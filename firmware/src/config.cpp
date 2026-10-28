@@ -102,6 +102,12 @@ bool applyConfig(Config& c, JsonVariantConst in, String& err) {
         next.mqttPort = static_cast<uint16_t>(port);
     }
     if (!in["mqtt_tls"].isNull()) next.mqttTls = in["mqtt_tls"].as<bool>();
+#if defined(ESP8266)
+    if (next.mqttTls) {
+        err = "MQTT over TLS needs an ESP32 (ESP8266 has RAM for only the speaker's TLS session)";
+        return false;
+    }
+#endif
     if (!next.deviceName.length()) {
         err = "device_name can't be empty";
         return false;

@@ -4,11 +4,11 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <WiFiClientSecure.h>
 
 #include <functional>
 
 #include "cast_message.h"
+#include "platform.h"
 
 class CastClient {
    public:
@@ -39,7 +39,7 @@ class CastClient {
     bool ensureMediaApp(String& err);
     bool ensureMediaSession(String& err);
 
-    WiFiClientSecure tls_;
+    SecureClient tls_;
     IPAddress ip_;
     uint16_t port_ = 0;
     uint32_t nextId_ = 1;

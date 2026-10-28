@@ -9,7 +9,7 @@ Control a Google Cast speaker such as the **Xiaomi Mi Smart Speaker** from your 
 text-to-speech announcements, YouTube audio, volume and playback control, through an HTTP API and a small web UI.
 The service talks to the speaker over the local network with the Cast protocol, and the speaker fetches audio from the service.
 
-> **Status:** the macOS service (Python) works today. ESP32 relay firmware builds (see [firmware/](firmware/README.md)) but is not yet hardware-tested; ESP8266 and Linux are in progress.
+> **Status:** the macOS service (Python) works today. Relay firmware for ESP32 and ESP8266 builds (see [firmware/](firmware/README.md)) but is not yet hardware-tested; Linux is in progress.
 > English docs are short for now; the detailed guide below is in Thai.
 
 HTTP API และหน้าเว็บสำหรับสั่ง Google Cast speaker (เช่น Xiaomi Mi Smart Speaker) ให้ประกาศข้อความและเล่นเสียงจาก YouTube
@@ -108,7 +108,7 @@ static/index.html      หน้าเว็บควบคุม
 speakerctl             จัดการ LaunchAgent บน macOS
 deploy/                template ของ LaunchAgent
 tests/                 pytest + ลำโพงจำลอง (ไม่ต้องมีลำโพงจริง)
-firmware/              firmware ESP32 (PlatformIO) ตัวกลางสั่งลำโพงในวง LAN
+firmware/              firmware ESP32 / ESP8266 (PlatformIO) ตัวกลางสั่งลำโพงในวง LAN
 config.example.json    ตัวอย่างไฟล์ตั้งค่า (คัดลอกเป็น config.json)
 ```
 

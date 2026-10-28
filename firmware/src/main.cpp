@@ -7,15 +7,15 @@
 // Audio URLs must be reachable by the speaker; this board never touches the audio itself.
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <ESPmDNS.h>
-#include <LittleFS.h>
 #include <PubSubClient.h>
-#include <WebServer.h>
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
 
 #include "cast_client.h"
 #include "config.h"
+#include "platform.h"
+
+#if defined(ESP8266)
+#include <ESP8266HTTPClient.h>
+#endif
 
 #ifndef RELAY_VERSION
 #define RELAY_VERSION "dev"
@@ -29,7 +29,9 @@ Config config;
 CastClient cast;
 WebServer server(80);
 WiFiClient mqttPlain;
-WiFiClientSecure mqttSecure;
+#if RELAY_HAS_MQTT_TLS
+SecureClient mqttSecure;
+#endif
 PubSubClient mqtt;
 String mqttCa;  // PEM kept alive for WiFiClientSecure, which stores only the pointer
 bool setupMode = false;
@@ -37,6 +39,32 @@ uint32_t lastMqttTry = 0;
 uint32_t lastStatus = 0;
 
 // ---------- speaker ----------
+
+#if defined(ESP8266)
+// LEAmDNS can't read TXT records from a one-shot query, so ask the speaker for its name instead.
+static String castFriendlyName(IPAddress ip) {
+    WiFiClient client;
+    HTTPClient http;
+    http.setTimeout(2000);
+    if (!http.begin(client, "http://" + ip.toString() + ":8008/setup/eureka_info?params=name")) return "";
+    String name;
+    if (http.GET() == 200) {
+        JsonDocument doc;
+        if (!deserializeJson(doc, http.getString())) name = doc["name"] | "";
+    }
+    http.end();
+    return name;
+}
+#endif
+
+static bool matchesName(int i) {
+    if (!config.speakerName.length()) return true;
+#if defined(ESP32)
+    return MDNS.txt(i, "fn") == config.speakerName;
+#else
+    return castFriendlyName(MDNS.IP(i)) == config.speakerName;
+#endif
+}
 
 static bool resolveSpeaker(IPAddress& ip, uint16_t& port, String& err) {
     port = 8009;
@@ -48,7 +76,7 @@ static bool resolveSpeaker(IPAddress& ip, uint16_t& port, String& err) {
     int n = MDNS.queryService("googlecast", "tcp");
     for (int i = 0; i < n; i++) {
         if (MDNS.IP(i) == IPAddress(0, 0, 0, 0)) continue;  // answer without an A record
-        if (!config.speakerName.length() || MDNS.txt(i, "fn") == config.speakerName) {
+        if (matchesName(i)) {
             ip = MDNS.IP(i);
             port = MDNS.port(i);  // groups and stereo pairs use a port other than 8009
             return true;
@@ -222,6 +250,9 @@ static void handleRotateToken() {
 
 static void handleMqttCa() {
     if (!authorized()) return;
+#if !RELAY_HAS_MQTT_TLS
+    return sendError(400, "MQTT over TLS needs an ESP32");
+#endif
     String pem = server.arg("plain");
     File f = LittleFS.open("/mqtt_ca.pem", "w");
     if (!f) return sendError(500, "could not save certificate");
@@ -245,8 +276,12 @@ Send commands to <code>/api/&lt;cmd&gt;</code> with <code>Authorization: Bearer 
   -d '{"url":"http://.../a.mp3","content_type":"audio/mpeg"}'</pre></body></html>)HTML";
 
 static void startApi() {
+#if defined(ESP8266)
+    server.collectHeaders("Authorization");  // the array overload loses to the variadic template here
+#else
     const char* headers[] = {"Authorization"};
     server.collectHeaders(headers, 1);
+#endif
     server.on("/", HTTP_GET, [] { server.send_P(200, "text/html", kInfoPage); });
     server.on("/api/status", HTTP_GET, [] { handleCommand("status"); });
     server.on("/api/play", HTTP_POST, [] { handleCommand("play"); });
@@ -336,7 +371,7 @@ static void handleSetupSave() {
 
 static void startSetupMode() {
     setupMode = true;
-    String ap = "SpeakerRelay-" + String((uint32_t)ESP.getEfuseMac(), HEX).substring(0, 4);
+    String ap = "SpeakerRelay-" + String(chipId(), HEX).substring(0, 4);
     WiFi.mode(WIFI_AP);
     WiFi.softAP(ap.c_str());
     Serial.printf("[setup] join Wi-Fi \"%s\" and open http://%s/\n", ap.c_str(), WiFi.softAPIP().toString().c_str());
@@ -375,6 +410,7 @@ static void onMqtt(char* topic, byte* payload, unsigned int len) {
 static void setupMqtt() {
     if (!config.mqttHost.length()) return;
     if (config.mqttTls) {
+#if RELAY_HAS_MQTT_TLS
         File f = LittleFS.open("/mqtt_ca.pem", "r");
         if (f) {
             mqttCa = f.readString();
@@ -386,6 +422,11 @@ static void setupMqtt() {
         }
         mqttSecure.setHandshakeTimeout(10);  // default 120 s would freeze loop() and starve Cast heartbeats
         mqtt.setClient(mqttSecure);
+#else
+        Serial.println("[mqtt] MQTT over TLS needs an ESP32; MQTT disabled");
+        config.mqttHost = "";
+        return;
+#endif
     } else {
         mqtt.setClient(mqttPlain);
     }
@@ -446,7 +487,7 @@ static bool resetRequested() {
 void setup() {
     Serial.begin(115200);
     Serial.printf("\nSpeaker Relay %s\n", RELAY_VERSION);
-    if (!LittleFS.begin(true)) Serial.println("[fs] LittleFS mount failed");
+    if (!mountFs()) Serial.println("[fs] LittleFS mount failed");
     if (resetRequested()) {
         Serial.println("[setup] BOOT held: settings wiped");
         wipeConfig();
@@ -461,7 +502,7 @@ void setup() {
 
     // Once configured, never fall back to the open setup AP (it would expose the token and accept new
     // settings from anyone nearby). Keep retrying the saved network; hold BOOT at power-on to reconfigure.
-    WiFi.setHostname(config.deviceName.c_str());  // must precede WiFi.mode() to reach DHCP
+    setStationHostname(config.deviceName.c_str());  // must precede WiFi.mode() to reach DHCP
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
     WiFi.begin(config.wifiSsid.c_str(), config.wifiPass.c_str());
@@ -474,8 +515,10 @@ void setup() {
 }
 
 void loop() {
-    server.handleClient();
-    if (setupMode) return;
+    if (setupMode) {
+        server.handleClient();
+        return;
+    }
     static bool online = false;
     if (WiFi.status() == WL_CONNECTED) {
         if (!online) {
@@ -488,6 +531,8 @@ void loop() {
         Serial.println("[wifi] disconnected; reconnecting");
         cast.end();
     }
+    mdnsUpdate();
+    server.handleClient();
     cast.loop();
     loopMqtt();
     publishStatus();
