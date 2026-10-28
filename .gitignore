@@ -5,3 +5,7 @@ service.log
 # Local settings (will hold API tokens); see config.example.json
 config.json
 .DS_Store
+
+# Internal workspace: notes, rules, internal docs (never published)
+.temp/
+CLAUDE.md

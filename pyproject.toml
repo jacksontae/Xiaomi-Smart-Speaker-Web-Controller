@@ -1,0 +1,18 @@
+[project]
+name = "xiaomi-smart-speaker-web-controller"
+version = "0.1.0"
+description = "Web controller for Google Cast speakers (Xiaomi Mi Smart Speaker): TTS announcements and YouTube audio over the LAN, no Google Assistant."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [".temp", "cache"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
