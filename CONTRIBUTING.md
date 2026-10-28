@@ -15,7 +15,7 @@ Releases and version tags are made by the maintainer.
 
 ## Development setup
 
-Python 3.10+ and Node.js (used by yt-dlp for YouTube) are required.
+Python 3.11+ and Node.js (used by yt-dlp for YouTube) are required.
 
 ```bash
 python3 -m venv .venv
@@ -31,7 +31,7 @@ cp config.example.json config.json     # set speaker_ip
 ./.venv/bin/python -m pytest
 ```
 
-Both must pass; CI runs the same checks on Python 3.10–3.14.
+Both must pass; CI runs the same checks on Python 3.11–3.14.
 
 - Add or update tests for behaviour changes. Tests use a fake speaker (`tests/conftest.py`), so no hardware is needed.
 - If you tested against a real speaker, say which model in the PR.
