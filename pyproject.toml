@@ -4,11 +4,11 @@ version = "0.1.0"
 description = "Web controller for Google Cast speakers (Xiaomi Mi Smart Speaker): TTS announcements and YouTube audio over the LAN, no Google Assistant."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"  # PyChromecast 14 and yt-dlp need 3.11+
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py311"
 extend-exclude = [".temp", "cache"]
 
 [tool.ruff.lint]

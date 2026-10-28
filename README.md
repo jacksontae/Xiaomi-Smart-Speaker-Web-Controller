@@ -17,7 +17,7 @@ HTTP API และหน้าเว็บสำหรับสั่ง Google 
 
 ## ติดตั้ง (macOS)
 
-ต้องมี Python 3.10+ และ Node.js (yt-dlp ใช้แก้ JS challenge ของ YouTube) เช่น `brew install python node`
+ต้องมี Python 3.11+ และ Node.js (yt-dlp ใช้แก้ JS challenge ของ YouTube) เช่น `brew install python node`
 
 ```bash
 git clone git@github.com:jacksontae/Xiaomi-Smart-Speaker-Web-Controller.git
