@@ -11,7 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   stored in `config.json` (mode 600), never returned by `/settings`, and rotated with `speakerctl token --rotate`.
 - Media links handed to the speaker are HMAC-signed and expire after 6 hours.
 - Web UI asks for the token once and keeps it in that browser.
-- ESP32 relay firmware (`firmware/`, PlatformIO, esp32dev and esp32-s3): Cast v2 client, HTTP API with Bearer
+- Relay firmware (`firmware/`, PlatformIO) for ESP32, ESP32-S3 and ESP8266 (plain MQTT only on ESP8266): Cast v2 client, HTTP API with Bearer
   token, MQTT commands and status, Wi-Fi setup access point, mDNS speaker discovery. Not yet tested on hardware.
 - HTTP service and web UI for a Google Cast speaker: Thai TTS announcements, YouTube audio, volume, pause/resume/stop.
 - Resume the interrupted YouTube track after an announcement (`resume_after_say`).

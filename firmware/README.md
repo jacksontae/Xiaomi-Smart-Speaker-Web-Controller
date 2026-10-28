@@ -1,6 +1,6 @@
-# Speaker Relay firmware (ESP32)
+# Speaker Relay firmware (ESP32 / ESP8266)
 
-Turns an ESP32 into the LAN-side helper for the speaker service: it receives commands over
+Turns an ESP32 or ESP8266 into the LAN-side helper for the speaker service: it receives commands over
 HTTP or MQTT and drives a Google Cast speaker (e.g. Xiaomi Mi Smart Speaker) with the Cast v2
 protocol. The board never handles audio; it tells the speaker which URL to play, and the speaker
 fetches it (from the speaker service or the cloud).
@@ -9,8 +9,8 @@ fetches it (from the speaker service or the cloud).
 [server / cloud] --MQTT or HTTP--> [ESP32 relay] --Cast (TLS :8009)--> [speaker] --HTTP--> audio URL
 ```
 
-> **Status:** builds for `esp32dev` and `esp32-s3`; the Cast codec has host unit tests.
-> Not yet tested on hardware. ESP8266 support is next.
+> **Status:** builds for `esp32dev`, `esp32-s3` and `esp8266` (D1 mini / NodeMCU); the Cast codec has
+> host unit tests. Not yet tested on hardware.
 
 ## Build and flash
 
@@ -18,10 +18,22 @@ Needs [PlatformIO](https://platformio.org/install/cli).
 
 ```bash
 cd firmware
-pio run -e esp32dev -t upload     # or -e esp32-s3
+pio run -e esp32dev -t upload     # or -e esp32-s3, -e esp8266
 pio device monitor                # 115200 baud
 pio test -e native                # codec tests on your computer
 ```
+
+## ESP32 or ESP8266?
+
+| | ESP32 / ESP32-S3 | ESP8266 |
+|---|---|---|
+| Recommended | Yes | For boards you already have |
+| Free heap | ~250 KB | ~46 KB at boot |
+| MQTT over TLS (cloud broker) | Yes, with CA verification | **No**: RAM fits only the speaker's TLS session. Use plain MQTT on a trusted LAN or VPN |
+| Pick speaker by `speaker_name` | From mDNS TXT records | Asks each speaker over HTTP :8008 (slower) |
+
+On ESP8266 the speaker connection needs a 16 KB TLS buffer unless the speaker accepts smaller
+TLS records (probed on each connect). If you see out-of-memory resets, use an ESP32.
 
 ## First-time setup
 

@@ -19,8 +19,15 @@ bool CastClient::begin(IPAddress ip, String& err, uint16_t port) {
     tls_.setInsecure();  // Cast devices present a self-signed certificate; this link stays on the LAN
 #if defined(ESP32)
     tls_.setHandshakeTimeout(8);
-#endif
     tls_.setTimeout(3);  // seconds on arduino-esp32 (WiFiClient overrides Stream's milliseconds)
+#else
+    // BearSSL must buffer a whole TLS record: 16 KB unless the speaker accepts smaller records.
+    if (SecureClient::probeMaxFragmentLength(ip, port, 1024))
+        tls_.setBufferSizes(1024, 1024);
+    else
+        tls_.setBufferSizes(16384 + 325, 1024);
+    tls_.setTimeout(3000);  // Stream timeout: milliseconds on ESP8266
+#endif
     if (!tls_.connect(ip, port)) {
         err = "can't reach speaker at " + ip.toString();
         return false;
@@ -294,7 +301,7 @@ void CastClient::loop() {
 }
 
 void CastClient::status(JsonObject out) const {
-    out["connected"] = const_cast<WiFiClientSecure&>(tls_).connected() != 0;
+    out["connected"] = const_cast<SecureClient&>(tls_).connected() != 0;
     out["ip"] = ip_.toString();
     out["app"] = appName_;
     if (volume_ >= 0) out["volume"] = volume_;

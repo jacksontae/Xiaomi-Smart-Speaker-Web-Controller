@@ -59,7 +59,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [esp32dev, esp32-s3]
+        env: [esp32dev, esp32-s3, esp8266]
     defaults:
       run:
         working-directory: firmware
