@@ -13,9 +13,12 @@ from pathlib import Path
 import httpx
 import pychromecast
 import pychromecast.discovery
+import pychromecast.error
 import yt_dlp
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
+from pychromecast.const import CAST_TYPE_AUDIO
+from pychromecast.models import CastInfo, HostServiceInfo
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).parent
@@ -74,19 +77,33 @@ def base_url():
     return settings.public_base_url or f"http://{host_ip()}:{settings.port}"
 
 
+def connect_speaker(ip):
+    """Connect without pychromecast's blocking 30 s HTTP probe for the cast type.
+
+    Bounded retries make an unreachable speaker fail in ~10 s instead of hanging;
+    when the worker later gives up, get_cast() sees a dead thread and reconnects.
+    """
+    info = CastInfo({HostServiceInfo(ip, 8009)}, None, None, None, ip, 8009, CAST_TYPE_AUDIO, None)
+    return pychromecast.Chromecast(info, tries=2, retry_wait=1, timeout=4)
+
+
 def get_cast():
     global _cast
-    if _cast is None or not _cast.socket_client.is_connected:
-        drop_cast()
-        _cast = pychromecast.get_chromecast_from_host((settings.speaker_ip, 8009, None, None, None))
+    if _cast is not None and not _cast.socket_client.is_alive():
+        drop_cast()  # worker thread is gone; pychromecast won't reconnect it
+    if _cast is None:
+        _cast = connect_speaker(settings.speaker_ip)
         _cast.wait(timeout=10)
+    elif not _cast.socket_client.is_connected:
+        _cast.wait(timeout=10)  # pychromecast is already reconnecting; let it finish
     return _cast
 
 
 def drop_cast():
     global _cast
     if _cast is not None:
-        _cast.disconnect(blocking=False)
+        # Signal the worker to stop without joining: Chromecast.disconnect(timeout=0) raises if it's still alive.
+        _cast.socket_client.disconnect()
         _cast = None
 
 
@@ -135,13 +152,22 @@ def cancel_resume():
 
 async def resume_after_announcement(gen, tts_prefix):
     global _resume
+    try:
+        await _watch_and_resume(gen, tts_prefix)
+    except HTTPException as e:  # speaker went away mid-announcement; drop the resume
+        _resume = None
+        print(f"resume skipped: {e.detail}")
+
+
+async def _watch_and_resume(gen, tts_prefix):
+    global _resume
     loop = asyncio.get_running_loop()
     deadline = loop.time() + RESUME_TIMEOUT
     while loop.time() < deadline:
         await asyncio.sleep(0.5)
         if gen != _say_gen:
             return  # a newer action took over
-        m = get_cast().media_controller.status
+        m = await run_cast(lambda: get_cast().media_controller.status)
         content_id = m.content_id or ""
         if _resume and content_id == _resume["url"]:
             continue  # status hasn't switched to the announcement yet
@@ -155,9 +181,16 @@ async def resume_after_announcement(gen, tts_prefix):
         await run_cast(cast_play, track["url"], track["content_type"], track["title"], None, track["position"])
 
 
+SPEAKER_ERRORS = (pychromecast.error.PyChromecastError, OSError)
+
+
 async def run_cast(fn, *args, **kwargs):
     async with cast_lock:
-        return await asyncio.to_thread(fn, *args, **kwargs)
+        try:
+            return await asyncio.to_thread(fn, *args, **kwargs)
+        except SPEAKER_ERRORS as e:
+            detail = f"Speaker {settings.speaker_ip} is not responding ({type(e).__name__}); is it on the same network?"
+            raise HTTPException(503, detail) from e
 
 
 def split_text(text, size=TTS_CHUNK):

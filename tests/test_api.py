@@ -126,3 +126,28 @@ def test_resume_gives_up_when_something_else_is_cast(app, fake_speaker):
     asyncio.run(app.resume_after_announcement(1, tts))
     assert fake_speaker.media_controller.loads == []
     assert app._resume is None
+
+
+def test_unreachable_speaker_returns_503(client, app, monkeypatch):
+    import pychromecast.error
+
+    def unreachable():
+        raise pychromecast.error.RequestTimeout("wait", 10)
+
+    monkeypatch.setattr(app, "get_cast", unreachable)
+    r = client.get("/status")
+    assert r.status_code == 503
+    assert "not responding" in r.json()["detail"]
+
+
+def test_resume_dropped_when_speaker_disappears(app, monkeypatch):
+    import pychromecast.error
+
+    def unreachable():
+        raise pychromecast.error.RequestTimeout("wait", 10)
+
+    app._resume = {"url": f"{BASE}/yt/abc.m4a", "content_type": "audio/mp4", "title": "Song", "position": 1}
+    app._say_gen = 2
+    monkeypatch.setattr(app, "get_cast", unreachable)
+    asyncio.run(app.resume_after_announcement(2, f"{BASE}/tts.mp3"))
+    assert app._resume is None
