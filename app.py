@@ -310,7 +310,7 @@ async def update_settings(changes: dict, background: BackgroundTasks):
     try:
         new = Settings(**{**settings.model_dump(), **changes})
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     old, settings = settings, new
     save_settings(new)
     if new.speaker_ip != old.speaker_ip:
@@ -376,58 +376,9 @@ async def yt_file(filename: str):
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return INDEX_HTML
+    return FileResponse(ROOT / "static" / "index.html")
 
 
-INDEX_HTML = """<!doctype html>
-<html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Speaker Control</title>
-<style>
-:root{--bg:#f6f6f4;--card:#fff;--fg:#1d1d1f;--muted:#6b6b70;--accent:#2f6fde;--line:#e2e2e0}
-@media (prefers-color-scheme:dark){:root{--bg:#141416;--card:#1f1f22;--fg:#f2f2f2;--muted:#9a9aa0;--accent:#6b9bf0;--line:#323236}}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
-main{max-width:520px;margin:0 auto;padding:24px 16px}
-h1{font-size:20px;margin:0 0 4px}#st{color:var(--muted);font-size:14px;margin-bottom:20px}
-section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
-label{display:block;font-weight:600;margin-bottom:8px}
-textarea,input[type=text]{width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
-button{margin-top:10px;padding:9px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;cursor:pointer}
-button.alt{background:transparent;color:var(--fg);border:1px solid var(--line)}
-.row{display:flex;gap:8px;flex-wrap:wrap}input[type=range]{width:100%}
-#msg{color:var(--muted);font-size:14px;min-height:1.5em}
-</style></head><body><main>
-<h1>Speaker Control</h1><div id="st">กำลังโหลด…</div>
-<section><label for="t">ประกาศข้อความ</label><textarea id="t" rows="3">สวัสดีครับ</textarea>
-<button onclick="call('/say',{text:t.value})">ประกาศ</button></section>
-<section><label for="q">YouTube (คำค้นหรือลิงก์)</label><input id="q" type="text" placeholder="เช่น เพลงบรรเลงเปียโน">
-<button onclick="call('/youtube',{query:q.value})">เล่นในลำโพง</button></section>
-<section><label for="v">ระดับเสียง <span id="vl"></span></label>
-<input id="v" type="range" min="0" max="1" step="0.05" onchange="call('/volume',{level:+v.value})">
-<div class="row"><button class="alt" onclick="call('/pause')">พัก</button><button class="alt" onclick="call('/resume')">เล่นต่อ</button><button class="alt" onclick="call('/stop')">หยุด</button></div></section>
-<details><summary>ตั้งค่า</summary><section style="margin-top:10px">
-<label for="sp">ลำโพง</label><div class="row"><select id="sp" style="flex:1;padding:9px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit"></select><button class="alt" style="margin-top:0" onclick="scan()">ค้นหา</button></div>
-<label for="dv" style="margin-top:12px">ระดับเสียงเริ่มต้นตอนประกาศ/เล่น <span id="dvl"></span></label>
-<div class="row" style="align-items:center"><input id="dv" type="range" min="0" max="1" step="0.05" style="flex:1" oninput="dvl.textContent=Math.round(dv.value*100)+'%'"><label style="font-weight:400;margin:0"><input id="keep" type="checkbox" onchange="dv.disabled=keep.checked;dvl.textContent=keep.checked?'(ไม่เปลี่ยน)':Math.round(dv.value*100)+'%'"> ใช้ค่าเดิมของลำโพง</label></div>
-<label for="lg" style="margin-top:12px">ภาษา TTS</label><select id="lg" style="width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit"><option value="th">ไทย</option><option value="en">English</option><option value="zh-CN">中文</option><option value="ja">日本語</option></select>
-<label for="pt" style="margin-top:12px">พอร์ต (เปลี่ยนแล้ว service จะรีสตาร์ท)</label><input id="pt" type="text" inputmode="numeric">
-<label for="ck" style="margin-top:12px">จำนวนเพลง YouTube ที่เก็บ cache</label><input id="ck" type="text" inputmode="numeric">
-<label style="margin-top:12px;font-weight:400"><input id="rs" type="checkbox"> ประกาศเสร็จแล้วเล่นเพลง YouTube ต่อ</label>
-<button onclick="saveSettings()">บันทึก</button></section></details>
-<div id="msg"></div>
-<script>
-async function call(p,b){msg.textContent='กำลังส่ง…';try{const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});const j=await r.json();msg.textContent=r.ok?('สำเร็จ'+(j.title?': '+j.title:'')):('ผิดพลาด: '+(j.detail||r.status))}catch(e){msg.textContent='ผิดพลาด: '+e}setTimeout(load,800)}
-async function load(){try{const s=await(await fetch('/status')).json();st.textContent=`${s.speaker} · ${s.app||'ว่าง'}${s.media.title?' · '+s.media.title:''} · ${s.media.state||''}`;v.value=s.volume;vl.textContent=Math.round(s.volume*100)+'%'}catch(e){st.textContent='เชื่อมต่อลำโพงไม่ได้'}}
-let cfg={};
-function opt(ip,name){const o=document.createElement('option');o.value=ip;o.textContent=`${name} (${ip})`;o.dataset.name=name;return o}
-async function loadSettings(){cfg=await(await fetch('/settings')).json();sp.replaceChildren(opt(cfg.speaker_ip,cfg.speaker_name));keep.checked=cfg.default_volume===null;dv.value=cfg.default_volume??0.3;keep.onchange();lg.value=cfg.tts_lang;pt.value=cfg.port;ck.value=cfg.cache_keep;rs.checked=cfg.resume_after_say}
-async function scan(){msg.textContent='กำลังค้นหาลำโพง…';const l=await(await fetch('/speakers')).json();sp.replaceChildren(...l.map(s=>opt(s.ip,s.name)));if(!l.some(s=>s.ip===cfg.speaker_ip))sp.prepend(opt(cfg.speaker_ip,cfg.speaker_name));sp.value=cfg.speaker_ip;msg.textContent=`พบ ${l.length} เครื่อง`}
-async function saveSettings(){const o=sp.selectedOptions[0];const b={speaker_ip:sp.value,speaker_name:o.dataset.name,default_volume:keep.checked?null:+dv.value,tts_lang:lg.value,port:+pt.value,cache_keep:+ck.value,resume_after_say:rs.checked};
-const r=await fetch('/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});const j=await r.json();
-if(!r.ok){msg.textContent='ผิดพลาด: '+j.detail;return}
-if(j.restart){msg.textContent='บันทึกแล้ว กำลังย้ายไปพอร์ต '+b.port+'…';setTimeout(()=>location.port=b.port,4000);return}
-cfg=j.settings;msg.textContent='บันทึกการตั้งค่าแล้ว';load()}
-load();loadSettings();setInterval(load,5000);
-</script></main></body></html>"""
 
 
 if __name__ == "__main__":
