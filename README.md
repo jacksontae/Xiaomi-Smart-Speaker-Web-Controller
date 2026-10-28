@@ -1,10 +1,19 @@
 # Xiaomi-Smart-Speaker-Web-Controller
+
+[![CI](https://github.com/jacksontae/Xiaomi-Smart-Speaker-Web-Controller/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jacksontae/Xiaomi-Smart-Speaker-Web-Controller/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Custom web controller with support for ESP32, ESP8266, macOS, and Linux.
+
+Control a Google Cast speaker such as the **Xiaomi Mi Smart Speaker** from your own code, with no Google Assistant:
+text-to-speech announcements, YouTube audio, volume and playback control, through an HTTP API and a small web UI.
+The service talks to the speaker over the local network with the Cast protocol, and the speaker fetches audio from the service.
+
+> **Status:** the macOS service (Python) works today. ESP32/ESP8266 and Linux support are in progress.
+> English docs are short for now; the detailed guide below is in Thai.
 
 HTTP API และหน้าเว็บสำหรับสั่ง Google Cast speaker (เช่น Xiaomi Mi Smart Speaker) ให้ประกาศข้อความและเล่นเสียงจาก YouTube
 ผ่านโปรโตคอล Cast ในวง LAN โดยไม่ต้องพึ่ง Google Assistant ลำโพงดึงไฟล์เสียงทั้งหมดจาก service นี้
-
-> สถานะ: ตอนนี้มีตัว service บน macOS (Python) · ESP32/ESP8266 และ Linux อยู่ระหว่างพัฒนา
 
 ## ติดตั้ง (macOS)
 
@@ -72,9 +81,37 @@ curl -X POST localhost:8090/youtube -H 'Content-Type: application/json' -d '{"qu
 
 ## หมายเหตุ
 
+- **ยังไม่มีระบบยืนยันตัวตน** ใครเข้าถึงพอร์ต 8090 ได้ก็สั่งลำโพงได้ ใช้ในวง LAN ที่ไว้ใจได้เท่านั้น และอย่าเปิดพอร์ตออกอินเทอร์เน็ต
+- ถ้าต่อลำโพงไม่ได้ (คนละวงเน็ต ลำโพงปิด หรือ IP เปลี่ยน) API จะตอบ `503` ภายในประมาณ 10 วินาที
 - `volume` ใน body เป็นค่าที่ไม่ต้องใส่ก็ได้
 - `say` ขัดเพลง YouTube ที่ service เล่นอยู่แล้วกลับมาเล่นต่อให้เอง (ประกาศติดกันหลายครั้งก็ได้) ถ้าระหว่างนั้นสั่ง `stop`, `youtube` หรือ `play` จะไม่กลับไปเล่นเพลงเดิม
 - แอปอื่นที่ลำโพงเล่นอยู่ (เช่น Spotify) จะหยุดและไม่กลับมาเล่นต่อ
 - YouTube ถูกดาวน์โหลดเก็บไว้ใน `cache/` (เก็บ 20 ไฟล์ล่าสุด) เพราะ YouTube ไม่ยอมให้ proxy stream ตรง
 - yt-dlp ต้องใช้ Node.js แก้ JS challenge ของ YouTube ถ้าวันไหนเล่นไม่ได้ให้อัปเดต: `./.venv/bin/pip install -U "yt-dlp[default]"`
 - TTS ใช้ endpoint ของ Google Translate ซึ่งไม่มีเอกสารทางการ อาจเปลี่ยนหรือถูกจำกัดได้
+
+## โครงสร้างโปรเจกต์
+
+```
+app.py                 FastAPI service: Cast control, TTS, YouTube cache, settings
+static/index.html      หน้าเว็บควบคุม
+speakerctl             จัดการ LaunchAgent บน macOS
+deploy/                template ของ LaunchAgent
+tests/                 pytest + ลำโพงจำลอง (ไม่ต้องมีลำโพงจริง)
+config.example.json    ตัวอย่างไฟล์ตั้งค่า (คัดลอกเป็น config.json)
+```
+
+## Contributing
+
+ยินดีรับ issue และ pull request ครับ อ่าน [CONTRIBUTING.md](CONTRIBUTING.md) ก่อน (PR ส่งเข้า branch `dev`)
+รายงานช่องโหว่ด้านความปลอดภัยตาม [SECURITY.md](SECURITY.md) · ทุกคนต้องปฏิบัติตาม [Code of Conduct](CODE_OF_CONDUCT.md)
+
+## Disclaimer
+
+This is an independent project. It is not affiliated with, endorsed by, or sponsored by Xiaomi, Google or YouTube;
+their names are used only to describe compatibility. YouTube playback uses yt-dlp and is subject to YouTube's Terms of Service;
+use it for content you are allowed to play. The TTS endpoint is an unofficial Google Translate endpoint and may change or stop working.
+
+## License
+
+[MIT](LICENSE) © 2026 Jackson Tae
