@@ -38,6 +38,7 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 ./speakerctl stop | start
 ./speakerctl logs        # ดู log แบบ follow
 ./speakerctl config      # แก้ config.json แล้วรีสตาร์ท
+./speakerctl token       # แสดง API token · --rotate เพื่อออก token ใหม่ (ของเดิมใช้ไม่ได้ทันที)
 ./speakerctl uninstall   # เลิกเปิดอัตโนมัติ
 ```
 
@@ -59,11 +60,19 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 | `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.168.2.45:8090` |
 
 ```bash
-curl -X POST localhost:8090/settings -H 'Content-Type: application/json' -d '{"default_volume":0.4}'
-curl localhost:8090/speakers    # ค้นหาลำโพง Cast ในวง LAN
+TOKEN=$(./speakerctl token)
+curl -X POST localhost:8090/settings -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"default_volume":0.4}'
+curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นหาลำโพง Cast ในวง LAN
 ```
 
 ## API
+
+ทุก endpoint ในตารางต้องส่ง header `Authorization: Bearer <token>` ถ้าไม่ส่งหรือ token ผิดจะได้ `401`
+
+- token สร้างให้อัตโนมัติตอนเปิด service ครั้งแรก เก็บใน `config.json` (สิทธิ์ไฟล์ 600) ดูด้วย `./speakerctl token`
+- `GET /settings` ไม่ส่ง token กลับไป และเปลี่ยน token ผ่าน API ไม่ได้ ใช้ `./speakerctl token --rotate`
+- หน้าเว็บจะขอ token ครั้งแรก แล้วจำไว้ในเบราว์เซอร์นั้น
+- ไฟล์เสียงที่ลำโพงดึง (`/tts.mp3`, `/yt/...`) ไม่ใช้ header เพราะลำโพงส่งไม่ได้ แต่ใช้ลิงก์ที่เซ็นด้วย HMAC ของ token และหมดอายุใน 6 ชั่วโมงแทน
 
 | Method | Path | Body | หน้าที่ |
 |---|---|---|---|
@@ -75,13 +84,14 @@ curl localhost:8090/speakers    # ค้นหาลำโพง Cast ในว�
 | POST | `/pause` · `/resume` · `/stop` | – | ควบคุมการเล่น |
 
 ```bash
-curl -X POST localhost:8090/say -H 'Content-Type: application/json' -d '{"text":"ค่าฝุ่นสูง กรุณาปิดหน้าต่าง"}'
-curl -X POST localhost:8090/youtube -H 'Content-Type: application/json' -d '{"query":"เพลงบรรเลงเปียโน"}'
+TOKEN=$(./speakerctl token)
+curl -X POST localhost:8090/say -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"text":"ค่าฝุ่นสูง กรุณาปิดหน้าต่าง"}'
+curl -X POST localhost:8090/youtube -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"query":"เพลงบรรเลงเปียโน"}'
 ```
 
 ## หมายเหตุ
 
-- **ยังไม่มีระบบยืนยันตัวตน** ใครเข้าถึงพอร์ต 8090 ได้ก็สั่งลำโพงได้ ใช้ในวง LAN ที่ไว้ใจได้เท่านั้น และอย่าเปิดพอร์ตออกอินเทอร์เน็ต
+- **service ยังเป็น HTTP ธรรมดา (ไม่มี TLS)** token จึงวิ่งแบบไม่เข้ารหัสในวง LAN ถ้าจะเรียกจากนอกบ้าน ให้ผ่าน Tailscale หรือ tunnel ที่เป็น HTTPS อย่าเปิดพอร์ต 8090 ออกอินเทอร์เน็ตตรงๆ
 - ถ้าต่อลำโพงไม่ได้ (คนละวงเน็ต ลำโพงปิด หรือ IP เปลี่ยน) API จะตอบ `503` ภายในประมาณ 10 วินาที
 - `volume` ใน body เป็นค่าที่ไม่ต้องใส่ก็ได้
 - `say` ขัดเพลง YouTube ที่ service เล่นอยู่แล้วกลับมาเล่นต่อให้เอง (ประกาศติดกันหลายครั้งก็ได้) ถ้าระหว่างนั้นสั่ง `stop`, `youtube` หรือ `play` จะไม่กลับไปเล่นเพลงเดิม

@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app as app_module  # noqa: E402
 
 BASE = "http://test-host:8090"
+TOKEN = "test-token"
 REAL_GET_CAST = app_module.get_cast
 
 
@@ -80,7 +81,7 @@ def app():
 def fake_speaker(monkeypatch):
     cast = FakeCast()
     monkeypatch.setattr(app_module, "get_cast", lambda: cast)
-    app_module.settings = app_module.Settings(public_base_url=BASE)
+    app_module.settings = app_module.Settings(public_base_url=BASE, api_token=TOKEN)
     app_module.save_settings(app_module.settings)
     app_module._resume = None
     app_module._say_gen = 0
@@ -89,6 +90,20 @@ def fake_speaker(monkeypatch):
 
 @pytest.fixture
 def client():
+    """A client holding the API token, like the web UI or an integration would."""
+    from fastapi.testclient import TestClient
+
+    return TestClient(app_module.app, headers={"Authorization": f"Bearer {TOKEN}"})
+
+
+@pytest.fixture
+def anon():
+    """A client with no token, like the speaker fetching media or an outsider on the LAN."""
     from fastapi.testclient import TestClient
 
     return TestClient(app_module.app)
+
+
+def path_of(url):
+    """Strip the scheme and host so a signed media URL can be fetched through TestClient."""
+    return url.removeprefix(BASE)

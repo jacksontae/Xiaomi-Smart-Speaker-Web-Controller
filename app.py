@@ -2,21 +2,30 @@
 
 The speaker fetches every stream from this service (TTS and YouTube are proxied),
 so it only needs to reach this machine on the LAN.
+
+Control endpoints require `Authorization: Bearer <api_token>`. The speaker cannot send
+headers, so the media URLs handed to it are signed with an HMAC of the token instead.
 """
 import asyncio
+import hashlib
+import hmac
 import json
 import os
+import secrets
 import socket
+import time
 import urllib.parse
 from pathlib import Path
+from typing import Annotated
 
 import httpx
 import pychromecast
 import pychromecast.discovery
 import pychromecast.error
 import yt_dlp
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pychromecast.const import CAST_TYPE_AUDIO
 from pychromecast.models import CastInfo, HostServiceInfo
 from pydantic import BaseModel, Field
@@ -30,6 +39,7 @@ CACHE_DIR = Path(os.environ.get("CACHE_DIR", ROOT / "cache"))
 CACHE_DIR.mkdir(exist_ok=True)
 RESUME_REWIND = 1.0  # seconds replayed before the interruption point
 RESUME_TIMEOUT = 300  # give up resuming if an announcement runs longer than this
+MEDIA_URL_TTL = 6 * 3600  # signed media links stay valid long enough to resume a track
 
 
 class Settings(BaseModel):
@@ -41,18 +51,24 @@ class Settings(BaseModel):
     cache_keep: int = Field(20, ge=1)  # most recent YouTube tracks kept on disk
     resume_after_say: bool = True  # continue the interrupted YouTube track after /say
     public_base_url: str | None = None  # override when auto-detected LAN address is wrong
+    api_token: str | None = None  # Bearer token for the control API; generated on first run, never served
 
 
 def load_settings():
-    if CONFIG_PATH.exists():
-        return Settings(**json.loads(CONFIG_PATH.read_text()))
-    s = Settings()
-    save_settings(s)
+    s = Settings(**json.loads(CONFIG_PATH.read_text())) if CONFIG_PATH.exists() else Settings()
+    if not s.api_token:
+        s.api_token = secrets.token_urlsafe(32)
+        save_settings(s)
     return s
 
 
 def save_settings(s):
     CONFIG_PATH.write_text(json.dumps(s.model_dump(), indent=2, ensure_ascii=False) + "\n")
+    CONFIG_PATH.chmod(0o600)  # holds the API token
+
+
+def public_settings(s):
+    return s.model_dump(exclude={"api_token"})
 
 
 settings = load_settings()
@@ -60,6 +76,36 @@ app = FastAPI(title="Speaker Service")
 http = httpx.AsyncClient(timeout=30, follow_redirects=True)
 cast_lock = asyncio.Lock()
 _cast = None
+bearer = HTTPBearer(auto_error=False, description="The api_token from config.json (`./speakerctl token`)")
+
+
+def require_token(creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]):
+    if creds is None or not secrets.compare_digest(creds.credentials.encode(), settings.api_token.encode()):
+        raise HTTPException(401, "Missing or invalid API token", headers={"WWW-Authenticate": "Bearer"})
+
+
+api = APIRouter(dependencies=[Depends(require_token)])
+
+
+def _media_sig(path, params):
+    payload = path + "?" + urllib.parse.urlencode(sorted(params.items()))
+    return hmac.new(settings.api_token.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+
+def media_url(path, **params):
+    """A URL the speaker can fetch without a header: signed with the API token and time-limited."""
+    params = {k: str(v) for k, v in params.items()}
+    params["exp"] = str(int(time.time()) + MEDIA_URL_TTL)
+    params["sig"] = _media_sig(path, params)
+    return f"{base_url()}{path}?{urllib.parse.urlencode(params)}"
+
+
+def verify_media(request: Request):
+    params = dict(request.query_params)
+    sig, exp = params.pop("sig", ""), params.get("exp", "")
+    expired = not exp.isdigit() or int(exp) < time.time()
+    if expired or not hmac.compare_digest(sig, _media_sig(request.url.path, params)):
+        raise HTTPException(403, "Invalid or expired media link")
 
 
 def content_type_for(path):
@@ -265,7 +311,7 @@ class VolumeBody(BaseModel):
     level: float
 
 
-@app.get("/status")
+@api.get("/status")
 async def status():
     def read():
         cast = get_cast()
@@ -288,42 +334,43 @@ async def status():
     return await run_cast(read)
 
 
-@app.post("/say")
+@api.post("/say")
 async def say(body: SayBody):
     if not body.text.strip():
         raise HTTPException(400, "text is empty")
     global _resume, _say_gen
-    q = urllib.parse.urlencode({"text": body.text, "lang": body.lang or settings.tts_lang})
     tts_prefix = f"{base_url()}/tts.mp3"
     if settings.resume_after_say:
         # Keep an already-pending track when announcements are back to back.
         _resume = await run_cast(capture_youtube) or _resume
     _say_gen += 1
     gen = _say_gen
-    await run_cast(cast_play, f"{tts_prefix}?{q}", "audio/mp3", "Announcement", body.volume)
+    url = media_url("/tts.mp3", text=body.text, lang=body.lang or settings.tts_lang)
+    await run_cast(cast_play, url, "audio/mp3", "Announcement", body.volume)
     if _resume:
         asyncio.create_task(resume_after_announcement(gen, tts_prefix))
     return {"ok": True, "chunks": len(split_text(body.text)), "will_resume": _resume and _resume["title"]}
 
 
-@app.post("/play")
+@api.post("/play")
 async def play(body: PlayBody):
     cancel_resume()
     await run_cast(cast_play, body.url, body.content_type, None, body.volume)
     return {"ok": True}
 
 
-@app.post("/youtube")
+@api.post("/youtube")
 async def youtube(body: YoutubeBody):
     cancel_resume()
     info = await asyncio.to_thread(yt_download, body.query)
     path = info["path"]
-    await run_cast(cast_play, f"{base_url()}/yt/{path.name}", content_type_for(path), info["title"], body.volume)
+    url = media_url(f"/yt/{path.name}")
+    await run_cast(cast_play, url, content_type_for(path), info["title"], body.volume)
     await asyncio.to_thread(prune_cache)
     return {"ok": True, "id": info["id"], "title": info["title"], "duration": info["duration"]}
 
 
-@app.post("/volume")
+@api.post("/volume")
 async def volume(body: VolumeBody):
     if not 0 <= body.level <= 1:
         raise HTTPException(400, "level must be between 0 and 1")
@@ -331,15 +378,17 @@ async def volume(body: VolumeBody):
     return {"ok": True, "volume": body.level}
 
 
-@app.get("/settings")
+@api.get("/settings")
 async def get_settings():
-    return settings
+    return public_settings(settings)
 
 
-@app.post("/settings")
+@api.post("/settings")
 async def update_settings(changes: dict, background: BackgroundTasks):
     """Partial update. Changing the port restarts the process; launchd brings it back up."""
     global settings
+    if "api_token" in changes:
+        raise HTTPException(400, "api_token can't be changed over the API; rotate it with ./speakerctl token --rotate")
     try:
         new = Settings(**{**settings.model_dump(), **changes})
     except ValueError as e:
@@ -351,10 +400,10 @@ async def update_settings(changes: dict, background: BackgroundTasks):
     restart = new.port != old.port
     if restart:
         background.add_task(lambda: os._exit(0))
-    return {"ok": True, "restart": restart, "settings": new}
+    return {"ok": True, "restart": restart, "settings": public_settings(new)}
 
 
-@app.get("/speakers")
+@api.get("/speakers")
 async def speakers():
     def discover():
         found, browser = pychromecast.discovery.discover_chromecasts(timeout=4)
@@ -364,28 +413,28 @@ async def speakers():
     return await asyncio.to_thread(discover)
 
 
-@app.post("/pause")
+@api.post("/pause")
 async def pause():
     await run_cast(lambda: get_cast().media_controller.pause())
     return {"ok": True}
 
 
-@app.post("/resume")
+@api.post("/resume")
 async def resume():
     await run_cast(lambda: get_cast().media_controller.play())
     return {"ok": True}
 
 
-@app.post("/stop")
+@api.post("/stop")
 async def stop():
     cancel_resume()
     await run_cast(lambda: get_cast().quit_app())
     return {"ok": True}
 
 
-# --- Streams fetched by the speaker itself ---
+# --- Streams fetched by the speaker itself (signed URLs, no header) ---
 
-@app.get("/tts.mp3")
+@app.get("/tts.mp3", dependencies=[Depends(verify_media)])
 async def tts(text: str, lang: str = "th"):
     audio = b""
     for chunk in split_text(text):
@@ -399,7 +448,7 @@ async def tts(text: str, lang: str = "th"):
     return Response(audio, media_type="audio/mpeg")
 
 
-@app.get("/yt/{filename}")
+@app.get("/yt/{filename}", dependencies=[Depends(verify_media)])
 async def yt_file(filename: str):
     path = CACHE_DIR / Path(filename).name
     if not path.is_file():
@@ -412,7 +461,7 @@ async def index():
     return FileResponse(ROOT / "static" / "index.html")
 
 
-
+app.include_router(api)
 
 if __name__ == "__main__":
     import uvicorn
