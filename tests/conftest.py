@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app as app_module  # noqa: E402
 
 BASE = "http://test-host:8090"
+REAL_GET_CAST = app_module.get_cast
 
 
 class FakeMediaController:
