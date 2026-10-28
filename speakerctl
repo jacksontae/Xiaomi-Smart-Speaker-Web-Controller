@@ -1,0 +1,25 @@
+#!/bin/zsh
+# Manage the speaker service LaunchAgent: install | start | stop | restart | status | logs | config | uninstall
+LABEL=local.speaker-service
+PLIST=~/Library/LaunchAgents/$LABEL.plist
+DOMAIN=gui/$(id -u)
+DIR=${0:A:h}
+
+case "$1" in
+  install)   [ -d $DIR/.venv ] || python3 -m venv $DIR/.venv
+             $DIR/.venv/bin/pip install -q -r $DIR/requirements.txt || exit 1
+             [ -f $DIR/config.json ] || cp $DIR/config.example.json $DIR/config.json
+             sed "s#__DIR__#$DIR#g" $DIR/deploy/$LABEL.plist > $PLIST
+             launchctl bootout $DOMAIN/$LABEL 2>/dev/null
+             launchctl bootstrap $DOMAIN $PLIST && echo "installed; edit $DIR/config.json then: speakerctl restart" ;;
+  start)     launchctl bootstrap $DOMAIN $PLIST 2>/dev/null || launchctl kickstart $DOMAIN/$LABEL ;;
+  stop)      launchctl bootout $DOMAIN/$LABEL ;;
+  restart)   launchctl kickstart -k $DOMAIN/$LABEL ;;
+  status)    launchctl print $DOMAIN/$LABEL 2>/dev/null | grep -E "^\s+(state|pid|runs|last exit code) =" || echo "not loaded"
+             port=$($DIR/.venv/bin/python -c "import json;print(json.load(open('$DIR/config.json'))['port'])" 2>/dev/null || echo 8090)
+             curl -s -m 15 localhost:$port/status; echo ;;
+  logs)      tail -n ${2:-50} -f $DIR/service.log ;;
+  config)    ${EDITOR:-nano} $DIR/config.json && launchctl kickstart -k $DOMAIN/$LABEL ;;
+  uninstall) launchctl bootout $DOMAIN/$LABEL 2>/dev/null; rm -f $PLIST; echo "auto-start removed" ;;
+  *)         echo "usage: speakerctl install|start|stop|restart|status|logs [n]|config|uninstall"; exit 1 ;;
+esac

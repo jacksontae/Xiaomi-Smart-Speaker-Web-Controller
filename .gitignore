@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+cache/
+service.log
+# Local settings (will hold API tokens); see config.example.json
+config.json
+.DS_Store
