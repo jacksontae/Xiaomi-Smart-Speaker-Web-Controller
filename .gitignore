@@ -9,3 +9,6 @@ config.json
 # Internal workspace: notes, rules, internal docs (never published)
 .temp/
 CLAUDE.md
+
+# PlatformIO build output
+firmware/.pio/
