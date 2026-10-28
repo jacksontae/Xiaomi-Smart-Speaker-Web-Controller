@@ -1,0 +1,38 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. POST /say {"text": "..."}
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: speaker
+    attributes:
+      label: Speaker model and firmware
+      placeholder: Xiaomi Mi Smart Speaker, Cast 1.52.272222
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where the service runs
+      options: [macOS, Linux, ESP32, ESP8266, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant lines from service.log. Remove tokens, IPs or anything private.
+      render: text
