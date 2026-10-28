@@ -9,13 +9,16 @@ main{max-width:520px;margin:0 auto;padding:24px 16px}
 h1{font-size:20px;margin:0 0 4px}#st{color:var(--muted);font-size:14px;margin-bottom:20px}
 section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
 label{display:block;font-weight:600;margin-bottom:8px}
-textarea,input[type=text]{width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+textarea,input[type=text],input[type=password]{width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
 button{margin-top:10px;padding:9px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;cursor:pointer}
 button.alt{background:transparent;color:var(--fg);border:1px solid var(--line)}
 .row{display:flex;gap:8px;flex-wrap:wrap}input[type=range]{width:100%}
 #msg{color:var(--muted);font-size:14px;min-height:1.5em}
 </style></head><body><main>
 <h1>Speaker Control</h1><div id="st">กำลังโหลด…</div>
+<section id="auth" hidden><label for="tok">API token</label>
+<input id="tok" type="password" autocomplete="off" placeholder="รัน ./speakerctl token บนเครื่องที่ติดตั้ง แล้ววางที่นี่">
+<button onclick="saveToken()">เข้าใช้งาน</button></section>
 <section><label for="t">ประกาศข้อความ</label><textarea id="t" rows="3">สวัสดีครับ</textarea>
 <button onclick="call('/say',{text:t.value})">ประกาศ</button></section>
 <section><label for="q">YouTube (คำค้นหรือลิงก์)</label><input id="q" type="text" placeholder="เช่น เพลงบรรเลงเปียโน">
@@ -31,19 +34,34 @@ button.alt{background:transparent;color:var(--fg);border:1px solid var(--line)}
 <label for="pt" style="margin-top:12px">พอร์ต (เปลี่ยนแล้ว service จะรีสตาร์ท)</label><input id="pt" type="text" inputmode="numeric">
 <label for="ck" style="margin-top:12px">จำนวนเพลง YouTube ที่เก็บ cache</label><input id="ck" type="text" inputmode="numeric">
 <label style="margin-top:12px;font-weight:400"><input id="rs" type="checkbox"> ประกาศเสร็จแล้วเล่นเพลง YouTube ต่อ</label>
-<button onclick="saveSettings()">บันทึก</button></section></details>
+<button onclick="saveSettings()">บันทึก</button> <button class="alt" onclick="forgetToken()">ออกจากระบบ (ลบ token ในเบราว์เซอร์นี้)</button></section></details>
 <div id="msg"></div>
 <script>
-async function call(p,b){msg.textContent='กำลังส่ง…';try{const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});const j=await r.json();msg.textContent=r.ok?('สำเร็จ'+(j.title?': '+j.title:'')):('ผิดพลาด: '+(j.detail||r.status))}catch(e){msg.textContent='ผิดพลาด: '+e}setTimeout(load,800)}
-async function load(){try{const s=await(await fetch('/status')).json();st.textContent=`${s.speaker} · ${s.app||'ว่าง'}${s.media.title?' · '+s.media.title:''} · ${s.media.state||''}`;v.value=s.volume;vl.textContent=Math.round(s.volume*100)+'%'}catch(e){st.textContent='เชื่อมต่อลำโพงไม่ได้'}}
+// API token lives in this browser only; every control request sends it as a Bearer header.
+const store={get(){try{return localStorage.getItem('speakerToken')||''}catch(e){return ''}},set(v){try{v?localStorage.setItem('speakerToken',v):localStorage.removeItem('speakerToken')}catch(e){}}};
+let token=store.get();
+function needToken(){auth.hidden=false;st.textContent='ต้องใส่ API token ก่อนใช้งาน';tok.focus()}
+async function api(path,body,method){
+  if(!token){needToken();throw new Error('ยังไม่ได้ใส่ API token')}
+  const h={'Authorization':'Bearer '+token};
+  if(body!==undefined)h['Content-Type']='application/json';
+  const r=await fetch(path,{method:method||(body!==undefined?'POST':'GET'),headers:h,body:body!==undefined?JSON.stringify(body):undefined});
+  if(r.status===401){needToken();throw new Error('API token ไม่ถูกต้อง')}
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.detail||('HTTP '+r.status));
+  return j}
+function saveToken(){token=tok.value.trim();store.set(token);tok.value='';auth.hidden=true;load();loadSettings()}
+function forgetToken(){token='';store.set('');needToken()}
+async function call(p,b){msg.textContent='กำลังส่ง…';try{const j=await api(p,b||{});msg.textContent='สำเร็จ'+(j.title?': '+j.title:'')}catch(e){msg.textContent='ผิดพลาด: '+e.message}setTimeout(load,800)}
+async function load(){if(!token)return needToken();try{const s=await api('/status');st.textContent=`${s.speaker} · ${s.app||'ว่าง'}${s.media.title?' · '+s.media.title:''} · ${s.media.state||''}`;v.value=s.volume;vl.textContent=Math.round(s.volume*100)+'%'}catch(e){if(auth.hidden)st.textContent='เชื่อมต่อลำโพงไม่ได้: '+e.message}}
 let cfg={};
 function opt(ip,name){const o=document.createElement('option');o.value=ip;o.textContent=`${name} (${ip})`;o.dataset.name=name;return o}
-async function loadSettings(){cfg=await(await fetch('/settings')).json();sp.replaceChildren(opt(cfg.speaker_ip,cfg.speaker_name));keep.checked=cfg.default_volume===null;dv.value=cfg.default_volume??0.3;keep.onchange();lg.value=cfg.tts_lang;pt.value=cfg.port;ck.value=cfg.cache_keep;rs.checked=cfg.resume_after_say}
-async function scan(){msg.textContent='กำลังค้นหาลำโพง…';const l=await(await fetch('/speakers')).json();sp.replaceChildren(...l.map(s=>opt(s.ip,s.name)));if(!l.some(s=>s.ip===cfg.speaker_ip))sp.prepend(opt(cfg.speaker_ip,cfg.speaker_name));sp.value=cfg.speaker_ip;msg.textContent=`พบ ${l.length} เครื่อง`}
+async function loadSettings(){if(!token)return;try{cfg=await api('/settings')}catch(e){return}sp.replaceChildren(opt(cfg.speaker_ip,cfg.speaker_name));keep.checked=cfg.default_volume===null;dv.value=cfg.default_volume??0.3;keep.onchange();lg.value=cfg.tts_lang;pt.value=cfg.port;ck.value=cfg.cache_keep;rs.checked=cfg.resume_after_say}
+async function scan(){msg.textContent='กำลังค้นหาลำโพง…';try{const l=await api('/speakers');sp.replaceChildren(...l.map(s=>opt(s.ip,s.name)));if(!l.some(s=>s.ip===cfg.speaker_ip))sp.prepend(opt(cfg.speaker_ip,cfg.speaker_name));sp.value=cfg.speaker_ip;msg.textContent=`พบ ${l.length} เครื่อง`}catch(e){msg.textContent='ผิดพลาด: '+e.message}}
 async function saveSettings(){const o=sp.selectedOptions[0];const b={speaker_ip:sp.value,speaker_name:o.dataset.name,default_volume:keep.checked?null:+dv.value,tts_lang:lg.value,port:+pt.value,cache_keep:+ck.value,resume_after_say:rs.checked};
-const r=await fetch('/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});const j=await r.json();
-if(!r.ok){msg.textContent='ผิดพลาด: '+j.detail;return}
-if(j.restart){msg.textContent='บันทึกแล้ว กำลังย้ายไปพอร์ต '+b.port+'…';setTimeout(()=>location.port=b.port,4000);return}
-cfg=j.settings;msg.textContent='บันทึกการตั้งค่าแล้ว';load()}
+  let j;try{j=await api('/settings',b)}catch(e){msg.textContent='ผิดพลาด: '+e.message;return}
+  if(j.restart){msg.textContent='บันทึกแล้ว กำลังย้ายไปพอร์ต '+b.port+'…';setTimeout(()=>location.port=b.port,4000);return}
+  cfg=j.settings;msg.textContent='บันทึกการตั้งค่าแล้ว';load()}
+tok.addEventListener('keydown',e=>{if(e.key==='Enter')saveToken()});
 load();loadSettings();setInterval(load,5000);
 </script></main></body></html>

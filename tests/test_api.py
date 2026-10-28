@@ -1,7 +1,7 @@
 import asyncio
 import json
 
-from conftest import BASE
+from conftest import BASE, path_of
 
 
 def test_status_reports_speaker(client):
@@ -36,7 +36,7 @@ def test_volume_validates_range(client, fake_speaker):
     assert fake_speaker.volume == 0.4
 
 
-def test_tts_concatenates_chunks(client, app, monkeypatch):
+def test_tts_concatenates_chunks(anon, app, monkeypatch):
     calls = []
 
     class Resp:
@@ -48,7 +48,7 @@ def test_tts_concatenates_chunks(client, app, monkeypatch):
         return Resp()
 
     monkeypatch.setattr(app.http, "get", fake_get)
-    r = client.get("/tts.mp3", params={"text": "ก" * 400})
+    r = anon.get(path_of(app.media_url("/tts.mp3", text="ก" * 400, lang="th")))
     assert r.status_code == 200
     assert r.content == b"MP3" * len(calls)
     assert len(calls) == 3
@@ -61,16 +61,16 @@ def test_youtube_plays_cached_file(client, fake_speaker, app, monkeypatch):
     r = client.post("/youtube", json={"query": "song"})
     assert r.status_code == 200 and r.json()["title"] == "Song"
     load = fake_speaker.media_controller.loads[-1]
-    assert load["url"] == f"{BASE}/yt/abc123.m4a"
+    assert load["url"].startswith(f"{BASE}/yt/abc123.m4a?")
     assert load["content_type"] == "audio/mp4"
     assert load["stream_type"] == "BUFFERED"
 
 
-def test_yt_file_serving_and_traversal(client, app):
+def test_yt_file_serving_and_traversal(anon, app):
     (app.CACHE_DIR / "ok.m4a").write_bytes(b"data")
-    assert client.get("/yt/ok.m4a").content == b"data"
-    assert client.get("/yt/missing.m4a").status_code == 404
-    assert client.get("/yt/..%2Fconfig.json").status_code == 404
+    assert anon.get(path_of(app.media_url("/yt/ok.m4a"))).content == b"data"
+    assert anon.get(path_of(app.media_url("/yt/missing.m4a"))).status_code == 404
+    assert anon.get(path_of(app.media_url("/yt/..%2Fconfig.json"))).status_code in (403, 404)
 
 
 def test_settings_partial_update_persists(client, app):
@@ -151,3 +151,88 @@ def test_resume_dropped_when_speaker_disappears(app, monkeypatch):
     monkeypatch.setattr(app, "get_cast", unreachable)
     asyncio.run(app.resume_after_announcement(2, f"{BASE}/tts.mp3"))
     assert app._resume is None
+
+
+# --- Authentication ---
+
+PROTECTED = [
+    ("get", "/status", None), ("post", "/say", {"text": "x"}), ("post", "/play", {"url": "http://x/a.mp3"}),
+    ("post", "/youtube", {"query": "x"}), ("post", "/volume", {"level": 0.5}), ("get", "/settings", None),
+    ("post", "/settings", {"cache_keep": 3}), ("get", "/speakers", None), ("post", "/pause", None),
+    ("post", "/resume", None), ("post", "/stop", None),
+]
+
+
+def test_control_endpoints_require_token(anon, fake_speaker):
+    for method, path, body in PROTECTED:
+        r = getattr(anon, method)(path, json=body) if body else getattr(anon, method)(path)
+        assert r.status_code == 401, path
+        assert r.headers["www-authenticate"] == "Bearer"
+    assert fake_speaker.media_controller.loads == [] and not fake_speaker.quit
+
+
+def test_wrong_token_is_rejected(anon):
+    assert anon.get("/status", headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+def test_web_ui_and_docs_stay_public(anon):
+    assert anon.get("/").status_code == 200
+    assert anon.get("/openapi.json").status_code == 200
+
+
+def test_settings_never_expose_token(client):
+    assert "api_token" not in client.get("/settings").json()
+    r = client.post("/settings", json={"cache_keep": 4})
+    assert "api_token" not in r.json()["settings"]
+
+
+def test_token_cannot_be_changed_over_api(client, app):
+    r = client.post("/settings", json={"api_token": "mine"})
+    assert r.status_code == 400
+    assert app.settings.api_token == "test-token"
+
+
+def test_first_run_generates_and_persists_token(app, monkeypatch, tmp_path):
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"speaker_ip": "10.0.0.5"}))
+    monkeypatch.setattr(app, "CONFIG_PATH", cfg)
+    s = app.load_settings()
+    assert s.api_token and len(s.api_token) >= 40
+    assert json.loads(cfg.read_text())["api_token"] == s.api_token
+    assert cfg.stat().st_mode & 0o077 == 0
+    assert app.load_settings().api_token == s.api_token
+
+
+def test_media_links_must_be_signed(anon, app):
+    (app.CACHE_DIR / "song.m4a").write_bytes(b"data")
+    assert anon.get("/yt/song.m4a").status_code == 403
+    assert anon.get("/tts.mp3", params={"text": "x"}).status_code == 403
+    signed = path_of(app.media_url("/yt/song.m4a"))
+    assert anon.get(signed).status_code == 200
+    assert anon.get(signed.replace("song.m4a", "other.m4a")).status_code == 403
+
+
+def test_tampered_or_expired_media_link_rejected(anon, app, monkeypatch):
+    signed = path_of(app.media_url("/tts.mp3", text="hello", lang="th"))
+    assert anon.get(signed.replace("hello", "evil")).status_code == 403
+    monkeypatch.setattr(app.time, "time", lambda: 10**12)
+    assert anon.get(signed).status_code == 403
+
+
+def test_rotating_token_invalidates_media_links(anon, app):
+    (app.CACHE_DIR / "song.m4a").write_bytes(b"data")
+    signed = path_of(app.media_url("/yt/song.m4a"))
+    app.settings.api_token = "rotated"
+    assert anon.get(signed).status_code == 403
+
+
+def test_signed_link_survives_url_encoding(anon, app, monkeypatch):
+    class Resp:
+        status_code, content = 200, b"MP3"
+
+    async def fake_get(url, params=None):
+        return Resp()
+
+    monkeypatch.setattr(app.http, "get", fake_get)
+    text = "a b&c=d+e/ไทย 100% ?#"
+    assert anon.get(path_of(app.media_url("/tts.mp3", text=text, lang="th"))).status_code == 200

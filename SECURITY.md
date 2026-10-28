@@ -14,7 +14,9 @@ You should get a first response within 7 days.
 
 ## Deployment notes
 
-- The HTTP service has **no authentication yet**. Run it only on a trusted LAN and do not expose port 8090
-  to the internet (port forwarding, public tunnels) until token auth lands.
+- Control endpoints require a Bearer token (`./speakerctl token`). Media links fetched by the speaker are
+  HMAC-signed with that token and expire after 6 hours. Rotate with `./speakerctl token --rotate`.
+- The service speaks plain HTTP, so the token crosses the LAN unencrypted. For remote access use an encrypted
+  path (Tailscale, an HTTPS tunnel) and never forward port 8090 to the internet directly.
 - The speaker is controlled with the Cast protocol, which is unauthenticated on the LAN by design;
   anyone on the same network can control the speaker regardless of this project.

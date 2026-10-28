@@ -6,5 +6,6 @@
   "tts_lang": "th",
   "cache_keep": 20,
   "resume_after_say": true,
-  "public_base_url": null
+  "public_base_url": null,
+  "api_token": null
 }

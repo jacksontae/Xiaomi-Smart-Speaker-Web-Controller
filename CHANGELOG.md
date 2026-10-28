@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- API token: control endpoints require `Authorization: Bearer <token>`; the token is generated on first run,
+  stored in `config.json` (mode 600), never returned by `/settings`, and rotated with `speakerctl token --rotate`.
+- Media links handed to the speaker are HMAC-signed and expire after 6 hours.
+- Web UI asks for the token once and keeps it in that browser.
 - HTTP service and web UI for a Google Cast speaker: Thai TTS announcements, YouTube audio, volume, pause/resume/stop.
 - Resume the interrupted YouTube track after an announcement (`resume_after_say`).
 - Editable settings (web UI, `POST /settings`, `config.json`) and speaker discovery (`GET /speakers`).

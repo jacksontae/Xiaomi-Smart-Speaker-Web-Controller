@@ -1,9 +1,11 @@
 #!/bin/zsh
-# Manage the speaker service LaunchAgent: install | start | stop | restart | status | logs | config | uninstall
+# Manage the speaker service LaunchAgent: install | start | stop | restart | status | logs | config | token | uninstall
 LABEL=local.speaker-service
 PLIST=~/Library/LaunchAgents/$LABEL.plist
 DOMAIN=gui/$(id -u)
 DIR=${0:A:h}
+PY=$DIR/.venv/bin/python
+cfg() { $PY -c "import json,sys;print(json.load(open('$DIR/config.json')).get(sys.argv[1]) or '')" $1 2>/dev/null; }
 
 case "$1" in
   install)   [ -d $DIR/.venv ] || python3 -m venv $DIR/.venv
@@ -16,10 +18,25 @@ case "$1" in
   stop)      launchctl bootout $DOMAIN/$LABEL ;;
   restart)   launchctl kickstart -k $DOMAIN/$LABEL ;;
   status)    launchctl print $DOMAIN/$LABEL 2>/dev/null | grep -E "^\s+(state|pid|runs|last exit code) =" || echo "not loaded"
-             port=$($DIR/.venv/bin/python -c "import json;print(json.load(open('$DIR/config.json'))['port'])" 2>/dev/null || echo 8090)
-             curl -s -m 15 localhost:$port/status; echo ;;
+             curl -s -m 15 -H "Authorization: Bearer $(cfg api_token)" localhost:${$(cfg port):-8090}/status; echo ;;
   logs)      tail -n ${2:-50} -f $DIR/service.log ;;
   config)    ${EDITOR:-nano} $DIR/config.json && launchctl kickstart -k $DOMAIN/$LABEL ;;
+  token)     if [ "$2" = "--rotate" ]; then
+               $PY - "$DIR/config.json" <<'PYEOF' || exit 1
+import json, os, secrets, sys
+path = sys.argv[1]
+cfg = json.load(open(path))
+cfg["api_token"] = secrets.token_urlsafe(32)
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+os.chmod(path, 0o600)
+PYEOF
+               launchctl kickstart -k $DOMAIN/$LABEL 2>/dev/null
+               echo "new token (old one and old media links stop working):" >&2
+             fi
+             t=$(cfg api_token)
+             [ -n "$t" ] && echo "$t" || { echo "no token yet; start the service once to generate it" >&2; exit 1; } ;;
   uninstall) launchctl bootout $DOMAIN/$LABEL 2>/dev/null; rm -f $PLIST; echo "auto-start removed" ;;
-  *)         echo "usage: speakerctl install|start|stop|restart|status|logs [n]|config|uninstall"; exit 1 ;;
+  *)         echo "usage: speakerctl install|start|stop|restart|status|logs [n]|config|token [--rotate]|uninstall"; exit 1 ;;
 esac
