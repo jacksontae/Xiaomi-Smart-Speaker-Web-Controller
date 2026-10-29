@@ -1,10 +1,11 @@
 {
-  "speaker_ip": "192.168.2.48",
+  "speaker_ip": "192.0.2.10",
   "speaker_name": "Air Purifier speaker",
   "port": 8090,
   "default_volume": null,
   "tts_lang": "th",
   "cache_keep": 20,
   "resume_after_say": true,
-  "public_base_url": null
+  "public_base_url": null,
+  "api_token": null
 }

@@ -5,3 +5,17 @@ service.log
 # Local settings (will hold API tokens); see config.example.json
 config.json
 .DS_Store
+
+# Internal workspace: notes, rules, internal docs (never published)
+.temp/
+CLAUDE.md
+
+# PlatformIO build output
+firmware/.pio/
+
+# Local Claude Code tooling (skills installed for this project)
+.claude/
+
+# Local database (users, sessions, playlists)
+data.db
+data.db-*
