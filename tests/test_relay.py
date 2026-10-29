@@ -259,6 +259,34 @@ def test_periodic_status_updates_state_and_relay_info(mqtt_transport, relay):
     assert info["rssi"] == -60 and info["last_seen"].endswith("Z") and info["base_topic"] == TOPIC
 
 
+def test_relay_reported_duration_and_content_type_are_used(mqtt_transport, relay):
+    t = mqtt_transport
+    relay.speaker["media"].update(state="PLAYING", content_id="https://speaker.example.com/other.mp3", position=3,
+                                  duration=200.5, content_type="audio/mpeg")
+    t.fake.deliver("status", {"proto": 1, "speaker": relay.speaker})
+    m = t.media()
+    assert (m.duration, m.content_type) == (200.5, "audio/mpeg")  # not loaded by us, so only the relay knows
+
+
+def test_pushing_relay_is_polled_less(mqtt_transport, relay, clock):
+    t = mqtt_transport
+    t.fake.deliver("status", {"proto": 1, "speaker": relay.speaker})
+    clock.now += t.cfg.status_refresh + 1  # stale for an old relay, fine for one that pushes changes
+    t.media()
+    assert t.fake.commands() == []
+    clock.now += t.PUSH_REFRESH
+    t.media()
+    assert [c["cmd"] for c in t.fake.commands()] == ["status"]
+
+
+def test_old_relay_without_proto_is_polled_as_before(mqtt_transport, relay, clock):
+    t = mqtt_transport
+    t.fake.deliver("status", {"version": "0.0.9", "speaker": relay.speaker})
+    clock.now += t.cfg.status_refresh + 0.1
+    t.media()
+    assert [c["cmd"] for c in t.fake.commands()] == ["status"]
+
+
 def test_retained_status_is_not_trusted_as_fresh(mqtt_transport, relay):
     t = mqtt_transport
     t.fake.deliver("status", {"version": "1.0", "speaker": relay.speaker}, retain=True)

@@ -47,5 +47,10 @@ health. After a board reset it rejoined Wi-Fi and MQTT in about 6 s.
 Fixed during the test: after `stop` the status kept the last title, URL and position; they are now
 cleared when the receiver reports no running app.
 
-Still open (seen on hardware, matches the gaps above): the `play` reply comes back with state `IDLE`
-before the speaker starts buffering, and the retained status is only refreshed every 30 s.
+Since then gaps 1, 2, 3, 5 and 6 are done: status is published within a second of a change (rate-limited
+to 1/s), `media` carries `content_type` and `duration`, status has `proto` (1), `seq` and `uptime`, and
+every result has `version`. The server reads `proto` and drops its 2 s polling to a 25 s safety poll for
+such relays (one poll in a minute of YouTube + announcement on hardware, down from ~30).
+
+Still open: gap 4 (a cold `play` blocks the loop; its reply still says `IDLE` before buffering, and the
+pushed status follows within a second).

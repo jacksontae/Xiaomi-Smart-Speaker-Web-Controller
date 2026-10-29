@@ -24,6 +24,8 @@
 static const int kResetPin = 0;  // BOOT button: hold while powering on to wipe settings
 static const uint32_t kWifiTimeoutMs = 20000;
 static const uint32_t kStatusEveryMs = 30000;
+static const uint32_t kStatusMinGapMs = 1000;  // on-change status is rate-limited to one per second
+static const int kProtocol = 1;               // bump when the MQTT JSON shape changes
 
 Config config;
 CastClient cast;
@@ -37,6 +39,8 @@ String mqttCa;  // PEM kept alive for WiFiClientSecure, which stores only the po
 bool setupMode = false;
 uint32_t lastMqttTry = 0;
 uint32_t lastStatus = 0;
+uint32_t statusSeq = 0;
+uint32_t publishedChanges = 0;
 
 // ---------- speaker ----------
 
@@ -400,6 +404,7 @@ static void onMqtt(char* topic, byte* payload, unsigned int len) {
         out["error"] = "payload must be JSON";
     } else {
         out["id"] = in["id"];
+        out["version"] = RELAY_VERSION;
         bool ok = runCommand(in.as<JsonVariantConst>(), out, err);
         out["ok"] = ok;
         if (!ok) out["error"] = err;
@@ -461,9 +466,16 @@ static void loopMqtt() {
 }
 
 static void publishStatus() {
-    if (!mqtt.connected() || millis() - lastStatus < kStatusEveryMs) return;
+    if (!mqtt.connected()) return;
+    uint32_t since = millis() - lastStatus;
+    bool changed = cast.changes() != publishedChanges;
+    if (since < kStatusEveryMs && !(changed && since >= kStatusMinGapMs)) return;
     lastStatus = millis();
+    publishedChanges = cast.changes();
     JsonDocument doc;
+    doc["proto"] = kProtocol;
+    doc["seq"] = ++statusSeq;
+    doc["uptime"] = millis() / 1000;
     doc["version"] = RELAY_VERSION;
     doc["ip"] = WiFi.localIP().toString();
     doc["rssi"] = WiFi.RSSI();
