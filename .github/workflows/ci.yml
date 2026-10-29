@@ -71,7 +71,9 @@ jobs:
       - uses: actions/cache@v5
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+          # One cache per board: matrix jobs sharing a key race to save it, and the winner's
+          # toolchains may not be the ones the other boards need.
+          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('firmware/platformio.ini') }}
       - run: pip install "platformio>=6.1"
       - name: Cast codec unit tests (host)
         if: matrix.env == 'esp32dev'
