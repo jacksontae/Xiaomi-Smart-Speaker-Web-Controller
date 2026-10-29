@@ -50,7 +50,7 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 
 | key | ค่าเริ่มต้น | ความหมาย |
 |---|---|---|
-| `speaker_ip` | `192.168.2.48` | IP ลำโพง (กด "ค้นหา" ในหน้าเว็บเพื่อเลือกจากลำโพงในวง LAN) |
+| `speaker_ip` | `192.0.2.10` | IP ลำโพง (กด "ค้นหา" ในหน้าเว็บเพื่อเลือกจากลำโพงในวง LAN) |
 | `speaker_name` | `Air Purifier speaker` | ชื่อที่แสดง |
 | `port` | `8090` | พอร์ตของ service (เปลี่ยนแล้วรีสตาร์ทเอง) |
 | `default_volume` | `null` | ระดับเสียงที่ตั้งก่อนประกาศหรือเล่น 0–1, `null` = ไม่เปลี่ยน |
@@ -59,7 +59,7 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 | `resume_after_say` | `true` | ประกาศเสร็จแล้วเล่นเพลง YouTube ที่ค้างอยู่ต่อจากจุดเดิม (ย้อน 1 วินาที) |
 | `transport` | `cast` | `cast` = สั่งลำโพงตรงในวง LAN · `mqtt` = สั่งผ่าน ESP32 relay (ดู Remote deployment) |
 | `mqtt` | ดู `config.example.json` | broker ของ relay: `host`, `port`, `tls`, `username`, `password`, `base_topic`, `client_id` |
-| `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.168.2.45:8090` |
+| `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.0.2.20:8090` |
 
 ```bash
 TOKEN=$(./speakerctl token)
