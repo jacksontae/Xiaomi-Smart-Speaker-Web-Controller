@@ -76,7 +76,7 @@ AUDIO_SUFFIXES = {".m4a", ".webm", ".mp3", ".opus", ".ogg", ".mp4", ".aac"}
 
 
 class Settings(BaseModel):
-    speaker_ip: str = "192.168.2.48"
+    speaker_ip: str = "192.0.2.10"
     speaker_name: str = "Air Purifier speaker"
     port: int = Field(8090, ge=1024, le=65535)
     default_volume: float | None = Field(None, ge=0, le=1)  # None = keep the speaker's volume
