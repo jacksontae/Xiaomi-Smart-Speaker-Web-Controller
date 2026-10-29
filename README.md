@@ -67,26 +67,82 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 
 ## API
 
-ทุก endpoint ในตารางต้องส่ง header `Authorization: Bearer <token>` ถ้าไม่ส่งหรือ token ผิดจะได้ `401`
+เรียก API ได้ 2 แบบ ถ้าไม่ได้ยืนยันตัวตนจะได้ `401` ถ้าสิทธิ์ไม่พอจะได้ `403` (body เป็น `{"detail": "..."}` เสมอ)
 
-- token สร้างให้อัตโนมัติตอนเปิด service ครั้งแรก เก็บใน `config.json` (สิทธิ์ไฟล์ 600) ดูด้วย `./speakerctl token`
-- `GET /settings` ไม่ส่ง token กลับไป และเปลี่ยน token ผ่าน API ไม่ได้ ใช้ `./speakerctl token --rotate`
-- หน้าเว็บจะขอ token ครั้งแรก แล้วจำไว้ในเบราว์เซอร์นั้น
+- **API token** ส่ง header `Authorization: Bearer <token>` ได้สิทธิ์ `admin` ใช้กับ curl, integration และ firmware relay
+  - token สร้างให้อัตโนมัติตอนเปิด service ครั้งแรก เก็บใน `config.json` (สิทธิ์ไฟล์ 600) ดูด้วย `./speakerctl token`
+  - `GET /settings` ไม่ส่ง token กลับไป และเปลี่ยน token ผ่าน API ไม่ได้ ใช้ `./speakerctl token --rotate`
+- **บัญชีผู้ใช้ (หน้าเว็บ)** ล็อกอินแล้วได้ cookie `sid` (`HttpOnly`, `SameSite=Strict`, อายุ 30 วันนับจากใช้งานล่าสุด)
+  - คำขอที่เปลี่ยนข้อมูล (POST/PUT/PATCH/DELETE) ด้วย cookie ต้องส่ง header `X-Requested-With: speaker-web` ไม่งั้นได้ `403`
+  - ครั้งแรกที่ยังไม่มีผู้ใช้ หน้าเว็บจะให้ใส่ API token เพื่อสร้างบัญชี admin คนแรก (`POST /auth/setup`)
+  - รหัสผ่านอย่างน้อย 8 ตัว เก็บแบบ scrypt · ล็อกอินผิด 5 ครั้งใน 5 นาที (ต่อ IP + ชื่อผู้ใช้) จะได้ `429` พร้อม `Retry-After`
 - ไฟล์เสียงที่ลำโพงดึง (`/tts.mp3`, `/yt/...`) ไม่ใช้ header เพราะลำโพงส่งไม่ได้ แต่ใช้ลิงก์ที่เซ็นด้วย HMAC ของ token และหมดอายุใน 6 ชั่วโมงแทน
+- ข้อมูลผู้ใช้ เพลย์ลิสต์ ข้อความด่วน และบันทึกกิจกรรม เก็บใน SQLite ที่ `data.db` (เปลี่ยนที่ได้ด้วย env `DATA_PATH`)
 
-| Method | Path | Body | หน้าที่ |
-|---|---|---|---|
-| GET | `/status` | – | แอป เพลง และระดับเสียงปัจจุบัน |
-| POST | `/say` | `{"text": "...", "lang": "th", "volume": 0.4}` | ประกาศข้อความ (TTS) |
-| POST | `/youtube` | `{"query": "คำค้น หรือ URL", "volume": 0.3}` | เล่นเสียงจาก YouTube |
-| POST | `/play` | `{"url": "...", "content_type": "audio/mp3"}` | เล่นไฟล์เสียงจาก URL |
-| POST | `/volume` | `{"level": 0.3}` | ปรับเสียง 0–1 |
-| POST | `/pause` · `/resume` · `/stop` | – | ควบคุมการเล่น |
+### สิทธิ์ (role)
+
+| role | ทำอะไรได้ |
+|---|---|
+| `viewer` | ดูสถานะ คิว เพลย์ลิสต์ และข้อความด่วน |
+| `operator` | viewer + ประกาศ เล่น ปรับเสียง หยุด/เล่นต่อ คุมคิว แก้เพลย์ลิสต์และข้อความด่วน |
+| `admin` | operator + จัดการสมาชิก ตั้งค่า ค้นหาลำโพง ดูบันทึกกิจกรรม |
+
+### บัญชี
+
+| Method | Path | สิทธิ์ | Body | หน้าที่ |
+|---|---|---|---|---|
+| GET | `/auth/state` | ทุกคน | – | `{"needs_setup", "user"}` |
+| POST | `/auth/setup` | ทุกคน (ตอนยังไม่มีผู้ใช้) | `{"api_token", "username", "display_name", "password"}` | สร้าง admin คนแรกแล้วล็อกอิน (token ผิด `401`, มีผู้ใช้แล้ว `409`) |
+| POST | `/auth/login` | ทุกคน | `{"username", "password"}` | ล็อกอิน ตั้ง cookie |
+| POST | `/auth/logout` · `/auth/logout-all` | ล็อกอินแล้ว | – | ออกจากระบบเครื่องนี้ · ทุกเครื่อง |
+| POST | `/auth/password` | ล็อกอินแล้ว | `{"current", "new"}` | เปลี่ยนรหัสผ่าน (เครื่องอื่นถูกออกจากระบบ) |
+| GET · POST | `/users` | admin | `{"username", "display_name", "password", "role"}` | ดู · เพิ่มสมาชิก |
+| PATCH · DELETE | `/users/{id}` | admin | `{"display_name", "role", "password", "disabled"}` (ใส่เฉพาะที่จะแก้) | แก้ · ลบสมาชิก |
+
+ชื่อผู้ใช้ 3–32 ตัว `a-z 0-9 . _ -` · ลบ ปิด หรือลดสิทธิ์ตัวเองไม่ได้ และต้องเหลือ admin ที่เปิดใช้อย่างน้อย 1 คน (`409`)
+ปิดบัญชีหรือเปลี่ยนรหัสผ่านจะออกจากระบบทุกเครื่องของคนนั้น
+
+### ลำโพง
+
+| Method | Path | สิทธิ์ | Body | หน้าที่ |
+|---|---|---|---|---|
+| GET | `/status` | viewer | – | แอป เพลง (มี `media.thumbnail`) ระดับเสียง และคิว (`queue`) |
+| POST | `/say` | operator | `{"text": "...", "lang": "th", "volume": 0.4}` | ประกาศข้อความ (TTS) |
+| POST | `/youtube` | operator | `{"query": "คำค้น หรือ URL", "volume": 0.3}` | เล่นเสียงจาก YouTube (ล้างคิว) |
+| GET | `/youtube/search?q=...&limit=8` | operator | – | ค้นหา YouTube (ไม่ดาวน์โหลด) |
+| POST | `/play` | operator | `{"url": "...", "content_type": "audio/mp3"}` | เล่นไฟล์เสียงจาก URL (ล้างคิว) |
+| POST | `/volume` | operator | `{"level": 0.3}` | ปรับเสียง 0–1 |
+| POST | `/pause` · `/resume` · `/stop` | operator | – | ควบคุมการเล่น (`stop` ล้างคิวด้วย) |
+| GET · POST | `/settings` | admin | `{"default_volume": 0.4}` | ดู · แก้ตั้งค่า |
+| GET | `/speakers` | admin | – | ค้นหาลำโพง Cast ในวง LAN |
+| GET | `/activity?limit=50&before_id=` | admin | – | บันทึกกิจกรรม ใหม่สุดก่อน (เก็บ 5000 รายการล่าสุด) |
+
+### เพลย์ลิสต์และคิว
+
+| Method | Path | สิทธิ์ | Body | หน้าที่ |
+|---|---|---|---|---|
+| GET · POST | `/playlists` | viewer · operator | `{"name"}` | รายการเพลย์ลิสต์ · สร้างใหม่ |
+| GET · PATCH · DELETE | `/playlists/{id}` | viewer · operator | `{"name"}` | ดูพร้อมรายการ · เปลี่ยนชื่อ · ลบ |
+| POST | `/playlists/{id}/items` | operator | `{"kind": "youtube"\|"url"\|"tts", "source", "title", "lang"}` | เพิ่มรายการ |
+| DELETE | `/playlists/{id}/items/{item_id}` | operator | – | ลบรายการ |
+| PUT | `/playlists/{id}/order` | operator | `{"item_ids": [...]}` | เรียงใหม่ (ต้องครบทุก id พอดี ไม่งั้น `409`) |
+| POST | `/playlists/{id}/play` | operator | `{"start_index": 0, "shuffle": false, "repeat": "off"\|"all"\|"one"}` | เล่นทั้งเพลย์ลิสต์เป็นคิว |
+| GET · PATCH | `/queue` | viewer · operator | `{"shuffle", "repeat"}` | ดูคิว (`null` ถ้าไม่มี) · สลับ shuffle/repeat |
+| POST | `/queue/next` · `/queue/prev` · `/queue/jump` | operator | `{"index"}` (เฉพาะ jump) | ข้ามเพลง |
+| POST | `/queue/clear` | operator | – | ล้างคิวและหยุดเล่น |
+| GET · POST | `/phrases` | viewer · operator | `{"text", "lang"}` | ข้อความด่วน (กดแล้วหน้าเว็บเรียก `/say`) |
+| DELETE | `/phrases/{id}` | operator | – | ลบข้อความด่วน |
+
+- รายการ `youtube` ใส่ได้ทั้ง URL, video id หรือคำค้น (เอาผลแรก) · `url` ต้องเป็นลิงก์ http(s) และต้องมี `title` · `tts` ยาวไม่เกิน 1000 ตัวอักษร
+- คิวเลื่อนไปเพลงถัดไปเองเมื่อเพลงจบ (ประกาศจบไม่นับ) โหลดเพลง YouTube ถัดไปไว้ล่วงหน้า รายการที่โหลดไม่ได้จะถูกข้ามและบันทึกไว้
+- `say` ระหว่างเล่นคิว: ประกาศจบแล้วเล่นเพลงเดิมต่อ แล้วคิวก็เดินต่อตามปกติ
+- คิวอยู่ในหน่วยความจำ รีสตาร์ท service แล้วหาย และแก้เพลย์ลิสต์ระหว่างเล่นจะไม่กระทบคิวที่เล่นอยู่
 
 ```bash
 TOKEN=$(./speakerctl token)
 curl -X POST localhost:8090/say -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"text":"ค่าฝุ่นสูง กรุณาปิดหน้าต่าง"}'
 curl -X POST localhost:8090/youtube -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"query":"เพลงบรรเลงเปียโน"}'
+curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"shuffle":true,"repeat":"all"}'
 ```
 
 ## หมายเหตุ
@@ -103,8 +159,11 @@ curl -X POST localhost:8090/youtube -H "Authorization: Bearer $TOKEN" -H 'Conten
 ## โครงสร้างโปรเจกต์
 
 ```
-app.py                 FastAPI service: Cast control, TTS, YouTube cache, settings
-static/index.html      หน้าเว็บควบคุม
+app.py                 FastAPI service: Cast control, TTS, YouTube cache, settings, API ทั้งหมด
+auth.py                รหัสผ่าน (scrypt), session token, จำกัดการล็อกอินผิด
+store.py               SQLite: ผู้ใช้ session เพลย์ลิสต์ ข้อความด่วน บันทึกกิจกรรม
+player.py              คิวเพลง (ลำดับเล่น shuffle repeat)
+static/                หน้าเว็บควบคุม
 speakerctl             จัดการ LaunchAgent บน macOS
 deploy/                template ของ LaunchAgent
 tests/                 pytest + ลำโพงจำลอง (ไม่ต้องมีลำโพงจริง)

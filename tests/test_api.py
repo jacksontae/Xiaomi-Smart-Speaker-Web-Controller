@@ -9,6 +9,7 @@ def test_status_reports_speaker(client):
     assert r.status_code == 200
     assert r.json()["speaker"] == "Test Speaker"
     assert r.json()["resume_pending"] is None
+    assert r.json()["tts_lang"] == "th"  # every role needs it to default the announce language
 
 
 def test_say_switches_receiver_and_loads_tts(client, fake_speaker, app):

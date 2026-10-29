@@ -7,6 +7,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- Web v2 backend: user accounts with roles (`admin`, `operator`, `viewer`) and first-run setup guarded by the API token;
+  session cookie (`HttpOnly`, `SameSite=Strict`, 30-day sliding expiry), `X-Requested-With: speaker-web` required for
+  cookie-authenticated changes, scrypt password hashes, login throttling (5 failures per IP and username per 5 minutes).
+  The API token keeps working and acts as `admin`. Every endpoint now checks the caller's role.
+- Members management (`/users`) with guards against removing, disabling or demoting yourself or the last admin.
+- Playlists of YouTube, direct-URL and TTS items with reordering, and `GET /youtube/search`.
+- Play queue (`/playlists/{id}/play`, `/queue`): shuffle, repeat off/all/one, next/previous/jump, auto-advance when a
+  track ends (not when an announcement ends), prefetch of the next YouTube track, failed items skipped.
+  `/status` now includes `queue` and `media.thumbnail`.
+- Quick phrases (`/phrases`) and an activity log (`/activity`, newest 5000 entries, volume changes coalesced).
+- SQLite storage at `DATA_PATH` (default `data.db`) with a schema version for later migrations.
+- `/static/...`, `/manifest.webmanifest` and `/apple-touch-icon.png` are served for the web UI.
 - API token: control endpoints require `Authorization: Bearer <token>`; the token is generated on first run,
   stored in `config.json` (mode 600), never returned by `/settings`, and rotated with `speakerctl token --rotate`.
 - Media links handed to the speaker are HMAC-signed and expire after 6 hours.
