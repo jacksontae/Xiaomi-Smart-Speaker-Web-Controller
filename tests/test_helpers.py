@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pytest
 
+import transport
+
 
 def test_split_text_keeps_short_text_whole(app):
     assert app.split_text("สวัสดีครับ") == ["สวัสดีครับ"]
@@ -54,26 +56,23 @@ def _fake_connections(app, monkeypatch):
             self.waits += 1
 
     made = []
-    monkeypatch.setattr(app, "connect_speaker", lambda ip: made.append(Conn()) or made[-1])
-    monkeypatch.setattr(app, "_cast", None)
+    monkeypatch.setattr(transport, "connect_speaker", lambda ip: made.append(Conn()) or made[-1])
     return made
 
 
 def test_get_cast_waits_while_pychromecast_reconnects(app, monkeypatch):
-    from conftest import REAL_GET_CAST
-
     made = _fake_connections(app, monkeypatch)
-    first = REAL_GET_CAST()
+    speaker = transport.CastTransport("192.0.2.10")
+    first = speaker.get_cast()
     first.socket_client.is_connected = False  # reconnect in progress, thread alive
-    assert REAL_GET_CAST() is first
+    assert speaker.get_cast() is first
     assert first.waits == 2 and len(made) == 1 and not first.socket_client.stopped
 
 
 def test_get_cast_replaces_dead_connection(app, monkeypatch):
-    from conftest import REAL_GET_CAST
-
     made = _fake_connections(app, monkeypatch)
-    first = REAL_GET_CAST()
+    speaker = transport.CastTransport("192.0.2.10")
+    first = speaker.get_cast()
     first.socket_client.alive = False
-    second = REAL_GET_CAST()
+    second = speaker.get_cast()
     assert second is not first and first.socket_client.stopped and len(made) == 2

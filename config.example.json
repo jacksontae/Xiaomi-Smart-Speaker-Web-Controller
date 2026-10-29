@@ -1,4 +1,5 @@
 {
+  "transport": "cast",
   "speaker_ip": "192.168.2.48",
   "speaker_name": "Air Purifier speaker",
   "port": 8090,
@@ -7,5 +8,22 @@
   "cache_keep": 20,
   "resume_after_say": true,
   "public_base_url": null,
-  "api_token": null
+  "api_token": null,
+  "mqtt": {
+    "host": "broker.example.com",
+    "port": 8883,
+    "tls": true,
+    "ca_file": null,
+    "username": "change-me",
+    "password": "change-me",
+    "base_topic": "speaker-relay/speaker-relay",
+    "client_id": "speaker-service",
+    "keepalive": 60,
+    "offline_after": 90,
+    "status_refresh": 2.0,
+    "command_timeout": 10,
+    "play_timeout": 45,
+    "reconnect_min": 1,
+    "reconnect_max": 60
+  }
 }

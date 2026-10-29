@@ -14,6 +14,7 @@ os.environ["DATA_PATH"] = str(_TMP / "data.db")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import app as app_module  # noqa: E402
+import transport as transport_module  # noqa: E402
 from auth import Throttle, hash_password, new_session_token, token_hash  # noqa: E402
 from store import Store  # noqa: E402
 
@@ -21,7 +22,6 @@ BASE = "http://test-host:8090"
 TOKEN = "test-token"
 PASSWORD = "correct horse"
 PASSWORD_HASH = hash_password(PASSWORD)  # scrypt is slow; hash once for every test user
-REAL_GET_CAST = app_module.get_cast
 REAL_SCHEDULE_PREFETCH = app_module.schedule_prefetch
 REAL_YT_DOWNLOAD = app_module.yt_download
 REAL_YT_EXTRACT = app_module.yt_extract
@@ -93,8 +93,10 @@ def app():
 @pytest.fixture(autouse=True)
 def fake_speaker(monkeypatch):
     cast = FakeCast()
-    monkeypatch.setattr(app_module, "get_cast", lambda: cast)
     app_module.settings = app_module.Settings(public_base_url=BASE, api_token=TOKEN)
+    speaker = transport_module.CastTransport("192.0.2.10", name=app_module.settings.speaker_name)
+    speaker.get_cast = lambda: cast
+    monkeypatch.setattr(app_module, "transport", speaker)
     app_module.save_settings(app_module.settings)
     app_module._resume = None
     app_module._say_gen = 0
