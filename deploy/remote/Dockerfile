@@ -1,0 +1,22 @@
+# Speaker service for a remote VM (transport "mqtt": drives the speaker through the ESP32 relay).
+# Build from the repository root: docker compose -f deploy/remote/docker-compose.yml build
+FROM python:3.13-slim
+
+# yt-dlp needs a JavaScript runtime for YouTube's challenges (app.py asks for node).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py auth.py player.py store.py transport.py ./
+COPY static ./static
+
+# config.json, the database and the YouTube cache live on the volume.
+ENV CONFIG_PATH=/data/config.json DATA_PATH=/data/data.db CACHE_DIR=/data/cache
+RUN useradd --system --uid 10001 speaker && mkdir -p /data && chown speaker /data
+USER speaker
+VOLUME /data
+EXPOSE 8090
+CMD ["python", "app.py"]

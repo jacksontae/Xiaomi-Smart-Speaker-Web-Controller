@@ -1,0 +1,41 @@
+# Remote deployment: speaker service + Cloudflare Tunnel on a VM, speaker reached through the ESP32 relay.
+#
+#   cp deploy/remote/.env.example deploy/remote/.env   # fill in, chmod 600
+#   docker compose -f deploy/remote/docker-compose.yml up -d --build
+#
+# Every value below is a placeholder. Real hostnames, broker credentials and tunnel tokens go in .env
+# (git-ignored), never in this file.
+services:
+  speaker-service:
+    build:
+      context: ../..
+      dockerfile: deploy/remote/Dockerfile
+    restart: unless-stopped
+    environment:
+      SPEAKER_TRANSPORT: mqtt
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}        # e.g. https://speaker-media.example.com (the tunnel hostname)
+      MQTT_HOST: ${MQTT_HOST}                    # e.g. broker.example.com
+      MQTT_PORT: ${MQTT_PORT:-8883}
+      MQTT_TLS: "true"
+      MQTT_USERNAME: ${MQTT_USERNAME}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_BASE_TOPIC: ${MQTT_BASE_TOPIC:-speaker-relay/speaker-relay}
+      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-speaker-service}
+    volumes:
+      - speaker-data:/data
+    # No public port: only cloudflared reaches the service. The admin UI is on the VM's loopback;
+    # use an SSH tunnel (ssh -L 8090:127.0.0.1:8090 vm) or put it behind Cloudflare Access.
+    ports:
+      - "127.0.0.1:8090:8090"
+
+  cloudflared:
+    image: cloudflare/cloudflared:2025.10.0   # pin to a current release
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - speaker-service
+
+volumes:
+  speaker-data:
