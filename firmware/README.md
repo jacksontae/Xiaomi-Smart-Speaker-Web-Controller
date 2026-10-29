@@ -63,7 +63,7 @@ The same JSON works over HTTP and MQTT. HTTP bodies must be sent with `Content-T
 TOKEN=...   # from the setup page
 curl -X POST http://speaker-relay.local/api/play -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"url":"http://192.168.2.45:8090/yt/abc.m4a?exp=…&sig=…","content_type":"audio/mp4"}'
+  -d '{"url":"http://192.0.2.20:8090/yt/abc.m4a?exp=…&sig=…","content_type":"audio/mp4"}'
 ```
 
 Over MQTT, add an `"id"` to match replies: results go to `<base>/result`, a retained status is
