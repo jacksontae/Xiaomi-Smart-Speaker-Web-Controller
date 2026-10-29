@@ -1,9 +1,11 @@
-"""SQLite storage for accounts, sessions, playlists, quick phrases and the activity log.
+"""SQLite storage for accounts, sessions, playlists, quick phrases, schedules and the activity log.
 
 Every call opens its own short-lived connection, so the store is safe to use from any thread.
 Writes that check-then-change (last-admin guard, reorder, first-run setup) run in one
 `BEGIN IMMEDIATE` transaction so concurrent requests can't both pass the check.
+The schema version lives in `PRAGMA user_version`; MIGRATIONS upgrade an older file in place.
 """
+import json
 import sqlite3
 import threading
 import time
@@ -11,7 +13,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SESSION_TTL = 30 * 24 * 3600
 ACTIVITY_KEEP = 5000
 
@@ -67,6 +69,39 @@ CREATE TABLE IF NOT EXISTS activity (
 );
 """
 
+# version -> statements that bring a database from version - 1 up to it
+MIGRATIONS = {
+    2: [
+        """CREATE TABLE IF NOT EXISTS schedules (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            action TEXT NOT NULL CHECK (action IN ('say', 'playlist')),
+            text TEXT,
+            lang TEXT,
+            playlist_id INTEGER REFERENCES playlists(id) ON DELETE SET NULL,
+            shuffle INTEGER NOT NULL DEFAULT 0,
+            volume REAL,
+            time TEXT NOT NULL,
+            days TEXT NOT NULL,
+            date TEXT,
+            next_run TEXT,
+            last_run TEXT,
+            last_result TEXT,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS schedules_due ON schedules(enabled, next_run)",
+    ],
+}
+SCHEDULE_COLUMNS = (
+    "name", "enabled", "action", "text", "lang", "playlist_id", "shuffle", "volume", "time", "days", "date",
+    "next_run", "last_run", "last_result",
+)
+SCHEDULE_SELECT = (
+    "SELECT s.*, u.display_name AS creator FROM schedules s LEFT JOIN users u ON u.id = s.created_by"
+)
+
 ITEM_COLUMNS = "id, kind, title, source, duration, thumbnail, lang"
 
 
@@ -76,6 +111,32 @@ class Conflict(Exception):
 
 def now_iso():
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _schedule(row):
+    if row is None:
+        return None
+    return {
+        "id": row["id"], "name": row["name"], "enabled": bool(row["enabled"]), "action": row["action"],
+        "text": row["text"], "lang": row["lang"], "playlist_id": row["playlist_id"], "shuffle": bool(row["shuffle"]),
+        "volume": row["volume"], "time": row["time"], "days": json.loads(row["days"]), "date": row["date"],
+        "next_run": row["next_run"], "last_run": row["last_run"], "last_result": row["last_result"],
+        "created_by": row["creator"],
+    }
+
+
+def _schedule_values(fields):
+    """Column values for SQLite: bools as 0/1, days as a JSON list."""
+    values = {}
+    for column, value in fields.items():
+        if column not in SCHEDULE_COLUMNS:
+            raise KeyError(column)
+        if column in ("enabled", "shuffle"):
+            value = int(value)
+        elif column == "days":
+            value = json.dumps(value)
+        values[column] = value
+    return values
 
 
 def _user(row):
@@ -98,10 +159,15 @@ class Store:
         finally:
             db.close()
         with self.tx(immediate=True) as db:
-            for statement in SCHEMA.split(";"):  # executescript() would commit our transaction
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+            for statement in SCHEMA.split(";"):  # version 1; executescript() would commit our transaction
                 if statement.strip():
                     db.execute(statement)
-            db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            for target in range(max(version, 1) + 1, SCHEMA_VERSION + 1):
+                for statement in MIGRATIONS[target]:
+                    db.execute(statement)
+            if version < SCHEMA_VERSION:
+                db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
     def tx(self, immediate=False):
@@ -282,7 +348,12 @@ class Store:
             return self.get_playlist(playlist_id, db)
 
     def delete_playlist(self, playlist_id):
+        """Delete it and switch off the schedules that played it."""
         with self.tx() as db:
+            db.execute(
+                "UPDATE schedules SET enabled = 0, playlist_id = NULL, next_run = NULL WHERE playlist_id = ?",
+                (playlist_id,),
+            )
             return db.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,)).rowcount > 0
 
     def add_item(self, playlist_id, item, max_items):
@@ -354,6 +425,53 @@ class Store:
     def delete_phrase(self, phrase_id):
         with self.tx() as db:
             return db.execute("DELETE FROM phrases WHERE id = ?", (phrase_id,)).rowcount > 0
+
+    # --- Schedules ---
+
+    def list_schedules(self):
+        """Soonest first; disabled and finished ones (no next_run) last."""
+        with self.tx() as db:
+            rows = db.execute(f"{SCHEDULE_SELECT} ORDER BY s.next_run IS NULL, s.next_run, s.time, s.id").fetchall()
+        return [_schedule(r) for r in rows]
+
+    def get_schedule(self, schedule_id, db=None):
+        if db is None:
+            with self.tx() as db:
+                return self.get_schedule(schedule_id, db)
+        return _schedule(db.execute(f"{SCHEDULE_SELECT} WHERE s.id = ?", (schedule_id,)).fetchone())
+
+    def create_schedule(self, fields, user_id):
+        values = _schedule_values(fields)
+        columns, marks = ", ".join(values), ", ".join("?" * len(values))
+        with self.tx() as db:
+            cur = db.execute(
+                f"INSERT INTO schedules ({columns}, created_by, created_at) VALUES ({marks}, ?, ?)",
+                (*values.values(), user_id, now_iso()),
+            )
+            return self.get_schedule(cur.lastrowid, db)
+
+    def update_schedule(self, schedule_id, fields):
+        """Set the given columns; None if there is no such schedule."""
+        values = _schedule_values(fields)
+        with self.tx() as db:
+            if values:
+                sets = ", ".join(f"{column} = ?" for column in values)
+                db.execute(f"UPDATE schedules SET {sets} WHERE id = ?", (*values.values(), schedule_id))
+            return self.get_schedule(schedule_id, db)
+
+    def delete_schedule(self, schedule_id):
+        with self.tx() as db:
+            return db.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,)).rowcount > 0
+
+    def due_schedules(self, now):
+        """Enabled schedules whose next_run (UTC ISO, same format as `now`) has come, oldest first."""
+        with self.tx() as db:
+            rows = db.execute(
+                f"{SCHEDULE_SELECT} WHERE s.enabled = 1 AND s.next_run IS NOT NULL AND s.next_run <= ?"
+                " ORDER BY s.next_run, s.id",
+                (now,),
+            ).fetchall()
+        return [_schedule(r) for r in rows]
 
     # --- Activity ---
 

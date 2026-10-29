@@ -46,6 +46,11 @@ ROLE_TABLE = {
     ("GET", "/phrases"): "viewer",
     ("POST", "/phrases"): "operator",
     ("DELETE", "/phrases/{phrase_id}"): "operator",
+    ("GET", "/schedules"): "viewer",
+    ("POST", "/schedules"): "operator",
+    ("PATCH", "/schedules/{schedule_id}"): "operator",
+    ("DELETE", "/schedules/{schedule_id}"): "operator",
+    ("POST", "/schedules/{schedule_id}/run"): "operator",
     # Fetched by the speaker with signed URLs, or the public web UI.
     ("GET", "/tts.mp3"): "signed",
     ("GET", "/yt/{filename}"): "signed",
@@ -92,7 +97,8 @@ def test_role_table_covers_every_route(app):
 
 
 def _url(path):
-    return path.format(user_id=999, playlist_id=999, item_id=999, phrase_id=999, filename="x.m4a")
+    return path.format(user_id=999, playlist_id=999, item_id=999, phrase_id=999, schedule_id=999,
+                       filename="x.m4a")
 
 
 def _call(client, method, path):

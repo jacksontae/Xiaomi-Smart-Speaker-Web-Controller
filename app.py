@@ -15,6 +15,7 @@ import itertools
 import json
 import mimetypes
 import os
+import random
 import re
 import secrets
 import socket
@@ -22,8 +23,10 @@ import time
 import urllib.parse
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 import pychromecast.discovery
@@ -69,7 +72,12 @@ QUEUE_BACKOFF = 10.0  # wait after the speaker failed to answer a poll
 MAX_PLAYLIST_ITEMS = 500
 TTS_TEXT_MAX = 1000
 VOLUME_COALESCE = 10  # at most one volume entry per actor in this many seconds
+SCHEDULE_POLL = 15.0  # seconds between checks for due schedules
+SCHEDULE_GRACE = timedelta(minutes=5)  # a schedule overdue by more than this (service was down) is skipped
+SCHEDULE_NAME_MAX = 80
 YT_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
+TIME_RE = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
+DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 AUDIO_SUFFIXES = {".m4a", ".webm", ".mp3", ".opus", ".ogg", ".mp4", ".aac"}
 
 
@@ -236,18 +244,34 @@ def describe_changes(changes):
     return ", ".join(parts)[:500]
 
 
+def local_zone():
+    """The server's zone: $TZ, else the system zone (/etc/localtime), else UTC."""
+    name = os.environ.get("TZ", "").lstrip(":")
+    if not name:
+        match = re.search(r"zoneinfo[^/]*/(.+)$", os.path.realpath("/etc/localtime"))
+        name = match[1] if match else "UTC"
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        print(f"unknown time zone {name!r}; schedules use UTC")
+        return ZoneInfo("UTC")
+
+
 settings = load_settings()
 transport = make_transport(settings)
 db = Store(DATA_PATH)
 login_throttle = Throttle(limit=5, window=300)
+ZONE = local_zone()
 
 
 @asynccontextmanager
 async def lifespan(_app):
     transport.start()  # the mqtt transport connects to the broker here; cast connects on first use
+    runner = asyncio.create_task(schedule_loop())
     try:
         yield
     finally:
+        runner.cancel()
         transport.close()
 
 
@@ -852,6 +876,21 @@ class PhraseBody(BaseModel):
     lang: str | None = None
 
 
+class ScheduleBody(BaseModel):
+    """POST takes the whole schedule, PATCH any subset; either way the result is validated as a whole."""
+    name: str | None = None
+    enabled: bool | None = None
+    action: str | None = None
+    text: str | None = None
+    lang: str | None = None
+    playlist_id: int | None = None
+    shuffle: bool | None = None
+    volume: float | None = None
+    time: str | None = None
+    days: list[int] | None = None
+    date: str | None = None
+
+
 def clean_text(value, field, max_len):
     value = value.strip()
     if not value:
@@ -1082,6 +1121,11 @@ async def status(who: Who):
 async def say(body: SayBody, who: Who):
     if not body.text.strip():
         raise HTTPException(400, "text is empty")
+    return await announce(body.text, body.lang, body.volume, who)
+
+
+async def announce(text, lang, volume, who):
+    """Speak `text`, then resume the interrupted track or let the queue continue (POST /say and schedules)."""
     global _resume, _say_gen
     tts_prefix = f"{base_url()}/tts.mp3"
     if settings.resume_after_say:
@@ -1092,12 +1136,12 @@ async def say(body: SayBody, who: Who):
         q.after_say = _resume is None and await run_cast(queue_after_say, q)
     _say_gen += 1
     gen = _say_gen
-    url = media_url("/tts.mp3", text=body.text, lang=body.lang or settings.tts_lang)
-    record(who, "say", body.text.strip()[:80])
-    await run_cast(cast_play, url, "audio/mp3", "Announcement", body.volume)
+    url = media_url("/tts.mp3", text=text, lang=lang or settings.tts_lang)
+    record(who, "say", text.strip()[:80])
+    await run_cast(cast_play, url, "audio/mp3", "Announcement", volume)
     if _resume:
         spawn(resume_after_announcement(gen, tts_prefix))
-    return {"ok": True, "chunks": len(split_text(body.text)), "will_resume": _resume and _resume["title"]}
+    return {"ok": True, "chunks": len(split_text(text)), "will_resume": _resume and _resume["title"]}
 
 
 @operator_api.post("/play")
@@ -1287,18 +1331,25 @@ async def reorder_playlist(playlist_id: int, body: OrderBody):
 
 @operator_api.post("/playlists/{playlist_id}/play")
 async def play_playlist(playlist_id: int, body: PlayPlaylistBody, who: Who):
+    return await start_playlist(playlist_or_404(db.get_playlist(playlist_id)), body.start_index, body.shuffle,
+                                body.repeat, who)
+
+
+async def start_playlist(playlist, start_index, shuffle, repeat, who, volume=None):
+    """Replace the queue with `playlist` and start it (POST /playlists/{id}/play and schedules)."""
     global _queue
-    playlist = playlist_or_404(db.get_playlist(playlist_id))
     if not playlist["items"]:
         raise HTTPException(400, "The playlist is empty")
-    if not 0 <= body.start_index < len(playlist["items"]):
+    if not 0 <= start_index < len(playlist["items"]):
         raise HTTPException(400, "start_index is out of range")
-    q = Queue(playlist["items"], playlist["id"], playlist["name"], body.start_index, body.shuffle, body.repeat)
+    q = Queue(playlist["items"], playlist["id"], playlist["name"], start_index, shuffle, repeat)
     clear_queue()
     _queue = q
     record(who, "playlist play", playlist["name"])
     try:
-        played = await play_queue(q, keep_volume=False)
+        if volume is not None:
+            await run_cast(transport.set_volume, volume)
+        played = await play_queue(q, keep_volume=volume is not None)
     except HTTPException:
         end_queue(q)
         raise
@@ -1388,6 +1439,180 @@ async def add_phrase(body: PhraseBody, who: Who):
 async def delete_phrase(phrase_id: int):
     if not db.delete_phrase(phrase_id):
         raise HTTPException(404, "No such phrase")
+
+
+# --- Scheduled announcements ---
+
+def utc_iso(moment):
+    return moment.astimezone(UTC).isoformat(timespec="seconds")
+
+
+def next_run_after(schedule, after):
+    """The first run strictly after `after` (aware), from the local wall time; None once a one-off has passed."""
+    hour, minute = map(int, schedule["time"].split(":"))
+    if not schedule["days"]:
+        day = date.fromisoformat(schedule["date"])
+        candidate = datetime(day.year, day.month, day.day, hour, minute, tzinfo=ZONE)
+        return candidate if candidate > after else None
+    today = after.astimezone(ZONE).date()
+    for offset in range(8):
+        day = today + timedelta(days=offset)
+        if day.weekday() in schedule["days"]:
+            candidate = datetime(day.year, day.month, day.day, hour, minute, tzinfo=ZONE)
+            if candidate > after:
+                return candidate
+    return None  # unreachable with at least one day
+
+
+def validate_schedule(fields, now):
+    """Normalize a whole schedule (after merging a PATCH) and work out next_run. 400 on anything invalid."""
+    out = {"name": clean_text(fields.get("name") or "", "name", SCHEDULE_NAME_MAX)}
+    out["enabled"] = True if fields.get("enabled") is None else fields["enabled"]
+    action = fields.get("action")
+    if action not in ("say", "playlist"):
+        raise HTTPException(400, "action must be 'say' or 'playlist'")
+    out["action"] = action
+    if action == "say":
+        out["text"] = clean_text(fields.get("text") or "", "text", TTS_TEXT_MAX)
+        out["lang"] = (fields.get("lang") or settings.tts_lang).strip()[:16] or settings.tts_lang
+        out["playlist_id"], out["shuffle"] = None, False
+    else:
+        if fields.get("playlist_id") is None:
+            raise HTTPException(400, "playlist_id is required for a playlist schedule")
+        if db.get_playlist(fields["playlist_id"]) is None:
+            raise HTTPException(400, "Unknown playlist")
+        out["playlist_id"], out["shuffle"] = fields["playlist_id"], bool(fields.get("shuffle"))
+        out["text"] = out["lang"] = None
+    volume = fields.get("volume")
+    if volume is not None and not 0 <= volume <= 1:
+        raise HTTPException(400, "volume must be between 0 and 1")
+    out["volume"] = volume
+    if not TIME_RE.fullmatch(fields.get("time") or ""):
+        raise HTTPException(400, "time must be HH:MM (24-hour)")
+    out["time"] = fields["time"]
+    days = fields.get("days") or []
+    if any(not 0 <= d <= 6 for d in days):
+        raise HTTPException(400, "days must be numbers 0 (Monday) to 6 (Sunday)")
+    out["days"] = sorted(set(days))
+    out["date"] = None
+    if not days:
+        raw = fields.get("date") or ""
+        try:
+            if not DATE_RE.fullmatch(raw):
+                raise ValueError
+            date.fromisoformat(raw)
+        except ValueError:
+            raise HTTPException(400, "date must be YYYY-MM-DD when days is empty (one-off)") from None
+        out["date"] = raw
+    following = next_run_after(out, now) if out["enabled"] else None
+    if out["enabled"] and following is None:
+        raise HTTPException(400, "The date and time of a one-off schedule must not be in the past")
+    out["next_run"] = following and utc_iso(following)
+    return out
+
+
+def schedule_or_404(schedule):
+    if schedule is None:
+        raise HTTPException(404, "No such schedule")
+    return schedule
+
+
+async def fire_schedule(schedule, who):
+    """Play a schedule now through the same path as POST /say or /playlists/{id}/play; raises HTTPException."""
+    if schedule["action"] == "say":
+        await announce(schedule["text"], schedule["lang"], schedule["volume"], who)
+        return
+    playlist = db.get_playlist(schedule["playlist_id"]) if schedule["playlist_id"] is not None else None
+    if playlist is None:
+        raise HTTPException(400, "The schedule's playlist no longer exists")
+    count = len(playlist["items"])
+    start = random.randrange(count) if schedule["shuffle"] and count else 0  # shuffle keeps the start item first
+    await start_playlist(playlist, start, schedule["shuffle"], "off", who, schedule["volume"])
+
+
+async def run_schedule(schedule, who):
+    """Fire and record the outcome ("ok" or the error) in last_result and the activity log.
+
+    Returns the HTTPException it failed with, or None.
+    """
+    error = None
+    try:
+        await fire_schedule(schedule, who)
+        result = "ok"
+    except HTTPException as e:
+        error, result = e, str(e.detail)
+    except Exception as e:  # one broken schedule mustn't stop the runner
+        result = f"{type(e).__name__}: {e}"
+        error = HTTPException(500, result)
+    db.update_schedule(schedule["id"], {"last_result": result})
+    record(who, "schedule run", f"{schedule['name']}: {result}"[:200])
+    return error
+
+
+async def run_due_schedules(now):
+    """Fire every enabled schedule whose next_run <= now (aware datetime); skip ones overdue past the grace."""
+    for schedule in db.due_schedules(utc_iso(now)):
+        due = datetime.fromisoformat(schedule["next_run"])
+        following = next_run_after(schedule, now) if schedule["days"] else None
+        moved = {"next_run": following and utc_iso(following)}
+        if not schedule["days"]:
+            moved["enabled"] = False  # one-off: done either way
+        if now - due > SCHEDULE_GRACE:
+            db.update_schedule(schedule["id"], moved | {"last_result": "missed"})
+            db.log("system", "schedule missed", f"{schedule['name']} (due {due.astimezone(ZONE):%Y-%m-%d %H:%M})")
+            continue
+        # Move next_run on before playing, so a slow download can't make the next poll fire it again.
+        db.update_schedule(schedule["id"], moved | {"last_run": utc_iso(now)})
+        await run_schedule(schedule, None)
+
+
+async def schedule_loop():
+    while True:
+        try:
+            await run_due_schedules(datetime.now(UTC))
+        except Exception as e:  # keep the runner alive
+            print(f"schedule runner error: {type(e).__name__}: {e}")
+        await asyncio.sleep(SCHEDULE_POLL)
+
+
+@viewer_api.get("/schedules")
+async def list_schedules():
+    return {"timezone": ZONE.key, "now": utc_iso(datetime.now(UTC)), "items": db.list_schedules()}
+
+
+@operator_api.post("/schedules")
+async def create_schedule(body: ScheduleBody, who: Who):
+    fields = validate_schedule(body.model_dump(), datetime.now(UTC))
+    schedule = db.create_schedule(fields, who.user and who.user["id"])
+    record(who, "schedule create", schedule["name"])
+    return schedule
+
+
+@operator_api.patch("/schedules/{schedule_id}")
+async def update_schedule(schedule_id: int, body: ScheduleBody, who: Who):
+    current = schedule_or_404(db.get_schedule(schedule_id))
+    fields = validate_schedule(current | body.model_dump(exclude_unset=True), datetime.now(UTC))
+    schedule = schedule_or_404(db.update_schedule(schedule_id, fields))
+    record(who, "schedule update", schedule["name"])
+    return schedule
+
+
+@operator_api.delete("/schedules/{schedule_id}", status_code=204)
+async def delete_schedule(schedule_id: int, who: Who):
+    schedule = schedule_or_404(db.get_schedule(schedule_id))
+    db.delete_schedule(schedule_id)
+    record(who, "schedule delete", schedule["name"])
+
+
+@operator_api.post("/schedules/{schedule_id}/run")
+async def run_schedule_now(schedule_id: int, who: Who):
+    """Test-play regardless of time or enabled; next_run stays as it is."""
+    schedule = schedule_or_404(db.get_schedule(schedule_id))
+    db.update_schedule(schedule_id, {"last_run": utc_iso(datetime.now(UTC))})
+    error = await run_schedule(schedule, who)
+    if error is not None:
+        raise error
+    return {"ok": True}
 
 
 # --- Streams fetched by the speaker itself (signed URLs, no header) ---
