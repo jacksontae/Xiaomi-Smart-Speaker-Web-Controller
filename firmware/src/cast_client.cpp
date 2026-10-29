@@ -118,6 +118,9 @@ void CastClient::handle(const castmsg::Message& m) {
             appId_ = appName_ = transportId_ = sessionId_ = connectedTransport_ = "";
             mediaSessionId_ = 0;
             playerState_ = "";
+            // no app means no media: drop the last track so status doesn't report it after a stop
+            title_ = contentId_ = idleReason_ = "";
+            position_ = 0;
         }
     } else if (type == "MEDIA_STATUS") {
         JsonArrayConst list = doc["status"].as<JsonArrayConst>();

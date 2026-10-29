@@ -10,7 +10,9 @@ fetches it (from the speaker service or the cloud).
 ```
 
 > **Status:** builds for `esp32dev`, `esp32-s3` and `esp8266` (D1 mini / NodeMCU); the Cast codec has
-> host unit tests. Not yet tested on hardware.
+> host unit tests. Tested on an ESP32-D0WDQ6 (`esp32dev`) with a Xiaomi Mi Smart Speaker over MQTT:
+> status, volume, play, pause/resume/stop, and the speaker service's announcements, YouTube and
+> resume-after-announcement. ESP32-S3 and ESP8266 are not yet tested on hardware.
 
 ## Build and flash
 

@@ -36,3 +36,16 @@ make it cheaper and more precise. None is required for the current server code.
    *Proposal:* include `version` in every result (cheap, lets the server show it right after boot).
 6. **No protocol version.** *Proposal:* add `"proto": 1` to status so the server can adapt if the JSON
    shape changes.
+
+## Hardware test (ESP32-D0WDQ6 + Xiaomi Mi Smart Speaker, MQTT on the LAN)
+
+Passed: setup access point and Wi-Fi join, MQTT connect and subscribe, `status`, `volume`, `play`
+(AAC/m4a over HTTP), `pause`, `resume`, `stop`; through the speaker service: `/say` (Thai TTS),
+`/youtube`, an announcement during YouTube with resume at the same position, and `/status` relay
+health. After a board reset it rejoined Wi-Fi and MQTT in about 6 s.
+
+Fixed during the test: after `stop` the status kept the last title, URL and position; they are now
+cleared when the receiver reports no running app.
+
+Still open (seen on hardware, matches the gaps above): the `play` reply comes back with state `IDLE`
+before the speaker starts buffering, and the retained status is only refreshed every 30 s.
