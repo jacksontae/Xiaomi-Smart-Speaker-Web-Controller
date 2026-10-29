@@ -68,8 +68,10 @@ curl -X POST http://speaker-relay.local/api/play -H "Authorization: Bearer $TOKE
   -d '{"url":"http://192.0.2.20:8090/yt/abc.m4a?exp=…&sig=…","content_type":"audio/mp4"}'
 ```
 
-Over MQTT, add an `"id"` to match replies: results go to `<base>/result`, a retained status is
-published to `<base>/status` every 30 s, and `<base>/online` is `true`/`false` (last will).
+Over MQTT, add an `"id"` to match replies: results go to `<base>/result` (with the firmware `version`),
+a retained status is published to `<base>/status` every 30 s and within a second of any change (app,
+player state, track, volume) with `proto`, `seq` and `uptime`, and `<base>/online` is `true`/`false`
+(last will). `media` includes `content_type` and `duration` when the speaker reports them.
 `<base>` defaults to `speaker-relay/<device-name>`.
 
 Settings: `GET/POST /api/config` (secrets are never returned), `POST /api/token/rotate`

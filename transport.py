@@ -162,17 +162,20 @@ class MqttRelayTransport:
 
     - commands are published to `<base>/cmd` with an "id"; the relay answers on `<base>/result`
       with {"id", "ok", "error"?, "speaker": {...}};
-    - `<base>/status` (retained, every 30 s) carries {"version", "ip", "rssi", "heap", "speaker"};
+    - `<base>/status` (retained, every 30 s) carries {"version", "ip", "rssi", "heap", "speaker"}; relays with
+      "proto" >= 1 also publish it within a second of any change (app, player state, track, volume);
     - `<base>/online` (retained) is "true", or "false" from the relay's last will.
 
     The relay counts as online only while our broker session is up, its last will hasn't fired, and
     something arrived from it within `offline_after` seconds (status is every 30 s, so a relay that
     dies without the broker noticing still drops out). Speaker state older than `status_refresh`
-    seconds is refreshed with a "status" command before it is used, because the relay only
-    publishes status every 30 s and the queue needs to see a track end promptly.
+    seconds is refreshed with a "status" command before it is used, because older relays only
+    publish status every 30 s and the queue needs to see a track end promptly. A relay that pushes
+    changes (proto >= 1) is only re-asked after `PUSH_REFRESH` seconds.
     """
     kind = "mqtt"
-    LOADED_MEMORY = 50  # content types remembered for URLs we loaded (the relay doesn't report them)
+    LOADED_MEMORY = 50  # content types remembered for URLs we loaded (older relays don't report them)
+    PUSH_REFRESH = 25.0  # safety poll for relays that push changes; under their 30 s periodic status
 
     def __init__(self, cfg, name=None, client_factory=paho_client, clock=time.monotonic, wall=time.time):
         self.cfg, self.name = cfg, name
@@ -189,6 +192,7 @@ class MqttRelayTransport:
         self._speaker = {}  # last "speaker" object from the relay
         self._speaker_at = None  # clock() when _speaker was reported fresh; None = not fresh (e.g. retained)
         self._info = {}  # version, ip, rssi, heap from <base>/status
+        self._pushes = False  # the relay publishes status on change (proto >= 1)
         self._loaded = OrderedDict()  # url -> content type
         self.client = client_factory(cfg)
         self.client.on_connect = self._on_connect
@@ -245,6 +249,7 @@ class MqttRelayTransport:
                 return
             if leaf == "status":
                 self._info = {k: doc.get(k) for k in ("version", "ip", "rssi", "heap")}
+                self._pushes = isinstance(doc.get("proto"), int) and doc["proto"] >= 1
                 if isinstance(doc.get("speaker"), dict):
                     self._take_speaker(doc["speaker"], fresh=not msg.retain)
                 if not msg.retain:
@@ -344,7 +349,8 @@ class MqttRelayTransport:
 
     def _fresh_speaker(self):
         with self._cond:
-            stale = self._speaker_at is None or self.clock() - self._speaker_at > self.cfg.status_refresh
+            limit = max(self.cfg.status_refresh, self.PUSH_REFRESH) if self._pushes else self.cfg.status_refresh
+            stale = self._speaker_at is None or self.clock() - self._speaker_at > limit
         if stale:
             self.command("status")
         with self._cond:
@@ -360,10 +366,12 @@ class MqttRelayTransport:
         if state == "PLAYING" and at is not None:
             adjusted += max(0.0, self.clock() - at)  # the relay's figure was current when it was reported
         with self._cond:
-            content_type = self._loaded.get(url)
+            content_type = m.get("content_type") or self._loaded.get(url)
+        duration = m.get("duration")
         return MediaState(
             content_id=url, content_type=content_type, title=m.get("title") or None, player_state=state,
-            idle_reason=m.get("idle_reason") or None, duration=None,
+            idle_reason=m.get("idle_reason") or None,
+            duration=float(duration) if isinstance(duration, (int, float)) and duration > 0 else None,
             current_time=float(position) if url and position is not None else None,
             adjusted_current_time=adjusted,
         )
