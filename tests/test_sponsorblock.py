@@ -14,8 +14,9 @@ def ffmpeg(monkeypatch, app):
 
 @pytest.fixture
 def ydl(monkeypatch, app):
-    """Fake YoutubeDL: records its options, 'downloads' into the outtmpl, optionally fails after the download."""
-    seen = {"fail": None}
+    """Fake YoutubeDL: records its options, resolves metadata, 'downloads' into the outtmpl (counted in
+    `downloads`), optionally fails after the download."""
+    seen = {"fail": None, "downloads": 0}
 
     class FakeYDL:
         def __init__(self, opts):
@@ -27,8 +28,13 @@ def ydl(monkeypatch, app):
         def __exit__(self, *exc):
             return False
 
-        def extract_info(self, target, download):
+        def extract_info(self, target, download=True, process=True):
+            assert not download and not process  # resolve first, download through process_ie_result
             info = {"id": "abcdefghijk", "title": "Song", "duration": 300, "extractor_key": "Youtube"}
+            return {"entries": iter([info])} if target.startswith("ytsearch") else info
+
+        def process_ie_result(self, info, download=True):
+            seen["downloads"] += 1
             path = seen["opts"]["outtmpl"].replace("%(id)s", info["id"]).replace("%(ext)s", "m4a")
             open(path, "wb").write(b"audio")
             for hook in seen["opts"].get("progress_hooks", []):
@@ -133,7 +139,7 @@ def test_download_failure_is_502(app, monkeypatch, ffmpeg):
         def __exit__(self, *exc):
             return False
 
-        def extract_info(self, target, download):
+        def extract_info(self, target, download=True, process=True):
             raise yt_dlp.utils.DownloadError("Video unavailable")
 
     monkeypatch.setattr(app, "yt_download", REAL_YT_DOWNLOAD)
@@ -141,3 +147,29 @@ def test_download_failure_is_502(app, monkeypatch, ffmpeg):
     with pytest.raises(app.HTTPException) as e:
         app.yt_download("https://www.youtube.com/watch?v=abcdefghijk")
     assert e.value.status_code == 502
+
+
+@pytest.mark.parametrize("query", ["https://www.youtube.com/watch?v=abcdefghijk", "song words"])
+def test_direct_play_reuses_whole_file_and_queues_cut(client, app, ydl, ffmpeg, fresh_state, fake_speaker, query):
+    legacy = app.CACHE_DIR / "abcdefghijk.m4a"
+    legacy.write_bytes(b"x")
+    r = client.post("/youtube", json={"query": query})
+    assert r.status_code == 200 and r.json()["title"] == "Song"
+    assert ydl["downloads"] == 0  # already cached: never downloaded again
+    assert "/yt/abcdefghijk.m4a?" in fake_speaker.media_controller.loads[-1]["url"]
+    assert fresh_state.cuts == ["abcdefghijk"]  # cut locally in the background for next time
+
+
+def test_direct_play_uses_cut_copy(client, app, ydl, ffmpeg, fresh_state, fake_speaker):
+    (app.CACHE_DIR / "abcdefghijk.m4a").write_bytes(b"x")
+    cut = app.CACHE_DIR / f"{app.yt_cache_stem('abcdefghijk', app.settings.yt_skip_segments)}.m4a"
+    cut.write_bytes(b"x")
+    assert client.post("/youtube", json={"query": "song words"}).status_code == 200
+    assert ydl["downloads"] == 0 and fresh_state.cuts == []
+    assert f"/yt/{cut.name}?" in fake_speaker.media_controller.loads[-1]["url"]
+
+
+def test_direct_play_downloads_on_a_miss(client, app, ydl, ffmpeg, fresh_state, fake_speaker):
+    assert client.post("/youtube", json={"query": "song words"}).status_code == 200
+    assert ydl["downloads"] == 1 and fresh_state.cuts == []  # downloaded already cut
+    assert ".sb-" in fake_speaker.media_controller.loads[-1]["url"]

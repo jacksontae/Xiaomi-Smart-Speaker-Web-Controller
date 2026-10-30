@@ -28,6 +28,7 @@ REAL_SCHEDULE_PREFETCH = app_module.schedule_prefetch
 REAL_YT_DOWNLOAD = app_module.yt_download
 REAL_YT_EXTRACT = app_module.yt_extract
 REAL_ENSURE_PROBE = app_module.ensure_probe
+REAL_QUEUE_CUT = app_module.queue_cut
 
 
 class FakeMediaController:
@@ -128,12 +129,13 @@ def fresh_state(monkeypatch, tmp_path):
     app_module.clear_queue()
     app_module._talk = app_module._talk_last = app_module._talk_on_speaker = None
     app_module._downloads.clear()
-    spawned = SimpleNamespace(watchers=0, prefetch=[], probes=0)
+    spawned = SimpleNamespace(watchers=0, prefetch=[], probes=0, cuts=[])
     app_module.reset_reachability()
     monkeypatch.setattr(app_module, "cast_lock", asyncio.Lock())  # a contended lock binds to its test's event loop
     monkeypatch.setattr(app_module, "ensure_queue_watcher", lambda: setattr(spawned, "watchers", spawned.watchers + 1))
     monkeypatch.setattr(app_module, "ensure_probe", lambda: setattr(spawned, "probes", spawned.probes + 1))
     monkeypatch.setattr(app_module, "schedule_prefetch", lambda q: spawned.prefetch.append(q.peek_next()))
+    monkeypatch.setattr(app_module, "queue_cut", lambda video_id, *a: spawned.cuts.append(video_id))
     return spawned
 
 
