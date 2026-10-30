@@ -5,6 +5,7 @@ import { h, icon, field, busy, segmented, tip } from './ui.js';
 import { register, t, lang, fmtDur } from './i18n.js';
 import { errorText } from './api.js';
 import { isPhone } from './sheet.js';
+import { isAndroid } from './prefs.js';
 import { bicon } from './teamb-icons.js';
 
 register({
@@ -23,7 +24,7 @@ register({
     'tb.fileGone': 'That file isn\'t in My files any more.',
     'tb.nameErr': 'Give it a name first.', 'tb.create': 'Create', 'tb.createAdd': 'Create and add',
     'tb.noPl': 'No playlists yet. Name one below and the item goes straight in.',
-    'tb.undo': 'Undo', 'tb.retry': 'Try again', 'tb.search': 'Search',
+    'tb.undo': 'Undo', 'tb.retry': 'Try again', 'tb.search': 'Search', 'tb.clear': 'Clear search',
     'tb.searching': (q) => `Searching “${q}”…`, 'tb.resultsFor': (q) => `Results for “${q}”`,
     'tb.noMatch': (q) => `Nothing matches “${q}”.`, 'tb.typeFirst': 'Type something to search for first.',
     'tb.errRadio': 'Couldn\'t reach the radio directory. The server needs internet access; try again in a moment.',
@@ -65,7 +66,7 @@ register({
     'tb.fileGone': 'ไฟล์นี้ไม่อยู่ในไฟล์ของฉันแล้ว',
     'tb.nameErr': 'ตั้งชื่อก่อนสร้าง', 'tb.create': 'สร้าง', 'tb.createAdd': 'สร้างแล้วเพิ่ม',
     'tb.noPl': 'ยังไม่มีเพลย์ลิสต์ ตั้งชื่อด้านล่าง แล้วรายการนี้จะถูกเพิ่มเข้าไปเลย',
-    'tb.undo': 'เลิกทำ', 'tb.retry': 'ลองอีกครั้ง', 'tb.search': 'ค้นหา',
+    'tb.undo': 'เลิกทำ', 'tb.retry': 'ลองอีกครั้ง', 'tb.search': 'ค้นหา', 'tb.clear': 'ล้างคำค้นหา',
     'tb.searching': (q) => `กำลังค้นหา “${q}”…`, 'tb.resultsFor': (q) => `ผลการค้นหา “${q}”`,
     'tb.noMatch': (q) => `ไม่มีรายการที่ตรงกับ “${q}”`, 'tb.typeFirst': 'พิมพ์คำที่จะค้นหาก่อน',
     'tb.errRadio': 'ติดต่อรายชื่อสถานีวิทยุไม่ได้ เซิร์ฟเวอร์ต้องต่ออินเทอร์เน็ต ลองใหม่อีกครั้ง',
@@ -172,7 +173,27 @@ export function searchForm({ label, placeholder, button = t('tb.search'), value 
   const input = h('input', { class: 'input', type: 'search', placeholder, value, 'aria-label': label, enterKeyHint: 'search', inputMode: inputmode, autocomplete: 'off', spellcheck: false });
   const btn = h('button', { type: 'submit', class: 'btn primary' }, button);
   const form = h('form', { class: 'tb-search', role: 'search', onsubmit: (e) => { e.preventDefault(); onSearch(input.value.trim(), btn); } }, input, btn);
+  androidSearch(form, input, btn);
   return { form, input, btn };
+}
+/**
+ * Android look (boards A_YouTube, A_AddItem, AT_YouTube): one rounded field with a search icon, a clear button and
+ * the submit button inside it (an arrow on phones, the word on tablets). No-op elsewhere. btn may be null.
+ */
+export function androidSearch(form, input, btn) {
+  if (!isAndroid()) return;
+  form.classList.add('tb-search-a');
+  const sync = () => { clear.hidden = !input.value; };
+  const clear = ibtn('close', t('tb.clear'), () => { input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); }, 'tb-clear');
+  input.addEventListener('input', sync);
+  sync();
+  form.prepend(bicon('search', 'tb-sic'));
+  if (btn) {
+    const label = btn.textContent;
+    btn.setAttribute('aria-label', label);
+    btn.replaceChildren(h('span', { class: 'tb-go-l' }, label), bicon('arrow-fwd', 'tb-go-ic'));
+    btn.before(clear);
+  } else form.append(clear);
 }
 
 /** Error text for music-source failures (502 from the server = the internet directory failed). */

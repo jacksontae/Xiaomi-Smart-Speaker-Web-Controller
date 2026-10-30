@@ -9,8 +9,9 @@ import { errorText, ApiError } from '../api.js';
 import { bicon } from '../teamb-icons.js';
 import {
   thumb, mediaRow, roundBtn, setRound, errBox, note, sectionLabel, spinnerLine, searchForm, sourceError,
-  playTracker, trackPlay, pickPlaylist, ibtn, deleteLater, isPending, undoDelete, isUrl, epMeta, fileMeta, size,
+  playTracker, trackPlay, pickPlaylist, ibtn, deleteLater, isPending, undoDelete, isUrl, epMeta, fileMeta, size, androidSearch,
 } from '../teamb-common.js';
+import { isAndroid } from '../prefs.js';
 
 register({
   en: {
@@ -77,6 +78,8 @@ const SOURCES = [
 ];
 // Kept between visits (module scope): the last search of each source, so coming back shows the same results.
 const memo = { source: 'youtube', yt: null, radio: { q: '' }, pod: null };
+// "Add to playlist": the playlist-add glyph on Android (A_YouTube), the plus elsewhere
+const ADD_IC = () => (isAndroid() ? 'playlist-add' : 'plus');
 
 export async function render(ctx) {
   await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/music.css')]);
@@ -134,7 +137,7 @@ function youtubePane(ctx, tracker) {
       const row = mediaRow({ th: thumb('youtube', { img: v.thumbnail, badge: fmtDur(v.duration), wide: true }), title: v.title, sub: v.channel || '' });
       const play = playButton(ctx, tracker, `yt:${v.video_id}`, v.title,
         () => ctx.api('/youtube', { body: { query: `https://www.youtube.com/watch?v=${v.video_id}` } }), row, v.channel || '');
-      const add = roundBtn('plus', t('tb.addX', v.title), () => pickPlaylist(ctx, { kind: 'youtube', source: v.video_id, title: v.title }));
+      const add = roundBtn(ADD_IC(), t('tb.addX', v.title), () => pickPlaylist(ctx, { kind: 'youtube', source: v.video_id, title: v.title }));
       row.querySelector('.tb-act').append(play, add);
       return row;
     })));
@@ -231,6 +234,7 @@ function radioPane(ctx, tracker) {
   });
   ctx.onCleanup(() => clearTimeout(timer));
   const form = h('form', { role: 'search', class: 'tb-search solo', onsubmit: (e) => { e.preventDefault(); clearTimeout(timer); search(input.value.trim()); } }, input);
+  androidSearch(form, input, null);
   loadFavs().catch((e) => { if (e.name !== 'AbortError') favBox.replaceChildren(errBox(errorText(e, ctx.user))); });
   if (memo.radio.results && !memo.radio.loading) paintResults(); else search(memo.radio.q || '');
   autofocus(input);
@@ -265,7 +269,7 @@ function podcastPane(ctx, tracker) {
       const row = mediaRow({ th: thumb('podcast', { img: ep.thumbnail }), title: ep.title, sub });
       const play = playButton(ctx, tracker, `pod:${ep.url}`, ep.title,
         () => ctx.api('/podcasts/play', { body: { url: ep.url, title: ep.title.slice(0, 200), thumbnail: ep.thumbnail, content_type: ep.content_type } }), row, sub);
-      const add = roundBtn('plus', t('tb.addX', ep.title), () => pickPlaylist(ctx, {
+      const add = roundBtn(ADD_IC(), t('tb.addX', ep.title), () => pickPlaylist(ctx, {
         kind: 'podcast', source: ep.url, title: ep.title.slice(0, 200), duration: ep.duration, thumbnail: ep.thumbnail, content_type: ep.content_type,
       }));
       row.querySelector('.tb-act').append(play, add);
@@ -355,7 +359,7 @@ function filesPane(ctx, tracker) {
         if (canEdit(f)) act.append(ibtn('pencil', t('music.rename', f.title), () => rename(f)), ibtn('trash', t('music.del', f.title), () => remove(f), 'mu-del'));
       } else {
         const play = playButton(ctx, tracker, `file:${f.id}`, f.title, () => ctx.api(`/files/${f.id}/play`, { body: {} }), row, sub);
-        act.append(play, roundBtn('plus', t('tb.addX', f.title), () => pickPlaylist(ctx, { kind: 'file', source: String(f.id) })));
+        act.append(play, roundBtn(ADD_IC(), t('tb.addX', f.title), () => pickPlaylist(ctx, { kind: 'file', source: String(f.id) })));
       }
       return row;
     })));

@@ -43,3 +43,21 @@
   .mu .tb-search { max-width: 760px; }
   .mu-fhead { max-width: 760px; }
 }
+
+/* ======================= Android look (boards A_YouTube, AT_YouTube) ======================= */
+:root[data-os="android"] .mu .tb-row { min-height: 76px; gap: 12px; padding: 10px 12px; }
+:root[data-os="android"] .mu .tb-t { font-size: 15px; font-weight: 700; }
+/* play: tonal circle; while it plays, a filled rounded square (shape morph) */
+:root[data-os="android"] .mu .tb-rb.primary {
+  background: var(--md-secondary-container); color: var(--md-on-secondary-container);
+  transition: width var(--t-slow) var(--md-spring), border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .mu .tb-rb.primary:hover { background: color-mix(in srgb, var(--md-on-secondary-container) 8%, var(--md-secondary-container)); }
+:root[data-os="android"] .mu .tb-row.on .tb-rb.primary { width: 52px; border-radius: 14px; background: var(--md-primary); color: var(--md-on-primary); }
+/* add to playlist: outlined circle */
+:root[data-os="android"] .mu .tb-rb.soft { background: transparent; box-shadow: inset 0 0 0 1px var(--md-outline); color: var(--md-on-surface-variant); }
+:root[data-os="android"] .mu .tb-rb.soft:hover { background: color-mix(in srgb, var(--md-state) 6%, transparent); }
+:root[data-os="android"] .mu .tb-row.on .tb-t { color: var(--md-primary); }
+@media (min-width: 744px) {
+  :root[data-os="android"] .mu .tb-search { max-width: 680px; }
+}
