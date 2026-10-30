@@ -31,6 +31,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   stream at a signed `/talk/<id>/live` URL; music pauses and resumes afterwards, with an optional chime,
   a `talk_max_seconds` limit (default 120) and an activity entry "Talked live for m:ss". Needs ffmpeg
   (added to the Docker image).
+- SponsorBlock (`yt_skip_segments`, default `interaction`, `selfpromo`, `sponsor`): sponsor reads inside YouTube
+  videos are cut out after download (needs ffmpeg); cache files carry a tag of the cut categories
+  (`<id>.sb-<hash>.<ext>`). Files cached before this play at once and are cut in the background from the local
+  copy (hash-prefix SponsorBlock lookup, niced ffmpeg, one job at a time), so nothing is downloaded again.
+  `POST /youtube` resolves the video first and plays a cached copy instead of downloading it again.
 
 ## [0.2.0] - 2026-10-30
 
