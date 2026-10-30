@@ -10,7 +10,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py auth.py player.py store.py transport.py ./
+COPY *.py ./
 COPY static ./static
 COPY deploy/remote/backup.py ./
 
