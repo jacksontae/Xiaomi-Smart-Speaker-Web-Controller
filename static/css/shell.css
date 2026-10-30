@@ -138,3 +138,6 @@ button.spside:hover, .spside[aria-expanded="true"] { background: var(--glass-sof
   .page { max-width: 1200px; }
   .page.narrow { max-width: 680px; }
 }
+
+/* main#view has tabindex -1 so the router can move focus to it; never draw a ring across the page. */
+.main:focus-visible { outline: none; }
