@@ -2,7 +2,7 @@
 // progress (ticks locally between polls), transport, volume and the queue with shuffle/repeat.
 // Idle, offline and announcing states come from /status; owners also see the ESP32 relay's health when the
 // server reports `relay` (mqtt transport). There is no seek endpoint, so the progress bar is display only.
-import { h, icon, iconBtn, tip } from '../ui.js';
+import { h, icon, iconBtn, tip, busy } from '../ui.js';
 import { register, t, fmtDur, fmtRel } from '../i18n.js';
 import { speaker3d } from '../speaker3d.js';
 import { aicon } from '../a-icons.js';
@@ -140,8 +140,9 @@ export async function render(ctx) {
   const liveTag = h('p', { class: 'np-livetag', hidden: true }, h('span', { 'aria-hidden': 'true' }), t('now.live'));
 
   /* ----- transport ----- */
+  // busy while the command is on its way (a round trip through the tunnel, then the speaker): dimmed, no double taps
   const ctl = (name, label, fn, cls = '') => {
-    const b = h('button', { type: 'button', class: `np-b ${cls}`.trim(), 'aria-label': label, onclick: fn }, aicon(name, 'lg'));
+    const b = h('button', { type: 'button', class: `np-b ${cls}`.trim(), 'aria-label': label, onclick: () => busy(b, fn) }, aicon(name, 'lg'));
     tip(b, label);
     return b;
   };
@@ -210,7 +211,7 @@ export async function render(ctx) {
     const s = st && st.media && st.media.state;
     const playing = s === 'PLAYING' || s === 'BUFFERING';
     setPlayIcon(!playing); // answer the tap now; the next poll confirms
-    act(playing ? '/pause' : '/resume');
+    return act(playing ? '/pause' : '/resume');
   }
   function setPlayIcon(playing) {
     const label = t(playing ? 'now.pause' : 'now.play');

@@ -100,6 +100,29 @@ button.spside:hover, .spside[aria-expanded="true"] { background: var(--glass-sof
 .page.enter { animation: page-in var(--t-mid) var(--ease) both; }
 @keyframes page-in { from { opacity: 0; transform: translateY(8px); } }
 
+/* page still loading (app.js pending()): slim bar at the very top + the page header over placeholder rows.
+   Reduced motion: the bar stands still at full width and the rows don't pulse. */
+.navprog {
+  position: fixed; z-index: 90; inset: var(--safe-t) 0 auto 0; height: 3px; overflow: hidden; pointer-events: none;
+  opacity: 0; transition: opacity var(--t-fast) var(--ease);
+}
+.navprog.on { opacity: 1; }
+.navprog::before {
+  content: ""; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: 0 var(--pill) var(--pill) 0;
+  background: var(--accent); animation: navprog 1.1s var(--ease) infinite;
+}
+@keyframes navprog { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+:root[data-motion="reduce"] .navprog::before { width: 100%; opacity: .7; animation: none !important; }
+.skel { display: flex; flex-direction: column; gap: 10px; }
+.skel-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: var(--r-row); background: var(--glass-soft); }
+.skel-dot { flex: 0 0 auto; width: 36px; height: 36px; border-radius: var(--r-sm); background: var(--fill); }
+.skel-line { flex: 0 1 60%; height: 12px; border-radius: var(--pill); background: var(--fill); }
+.skel-row:nth-child(2) .skel-line { flex-basis: 45%; }
+.skel-row:nth-child(3) .skel-line { flex-basis: 70%; }
+.page-loading .skel { animation: skel 1.4s ease-in-out infinite; }
+@keyframes skel { 50% { opacity: .55; } }
+:root[data-motion="reduce"] .page-loading .skel { animation: none !important; }
+
 /* ======================= large screens ======================= */
 @media (min-width: 744px) {
   .topbar, .tabdock { display: none; }

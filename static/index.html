@@ -21,6 +21,14 @@
 <script src="/static/js/boot.js"></script>
 <title>Speaker</title>
 <script type="module" src="/static/js/app.js"></script>
+<!-- app.js's imports, fetched in parallel with it instead of after it (keep in sync with its import list) -->
+<link rel="modulepreload" href="/static/js/api.js">
+<link rel="modulepreload" href="/static/js/i18n.js">
+<link rel="modulepreload" href="/static/js/prefs.js">
+<link rel="modulepreload" href="/static/js/ui.js">
+<link rel="modulepreload" href="/static/js/sheet.js">
+<link rel="modulepreload" href="/static/js/shell.js">
+<link rel="modulepreload" href="/static/js/routes.js">
 </head>
 <body data-mood="idle">
 <!-- Icon sprite: 24px line icons, stroke 2, round caps (prototype boards). Use with ui.js icon('name'). -->

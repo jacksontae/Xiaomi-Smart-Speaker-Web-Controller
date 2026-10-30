@@ -14,9 +14,10 @@ register({
 });
 
 export async function render(ctx) {
-  await ctx.css('views/c-common.css');
+  const fresh = freshAuth(ctx); // ask the server while the stylesheet loads, not after
   ctx.css('views/prefs.css');
-  const auth = await freshAuth(ctx);
+  await ctx.css('views/c-common.css');
+  const auth = await fresh;
   if (!isPhone()) return large(ctx, auth, t('nav.prefs'));
   const user = { ...ctx.user, ...(auth.user || {}) };
   const admin = ctx.can('admin');
