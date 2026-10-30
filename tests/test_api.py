@@ -239,3 +239,12 @@ def test_signed_link_survives_url_encoding(anon, app, monkeypatch):
     monkeypatch.setattr(app.http, "get", fake_get)
     text = "a b&c=d+e/ไทย 100% ?#"
     assert anon.get(path_of(app.media_url("/tts.mp3", text=text, lang="th"))).status_code == 200
+
+
+def test_web_app_files_are_revalidated(anon):
+    """Modules keep their names across releases, so nothing may cache them without checking back."""
+    for path in ("/", "/static/js/app.js", "/static/css/base.css"):
+        r = anon.get(path)
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-cache", path
+    etag = anon.get("/static/js/app.js").headers["etag"]
+    assert anon.get("/static/js/app.js", headers={"If-None-Match": etag}).status_code == 304

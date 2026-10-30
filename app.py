@@ -2807,9 +2807,21 @@ async def talk_live(talk_id: str):
 
 # --- Web UI (public) ---
 
+# The web app is ES modules under fixed names, so browsers (and proxies such as Cloudflare, which add a long
+# max-age when none is set) must check back on every load; otherwise an update mixes old and new modules.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class RevalidatedStatic(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(NO_CACHE)
+        return response
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers=NO_CACHE)
 
 
 def static_root_file(name, media_type):
@@ -2827,7 +2839,7 @@ app.get("/manifest.webmanifest", include_in_schema=False)(
     static_root_file("manifest.webmanifest", "application/manifest+json")
 )
 app.get("/apple-touch-icon.png", include_in_schema=False)(static_root_file("apple-touch-icon.png", "image/png"))
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/static", RevalidatedStatic(directory=STATIC_DIR), name="static")
 
 for router in (viewer_api, operator_api, admin_api):
     app.include_router(router)
