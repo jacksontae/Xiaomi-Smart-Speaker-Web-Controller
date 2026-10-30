@@ -43,8 +43,12 @@ register({
     'auth.pkOn': 'On. Members add passkeys in Account and sign in with a fingerprint, face or device PIN.',
     'auth.pkOff': 'Off. Saved passkeys don\'t work until this is turned on again.',
     'auth.req': 'Require a passkey for owners',
-    'auth.reqOn': 'On. Owners who have a passkey can only sign in with it. Others still use a password or Google.',
-    'auth.reqOff': 'Off. Owners can also use a password or Google.',
+    'auth.reqOn': 'On. Owners who have a passkey can sign in ONLY with it: their password and Google sign-in are refused. Operators and viewers are not affected.',
+    'auth.reqOff': 'Off. When on, owners who have a passkey can sign in only with it (password and Google are refused).',
+    'auth.reqAsk': 'Require a passkey for owners?',
+    'auth.reqAskText': 'Owners who have a passkey will be able to sign in ONLY with it. Their password and Google sign-in will be refused, on every device. Make sure each owner can reach their passkey (phone or security key) first.',
+    'auth.reqAskSave': 'It takes effect when you save this page.',
+    'auth.reqYes': 'Require passkeys',
     'auth.reqNeedsPk': 'Turn on passkey sign-in first.',
     'auth.secure': (u) => `Passkeys work on ${u}. On other addresses, like the plain LAN address, the passkey button is hidden.`,
     'auth.insecure': 'Passkeys need a secure address: set public_base_url in config.json to an https:// address (for example https://speaker.example.com). Until then the passkey button stays hidden.',
@@ -86,8 +90,12 @@ register({
     'auth.pkOn': 'เปิดอยู่ สมาชิกเพิ่มพาสคีย์ได้ในหน้าบัญชี แล้วเข้าด้วยลายนิ้วมือ ใบหน้า หรือ PIN ของเครื่อง',
     'auth.pkOff': 'ปิดอยู่ พาสคีย์ที่บันทึกไว้จะใช้ไม่ได้จนกว่าจะเปิดอีกครั้ง',
     'auth.req': 'เจ้าของต้องใช้พาสคีย์',
-    'auth.reqOn': 'เปิดอยู่ เจ้าของที่มีพาสคีย์เข้าได้ด้วยพาสคีย์เท่านั้น คนอื่นยังใช้รหัสผ่านหรือ Google ได้',
-    'auth.reqOff': 'ปิดอยู่ เจ้าของใช้รหัสผ่านหรือ Google ได้ด้วย',
+    'auth.reqOn': 'เปิดอยู่ เจ้าของที่มีพาสคีย์เข้าสู่ระบบได้ด้วยพาสคีย์เท่านั้น ระบบจะไม่รับรหัสผ่านและ Google ของเจ้าของ ผู้ดูแลและผู้ชมไม่ได้รับผลกระทบ',
+    'auth.reqOff': 'ปิดอยู่ ถ้าเปิด เจ้าของที่มีพาสคีย์จะเข้าสู่ระบบได้ด้วยพาสคีย์เท่านั้น (ไม่รับรหัสผ่านและ Google)',
+    'auth.reqAsk': 'ให้เจ้าของต้องใช้พาสคีย์ไหม',
+    'auth.reqAskText': 'เจ้าของที่มีพาสคีย์จะเข้าสู่ระบบได้ด้วยพาสคีย์เท่านั้น ระบบจะไม่รับรหัสผ่านและ Google ของเจ้าของในทุกอุปกรณ์ ตรวจให้แน่ใจก่อนว่าเจ้าของทุกคนเข้าถึงพาสคีย์ของตัวเองได้ (มือถือหรือกุญแจความปลอดภัย)',
+    'auth.reqAskSave': 'มีผลเมื่อกดบันทึกหน้านี้',
+    'auth.reqYes': 'ต้องใช้พาสคีย์',
     'auth.reqNeedsPk': 'เปิดการเข้าสู่ระบบด้วยพาสคีย์ก่อน',
     'auth.secure': (u) => `พาสคีย์ใช้ได้ที่ ${u} ถ้าเปิดผ่านที่อยู่อื่น เช่นที่อยู่ในวงแลนแบบธรรมดา ปุ่มพาสคีย์จะไม่แสดง`,
     'auth.insecure': 'พาสคีย์ต้องใช้ที่อยู่แบบปลอดภัย ตั้ง public_base_url ใน config.json เป็นที่อยู่ https:// (เช่น https://speaker.example.com) ระหว่างนี้ปุ่มพาสคีย์จะไม่แสดง',
@@ -200,6 +208,10 @@ export function render(ctx) {
   const val = (k) => (k in draft ? draft[k] : saved[k]);
   function set(k, v) {
     if (JSON.stringify(v) === JSON.stringify(saved[k])) delete draft[k]; else draft[k] = v;
+    paintDirty();
+  }
+  // the draft is the source of truth for Save (busy() re-enables buttons when it finishes, so repaint after it)
+  function paintDirty() {
     const dirty = Object.keys(draft).length > 0;
     saveBtn.disabled = !dirty; bottomSave.disabled = !dirty; dirtyNote.hidden = !dirty;
   }
@@ -238,7 +250,12 @@ export function render(ctx) {
     const pkSub = h('span', {});
     const reqSub = h('span', {});
     const reqErr = h('span', { class: 'c-sub err', role: 'alert' });
-    const reqSw = switchInput(val('passkey_required_for_admins'), (on) => { set('passkey_required_for_admins', on); paintPk(); });
+    const reqSw = switchInput(val('passkey_required_for_admins'), (on) => {
+      if (!on) { set('passkey_required_for_admins', false); paintPk(); return; }
+      // turning it on locks owners out of password and Google: confirm first (the switch waits for the answer)
+      reqSw.checked = false;
+      confirmRequire(() => { reqSw.checked = true; set('passkey_required_for_admins', true); paintPk(); });
+    });
     const pkSw = switchInput(val('passkey_signin'), (on) => { set('passkey_signin', on); paintPk(); });
     const paintPk = () => {
       pkSub.textContent = pkSw.checked ? t('auth.pkOn') : t('auth.pkOff');
@@ -256,6 +273,17 @@ export function render(ctx) {
     const gCap = h('div', { class: 'infotip-row infotip-caprow' }, caption(t('auth.google')), gTip);
     left.replaceChildren(gCap, gCard, caption(t('auth.pw')), pwCard);
     right.replaceChildren(caption(t('auth.pk')), pkCard, caption(t('auth.who')), whoCard());
+  }
+
+  function confirmRequire(yes) {
+    ctx.sheet({
+      title: t('auth.reqAsk'),
+      build(body, sheet) {
+        body.append(h('p', {}, t('auth.reqAskText')), h('p', { class: 'small' }, t('auth.reqAskSave')),
+          h('button', { type: 'button', class: 'btn primary big wide', onclick: () => { sheet.close(); yes(); } }, t('auth.reqYes')),
+          h('button', { type: 'button', class: 'btn big wide', onclick: () => sheet.close() }, t('common.cancel')));
+      },
+    });
   }
 
   function whoCard() {
@@ -276,7 +304,6 @@ export function render(ctx) {
         const r = await ctx.api('/settings', { body });
         saved = r.settings;
         draft = {};
-        set('google_signin', saved.google_signin);
         toast(t('auth.saved'), 'ok');
         build();
       } catch (e) {
@@ -285,6 +312,7 @@ export function render(ctx) {
         err.textContent = msg;
       }
     }));
+    paintDirty();
   }
 
   Promise.all([ctx.api('/settings', { signal: ctx.signal }), ctx.api('/users', { signal: ctx.signal }).catch(() => [])])

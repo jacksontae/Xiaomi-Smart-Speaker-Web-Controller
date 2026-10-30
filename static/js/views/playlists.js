@@ -137,7 +137,10 @@ function listPage(ctx, selected) {
         upd();
         act.append(btn);
       } else {
-        act.append(roundBtn('plus', t('pl.addItemsTo', p.name), () => addItemSheet(ctx, p, load), 'tint'));
+        act.append(roundBtn('plus', t('pl.addItemsTo', p.name), () => addItemSheet(ctx, p, () => {
+          load();
+          if (detail && detail.id === p.id) detail.reload(); // the open desktop pane shows this playlist: refresh it
+        }), 'tint'));
       }
       row.append(act);
     }
@@ -543,7 +546,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
   node.append(spinnerLine(''));
   load();
   return {
-    id, node,
+    id, node, reload: reloadItems,
     onStatus(s) { status = s.status; if (p && metaEl && !dragging) paintControls(); },
     destroy() { ac.abort(); },
   };

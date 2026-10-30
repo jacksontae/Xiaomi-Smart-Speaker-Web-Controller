@@ -96,9 +96,14 @@ button.spside:hover, .spside[aria-expanded="true"] { background: var(--glass-sof
 .status-line { font-size: 14px; line-height: 1.5; color: var(--ink-2); }
 .status-line.off { color: var(--danger-ink); }
 
-/* ---------- route change ---------- */
-.page.enter { animation: page-in var(--t-mid) var(--ease) both; }
-@keyframes page-in { from { opacity: 0; transform: translateY(8px); } }
+/* ---------- route change ----------
+   app.js swaps pages inside a view transition: the old page crossfades into the new one (no blank frame), the page
+   header (view-transition-name: page-head, set by app.js) stays put and only its text fades. Reduce motion: none
+   (base.css). Without view transitions: a short fade that starts at 50%, no movement (nothing jumps). */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 160ms; animation-timing-function: var(--ease); }
+::view-transition-group(page-head), ::view-transition-old(page-head), ::view-transition-new(page-head) { animation-duration: 160ms; }
+.page.enter { animation: page-in 140ms var(--ease) both; }
+@keyframes page-in { from { opacity: .5; } }
 
 /* page still loading (app.js pending()): slim bar at the very top + the page header over placeholder rows.
    Reduced motion: the bar stands still at full width and the rows don't pulse. */
@@ -165,5 +170,11 @@ button.spside:hover, .spside[aria-expanded="true"] { background: var(--glass-sof
 /* main#view has tabindex -1 so the router can move focus to it; never draw a ring across the page. */
 .main:focus-visible { outline: none; }
 
-/* Header bars bleed past the column (.phd::before); clip, not hidden, so position: sticky keeps working. */
+/* Header bars bleed past the column (.phd::before); clip, not hidden, so position: sticky keeps working.
+   Safari before 16 has no clip: there the phone column (no sticky header inside it on phones) hides overflow. */
 html, body { overflow-x: clip; }
+@supports not (overflow-x: clip) {
+  @media (max-width: 743px) { .main { overflow-x: hidden; } }
+}
+/* long unbroken text (URLs, long Thai runs, names) wraps instead of widening the page */
+.page { min-width: 0; overflow-wrap: break-word; }

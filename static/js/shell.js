@@ -51,11 +51,18 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker }) {
   function accountItems(close = () => {}) {
     const item = (ic, label, props, cls = '') => h(props.href ? 'a' : 'button', { class: `mi ${cls}`.trim(), type: props.href ? null : 'button', ...props },
       h('span', { class: 'mic' }, icon(ic, 'xs')), h('span', {}, label));
+    // a link row: closing removes the popover (and the <a>) before the browser follows it, so navigate ourselves
+    const go = (to) => (e) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; // new tab/window: let the browser handle it
+      e.preventDefault();
+      close();
+      location.hash = to;
+    };
     const items = [
-      isPhone() ? null : item('user', t('nav.prefs'), { href: href('prefs'), onclick: () => close() }),
+      isPhone() ? null : item('user', t('nav.prefs'), { href: href('prefs'), onclick: go(href('prefs')) }),
       item('key', t('acct.changePw'), { onclick: () => { close(); changePassword(); } }),
       item('devices', t('acct.signOutAll'), { onclick: (e) => { close(); confirmSignOutAll(e.currentTarget); } }),
-      item('help', t('nav.help'), { href: href('help'), onclick: () => close() }),
+      item('help', t('nav.help'), { href: href('help'), onclick: go(href('help')) }),
       item('logout', t('acct.signOut'), { onclick: (e) => busy(e.currentTarget, () => onSignOut('/auth/logout')).catch(() => {}) }, 'danger'),
     ];
     return items;

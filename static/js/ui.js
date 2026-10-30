@@ -85,39 +85,63 @@ export async function busy(btn, fn) {
 }
 
 /* ---------- toast ---------- */
+const TOAST_MAX = 3;
 /**
  * toast('Announced', 'ok') — use when the effect happens elsewhere (on the speaker) or a page changes under you.
  * kind: 'info' | 'ok' | 'err'. action: { label, run } adds one button (e.g. Undo).
+ * Every toast goes away by itself (2-10 s), on a tap, or when newer ones push it out (TOAST_MAX on screen).
+ * While a sheet is open the toast host moves into that <dialog> (the modal top layer would otherwise cover it,
+ * dimmed and untappable); sheet.js moves it back to <body> when the sheet closes.
  */
 export function toast(msg, kind = 'info', { ms = 3800, action } = {}) {
   const box = document.getElementById('toasts');
+  const host = [...document.querySelectorAll('dialog.ov[open]:not(.closing)')].pop() || document.body;
+  if (box.parentNode !== host) host.append(box);
   const el = h('div', { class: `toast ${kind}`, role: kind === 'err' ? 'alert' : 'status' },
     icon(kind === 'err' ? 'info' : kind === 'ok' ? 'check' : 'speaker', 'sm'), h('span', {}, msg),
-    action ? h('button', { type: 'button', onclick: () => { action.run(); dismiss(); } }, action.label) : null);
+    action ? h('button', { type: 'button', onclick: (e) => { e.stopPropagation(); action.run(); dismiss(); } }, action.label) : null);
+  el.addEventListener('click', () => dismiss());
   box.append(el);
-  while (box.children.length > 3) box.firstChild.remove();
-  const timer = setTimeout(dismiss, kind === 'err' ? Math.max(ms, 5200) : ms);
+  while (box.children.length > TOAST_MAX) box.firstChild.remove();
+  const life = Math.min(Math.max(kind === 'err' ? 5200 : 2000, Number(ms) || 0), 10000);
+  const timer = setTimeout(dismiss, life);
+  let gone = false;
   function dismiss() {
+    if (gone) return;
+    gone = true;
     clearTimeout(timer);
     el.classList.add('out');
     setTimeout(() => el.remove(), motionReduced() ? 0 : 240);
   }
   return dismiss;
 }
+/** sheet.js calls this before a <dialog> is removed: the toast host must not leave the page with it. */
+export function rehomeToasts(dlg) {
+  const box = document.getElementById('toasts');
+  if (box && dlg.contains(box)) {
+    const next = [...document.querySelectorAll('dialog.ov[open]:not(.closing)')].filter((d) => d !== dlg).pop();
+    (next || document.body).append(box);
+  }
+}
 
 /* ---------- tooltip ---------- */
 let tipEl = null;
 let tipTimer = 0;
+let tipWatch = 0;
 /**
- * tip(el, 'Shuffle') shows a small label on hover (after 500 ms), keyboard focus, or long-press on touch.
+ * tip(el, 'Shuffle') shows a small label on mouse hover (after 500 ms) or keyboard focus. On touch there is no
+ * hover: the label shows only when its control is tapped (a long press used to open labels that stuck, because iOS
+ * sends pointercancel instead of pointerup). It hides on leave, blur, a mouse click, any other tap, scroll, Esc, a
+ * route change, after a few seconds, or when its control leaves the page (re-render).
  * For icon-only controls the text should equal the aria-label. Returns el.
  */
 export function tip(el, text) {
   el.dataset.tip = text;
   if (el.dataset.tipBound) return el;
   el.dataset.tipBound = '1';
-  const show = () => {
+  const show = (life = 6000) => {
     hideTip();
+    if (!el.isConnected) return;
     tipEl = h('div', { class: 'tip', role: 'tooltip' }, el.dataset.tip);
     document.body.append(tipEl);
     const r = el.getBoundingClientRect(), w = tipEl.offsetWidth, ht = tipEl.offsetHeight;
@@ -125,17 +149,27 @@ export function tip(el, text) {
     const top = r.top - ht - 8 > 8 ? r.top - ht - 8 : r.bottom + 8;
     tipEl.style.left = `${left}px`;
     tipEl.style.top = `${top}px`;
+    const born = Date.now();
+    tipWatch = setInterval(() => { if (!el.isConnected || Date.now() - born > life) hideTip(); }, 250);
   };
-  el.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') { clearTimeout(tipTimer); tipTimer = setTimeout(show, 500); } });
-  el.addEventListener('pointerleave', hideTip);
-  el.addEventListener('focus', () => { if (el.matches(':focus-visible')) show(); });
+  el.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') { clearTimeout(tipTimer); tipTimer = setTimeout(() => show(), 500); } });
+  el.addEventListener('focus', () => { if (el.matches(':focus-visible') && !touchLast) show(); });
+  el.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') hideTip(); });
   el.addEventListener('blur', hideTip);
-  el.addEventListener('click', hideTip);
-  el.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') { clearTimeout(tipTimer); tipTimer = setTimeout(show, 550); } });
-  el.addEventListener('pointerup', () => { clearTimeout(tipTimer); setTimeout(hideTip, 1200); });
+  el.addEventListener('click', () => { if (touchLast) show(3000); else hideTip(); });
   return el;
 }
-export function hideTip() { clearTimeout(tipTimer); if (tipEl) { tipEl.remove(); tipEl = null; } }
+export function hideTip() {
+  clearTimeout(tipTimer);
+  clearInterval(tipWatch);
+  if (tipEl) { tipEl.remove(); tipEl = null; }
+}
+// the last input was a touch: focus moved by a tap must not open a label
+let touchLast = false;
+addEventListener('pointerdown', (e) => { touchLast = e.pointerType !== 'mouse'; if (tipEl) hideTip(); }, true);
+addEventListener('keydown', (e) => { touchLast = false; if (e.key === 'Escape' && tipEl) hideTip(); }, true);
+addEventListener('scroll', () => { if (tipEl) hideTip(); }, { capture: true, passive: true });
+addEventListener('hashchange', hideTip);
 
 /** Link to a Help topic: helpLink('passkey', t('login.pkWhy')) -> <a href="#/help/passkey">. */
 export function helpLink(topic, label) {

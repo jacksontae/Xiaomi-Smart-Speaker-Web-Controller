@@ -8,10 +8,11 @@ import { register, t, locale } from '../i18n.js';
 import { errorText } from '../api.js';
 import { bicon } from '../teamb-icons.js';
 import { errBox, note, spinnerLine, playlistMeta, TTS_LANGS, langNative } from '../teamb-common.js';
+import { modeSwitch } from '../a-modeswitch.js';
 
 register({
   en: {
-    'sched.title': 'Schedule', 'sched.mode': 'Announce mode', 'sched.annNow': 'Announce now', 'sched.schedule': 'Schedule',
+    'sched.title': 'Schedule',
     'sched.clock': (tm, zone) => `Speaker time now ${tm} (${zone})`, 'sched.new': 'New schedule', 'sched.edit': 'Edit schedule',
     'sched.list': 'Scheduled announcements', 'sched.none': 'Nothing scheduled yet.',
     'sched.noneOp': 'Nothing scheduled yet. Set an announcement for opening time, or a playlist for lunch.',
@@ -48,7 +49,7 @@ register({
     'sched.listSep': ', ',
   },
   th: {
-    'sched.title': 'ตั้งเวลา', 'sched.mode': 'โหมดประกาศ', 'sched.annNow': 'ประกาศเลย', 'sched.schedule': 'ตั้งเวลา',
+    'sched.title': 'ตั้งเวลา',
     'sched.clock': (tm, zone) => `เวลาของลำโพงตอนนี้ ${tm} น. (${zone})`, 'sched.new': 'ตั้งเวลาใหม่', 'sched.edit': 'แก้ไขเวลา',
     'sched.list': 'รายการตั้งเวลา', 'sched.none': 'ยังไม่มีรายการตั้งเวลา',
     'sched.noneOp': 'ยังไม่มีรายการตั้งเวลา ลองตั้งประกาศตอนเปิดร้าน หรือเพลย์ลิสต์ช่วงพักเที่ยง',
@@ -111,24 +112,20 @@ function zoneName(tz) {
 }
 
 export async function render(ctx) {
-  await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/schedule.css')]);
+  await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/schedule.css'), ctx.css('views/a-modeswitch.css')]);
   const op = ctx.can('operator');
   const desk = isDesk();
   let data = null, playlists = [], offset = 0, selected = null; // selected: schedule id | 'new' (desktop)
   const now = () => Date.now() + offset;
 
-  const mode = (cls) => segmented({
-    label: t('sched.mode'), cls: `sc-mode ${cls}`, value: 'schedule',
-    options: [{ value: 'now', label: t('sched.annNow') }, { value: 'schedule', label: t('sched.schedule') }],
-    onChange: (v) => { if (v === 'now') ctx.go('#/announce'); },
-  });
+  const sw = modeSwitch(ctx, { current: 'schedule' }); // same switch as Announce: picking another mode goes there
   const clock = h('p', { class: 'small sc-clock' });
   const newBtn = op ? h('button', { type: 'button', class: 'btn primary', onclick: () => openEditor(null) }, icon('plus', 'sm'), t('sched.new')) : null;
   const listEl = h('div', { class: 'sc-list', 'aria-label': t('sched.list') });
   const pane = h('div', { class: 'sc-pane glass' });
   const node = h('div', { class: `page sc${desk ? ' sc-desk' : ''}` },
-    ctx.header({ title: t('nav.announce'), actions: mode('sc-mode-lg') }),
-    mode('sc-mode-ph'),
+    ctx.header({ title: t('nav.announce'), actions: sw.headActs }),
+    sw.slot,
     h('div', { class: 'sc-bar' }, clock, newBtn),
     desk ? h('div', { class: 'sc-split' }, listEl, pane) : listEl);
 
@@ -289,7 +286,8 @@ export async function render(ctx) {
     const dateRow = field(t('sched.date'), date);
     const summary = h('p', { class: 'small sc-summary', 'aria-live': 'polite' });
     const presetBtn = (key, label) => h('button', { type: 'button', class: 'tb-chip', dataset: { k: key }, onclick: () => {
-      if (key === 'once') once = true; else { once = false; f.days = [...PRESETS[key]]; }
+      // Once: the date field already shows a day (today for a repeating schedule); make that the chosen date
+      if (key === 'once') { once = true; f.date = f.date || date.value || today; } else { once = false; f.days = [...PRESETS[key]]; }
       touch(); paintRepeat();
     } }, label);
     presets.append(presetBtn('every', t('sched.every')), presetBtn('wk', t('sched.wk')), presetBtn('we', t('sched.we')), presetBtn('once', t('sched.once')));

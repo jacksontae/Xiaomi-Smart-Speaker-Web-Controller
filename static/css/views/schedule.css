@@ -1,5 +1,4 @@
 /* Schedule (boards T_Schedule / D_Schedule; the iPhone Announce board's Schedule mode). Shared rows: teamb.css. */
-.sc-mode-lg { display: none; }
 .sc-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; }
 .sc-list { display: flex; flex-direction: column; gap: 18px; }
 .sc-group { display: flex; flex-direction: column; gap: 8px; }
@@ -43,12 +42,9 @@
 .sc-sheet .sheet { height: calc(100% - 40px - var(--safe-t)); }
 
 @media (min-width: 744px) {
-  .sc-mode-ph { align-self: flex-start; min-width: 320px; }
   .sc-sheet .sheet { width: min(560px, calc(100% - 48px)); height: min(860px, calc(100% - 48px)); }
 }
 @media (min-width: 1280px) {
-  .sc-mode-ph { display: none; }
-  .sc-mode-lg { display: grid; min-width: 280px; }
   .sc-split { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 20px; align-items: start; }
   .sc-pane { position: sticky; top: 100px; max-height: calc(100vh - 124px); overflow-y: auto; padding: 20px 22px 24px; border-radius: var(--r-xl); }
   .sc-ph h2 { margin-bottom: 14px; font-size: 18px; font-weight: 700; }

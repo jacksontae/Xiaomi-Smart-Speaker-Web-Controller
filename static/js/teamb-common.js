@@ -13,13 +13,14 @@ register({
     'tb.kind.podcast': 'Podcast episode', 'tb.kind.file': 'My file', 'tb.kind.tts': (l) => `Announcement in ${l}`,
     'tb.lang.th': 'Thai', 'tb.lang.en': 'English', 'tb.lang.ja': 'Japanese',
     'tb.items': (n, m) => (n === 1 ? `1 item${m ? `, ${m} min` : ''}` : `${n} items${m ? `, ${m} min` : ''}`),
-    'tb.msgs': (n, m) => (n === 1 ? `1 message${m ? `, ${m} min` : ''}` : `${n} messages${m ? `, ${m} min` : ''}`),
     'tb.empty': 'Empty',
     'tb.playOn': (x) => `Play ${x} on the speaker`, 'tb.stopX': (x) => `Stop ${x}`, 'tb.loadingX': (x) => `Loading ${x}`,
     'tb.loading': 'Loading on the speaker…', 'tb.playing': 'Playing on the speaker', 'tb.live': 'Live on the speaker',
     'tb.stopped': 'Speaker stopped', 'tb.nowPlaying': (x) => `Speaker is playing ${x}`,
     'tb.addToPl': 'Add to playlist', 'tb.addX': (x) => `Add ${x} to a playlist`, 'tb.addedTo': (p) => `Added to ${p}`,
     'tb.newPl': 'New playlist', 'tb.plName': 'Playlist name', 'tb.namePh': 'e.g. Afternoon music',
+    'tb.ytGone': 'YouTube couldn\'t find that video. It may be private or removed.',
+    'tb.fileGone': 'That file isn\'t in My files any more.',
     'tb.nameErr': 'Give it a name first.', 'tb.create': 'Create', 'tb.createAdd': 'Create and add',
     'tb.noPl': 'No playlists yet. Name one below and the item goes straight in.',
     'tb.undo': 'Undo', 'tb.retry': 'Try again', 'tb.search': 'Search',
@@ -54,13 +55,14 @@ register({
     'tb.kind.podcast': 'ตอนพอดแคสต์', 'tb.kind.file': 'ไฟล์ของฉัน', 'tb.kind.tts': (l) => `ประกาศ ${l}`,
     'tb.lang.th': 'ภาษาไทย', 'tb.lang.en': 'ภาษาอังกฤษ', 'tb.lang.ja': 'ภาษาญี่ปุ่น',
     'tb.items': (n, m) => `${n} รายการ${m ? ` รวม ${m} นาที` : ''}`,
-    'tb.msgs': (n, m) => `${n} ข้อความ${m ? ` รวม ${m} นาที` : ''}`,
     'tb.empty': 'ยังว่าง',
     'tb.playOn': (x) => `เล่น ${x} ที่ลำโพง`, 'tb.stopX': (x) => `หยุดเล่น ${x}`, 'tb.loadingX': (x) => `กำลังโหลด ${x}`,
     'tb.loading': 'กำลังโหลดลงลำโพง…', 'tb.playing': 'กำลังเล่นที่ลำโพง', 'tb.live': 'กำลังถ่ายทอดสดที่ลำโพง',
     'tb.stopped': 'ลำโพงหยุดเล่นแล้ว', 'tb.nowPlaying': (x) => `ลำโพงกำลังเล่น ${x}`,
     'tb.addToPl': 'เพิ่มเข้าเพลย์ลิสต์', 'tb.addX': (x) => `เพิ่ม ${x} เข้าเพลย์ลิสต์`, 'tb.addedTo': (p) => `เพิ่มเข้า ${p} แล้ว`,
     'tb.newPl': 'เพลย์ลิสต์ใหม่', 'tb.plName': 'ชื่อเพลย์ลิสต์', 'tb.namePh': 'เช่น เพลงช่วงบ่าย',
+    'tb.ytGone': 'ไม่พบวิดีโอนี้บน YouTube อาจถูกตั้งเป็นส่วนตัวหรือถูกลบไปแล้ว',
+    'tb.fileGone': 'ไฟล์นี้ไม่อยู่ในไฟล์ของฉันแล้ว',
     'tb.nameErr': 'ตั้งชื่อก่อนสร้าง', 'tb.create': 'สร้าง', 'tb.createAdd': 'สร้างแล้วเพิ่ม',
     'tb.noPl': 'ยังไม่มีเพลย์ลิสต์ ตั้งชื่อด้านล่าง แล้วรายการนี้จะถูกเพิ่มเข้าไปเลย',
     'tb.undo': 'เลิกทำ', 'tb.retry': 'ลองอีกครั้ง', 'tb.search': 'ค้นหา',
@@ -102,8 +104,8 @@ export function playlistMeta(p) {
   const n = p.item_count ?? (p.items || []).length;
   if (!n) return t('tb.empty');
   const total = p.total_duration ?? (p.items || []).reduce((s, i) => s + (i.duration || 0), 0);
-  const allTts = p.items ? p.items.every((i) => i.kind === 'tts') : false;
-  return t(allTts ? 'tb.msgs' : 'tb.items', n, minutes(total));
+  // always "items": the list summary doesn't know the kinds, and list row and detail must read the same
+  return t('tb.items', n, minutes(total));
 }
 export function kindSub(item) {
   return item.kind === 'tts' ? t('tb.kind.tts', langName(item.lang)) : t(`tb.kind.${item.kind}`);
@@ -178,6 +180,13 @@ export function sourceError(e, user, what) {
   const map = { radio: 'tb.errRadio', podcast: 'tb.errPod', feed: 'tb.errFeed' };
   if (what === 'feed' && e && e.status === 400 && /public internet|private/i.test(e.detail || '')) return t('tb.errFeedLocal');
   if (e && e.status === 502 && map[what]) return t(map[what]);
+  return errorText(e, user);
+}
+
+/** Error text for a refused playlist-item add: a 404 about the item's source says what is missing. */
+export function itemError(e, user) {
+  if (e && e.status === 404 && /youtube/i.test(e.detail || '')) return t('tb.ytGone');
+  if (e && e.status === 404 && /file/i.test(e.detail || '')) return t('tb.fileGone');
   return errorText(e, user);
 }
 
@@ -305,19 +314,31 @@ export function pickPlaylist(ctx, item) {
       body.append(h('p', { class: 'tb-note tb-clip' }, item.title || ''), list, err);
       const name = h('input', { class: 'input', placeholder: t('tb.namePh'), maxLength: 100, enterKeyHint: 'done' });
       const create = h('button', { type: 'submit', class: 'btn tonal' }, icon('plus', 'sm'), t('tb.createAdd'));
+      let made = null; // playlist created by "Create and add" whose item add hasn't succeeded yet
       const form = h('form', {
         class: 'tb-newpl', novalidate: true,
         onsubmit: (e) => {
           e.preventDefault();
           if (!name.value.trim()) { name.setAttribute('aria-invalid', 'true'); err.textContent = t('tb.nameErr'); name.focus(); return; }
           name.removeAttribute('aria-invalid');
+          err.textContent = '';
           busy(create, async () => {
+            const wanted = name.value.trim();
+            // a playlist left over from a failed try (its clean-up failed too) is reused, never created twice
             try {
-              const p = await ctx.api('/playlists', { body: { name: name.value.trim() } });
-              await ctx.api(`/playlists/${p.id}/items`, { body: item });
+              if (!made) made = await ctx.api('/playlists', { body: { name: wanted } });
+              else if (made.name !== wanted) made = await ctx.api(`/playlists/${made.id}`, { method: 'PATCH', body: { name: wanted } });
+            } catch (e2) { err.textContent = errorText(e2, ctx.user); return; }
+            try {
+              await ctx.api(`/playlists/${made.id}/items`, { body: item });
               sheet.close();
-              ctx.toast(t('tb.addedTo', p.name), 'ok');
-            } catch (e2) { err.textContent = errorText(e2, ctx.user); }
+              ctx.toast(t('tb.addedTo', made.name), 'ok');
+              made = null;
+            } catch (e2) {
+              err.textContent = itemError(e2, ctx.user);
+              // don't leave an empty playlist behind
+              try { await ctx.api(`/playlists/${made.id}`, { method: 'DELETE' }); made = null; } catch { /* reused on retry */ }
+            }
           });
         },
       }, field(t('tb.newPl'), name), create);
@@ -334,7 +355,7 @@ export function pickPlaylist(ctx, item) {
                 await ctx.api(`/playlists/${p.id}/items`, { body: item });
                 sheet.close();
                 ctx.toast(t('tb.addedTo', p.name), 'ok');
-              } catch (e) { err.textContent = errorText(e, ctx.user); }
+              } catch (e) { err.textContent = itemError(e, ctx.user); }
             }),
           }, thumb('playlist'), h('span', { class: 'tb-tx' }, h('span', { class: 'tb-t' }, p.name), h('span', { class: 'tb-s' }, playlistMeta(p))), icon('plus', 'sm tb-pick-ic'));
           list.append(row);
@@ -536,7 +557,7 @@ export function addItemSheet(ctx, playlist, onChange) {
                   url.value = ''; name.value = '';
                   err.textContent = '';
                   ctx.toast(t('add.linkAdded'), 'ok');
-                } catch (e2) { err.textContent = errorText(e2, ctx.user); }
+                } catch (e2) { err.textContent = itemError(e2, ctx.user); }
               });
             },
           }, urlF, field(t('add.displayName'), name), err, btn);

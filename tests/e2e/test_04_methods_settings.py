@@ -62,8 +62,20 @@ def test_signin_methods_google_and_passkey_switches(make_app, seeded):
         save.click()
         app.toast("Sign-in methods saved")
         assert auth_state()["methods"]["passkey"] is True
+        expect(req.locator("xpath=..")).to_contain_text("can sign in only with it (password and Google are refused)")
+        # turning it on asks first: Cancel leaves it off, confirming switches it on (saved with the page)
+        req.click()
+        sheet = app.sheet()
+        expect(sheet).to_contain_text("will be able to sign in ONLY with it")
+        sheet.get_by_role("button", name="Cancel").click()
+        app.no_sheet()
+        expect(req).not_to_be_checked()
+        req.click()
+        app.sheet().get_by_role("button", name="Require passkeys").click()
+        app.no_sheet()
+        expect(req).to_be_checked()
+        expect(req.locator("xpath=..")).to_contain_text("can sign in ONLY with it")
         # require passkeys while the owner has none: refused with the owner's name
-        req.check()
         save.click()
         expect(p.locator("#view .page > p.form-error")).to_contain_text(
             "Every owner needs a passkey first. Still missing: Olivia Owner")

@@ -36,6 +36,7 @@ is installed.
 | `test_10_help.py` | search, deep links, Try it per role |
 | `test_11_roles_matrix.py` | every page × role × device, forbidden pages, API role gating |
 | `test_12_network.py` | aborted requests: list load, write, boot, blocked page script, status, inline save |
+| `test_13_phone_app.py` | phone feels like an app: no zoom (viewport, 16 px fields, iOS gestures), no sideways scroll under stress (320/390 px, long text, toasts, sheets, animations), toasts always go away, touch tooltips open on tap only, same Announce mode switch on Announce and Schedule, no blank frame on page change |
 
 ## Run it
 

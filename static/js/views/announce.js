@@ -2,16 +2,16 @@
 // volume and quick phrases) and "Talk live" (browser mic streamed to the speaker, see ../a-talk.js).
 // "Schedule" is a link to #/schedule (its own page). #/announce/talk opens Talk live directly.
 // Talk live only shows when the server offers it (GET /talk/status -> { available: true }) and for operators.
-import { h, icon, iconBtn, field, segmented, busy, tip } from '../ui.js';
+import { h, icon, iconBtn, field, segmented, busy } from '../ui.js';
 import { register, t, lang as appLang } from '../i18n.js';
 import { isPhone } from '../sheet.js';
 import { aicon } from '../a-icons.js';
 import { liveTalk, micPermission, askMic, micAllowedHere } from '../a-talk.js';
+import { modeSwitch } from '../a-modeswitch.js';
 
 register({
   en: {
-    'ann.modeAria': 'Announce mode',
-    'ann.now': 'Announce now', 'ann.talk': 'Talk live', 'ann.schedule': 'Schedule',
+    'ann.talk': 'Talk live',
     'ann.textLabel': 'Text to announce',
     'ann.textPh': 'Type a message, e.g. Meeting in 5 minutes, please come to the main room',
     'ann.textPhShort': 'Type a message, e.g. Meeting in 5 minutes',
@@ -80,8 +80,7 @@ register({
     'talk.micAllowed': 'Microphone allowed. Hold the button to talk.',
   },
   th: {
-    'ann.modeAria': 'โหมดประกาศ',
-    'ann.now': 'ประกาศเลย', 'ann.talk': 'พูดสด', 'ann.schedule': 'ตั้งเวลา',
+    'ann.talk': 'พูดสด',
     'ann.textLabel': 'ข้อความที่จะประกาศ',
     'ann.textPh': 'พิมพ์ข้อความ เช่น ประชุมใน 5 นาที เชิญที่ห้องประชุมใหญ่',
     'ann.textPhShort': 'พิมพ์ข้อความ เช่น ประชุมใน 5 นาที',
@@ -165,46 +164,29 @@ const coarse = () => matchMedia('(pointer: coarse)').matches;
 const isIos = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
 export async function render(ctx) {
-  await ctx.css('views/announce.css');
+  await Promise.all([ctx.css('views/announce.css'), ctx.css('views/a-modeswitch.css')]);
   const op = ctx.can('operator');
   let mode = 'say';
   let talkAvail = false;
   let talkInfo = null; // GET /talk/status body
 
-  /* ---------- mode switch: Announce now | Talk live | Schedule (link) ---------- */
-  const segThumb = h('span', { class: 'seg-thumb', 'aria-hidden': 'true' });
-  const segSay = h('button', { type: 'button', role: 'tab', onclick: () => setMode('say') }, t('ann.now'));
-  const segTalk = h('button', { type: 'button', role: 'tab', hidden: true, onclick: () => setMode('talk') }, t('ann.talk'));
-  const segSched = h('a', { class: 'ann-seglink', href: '#/schedule' }, t('ann.schedule'));
-  const seg = h('div', { class: 'seg ann-seg', role: 'tablist', 'aria-label': t('ann.modeAria') }, segThumb, segSay, segTalk, segSched);
-  seg.addEventListener('keydown', (e) => {
-    const tabs = [segSay, segTalk].filter((b) => !b.hidden);
-    const i = tabs.indexOf(document.activeElement);
-    const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
-    if (i < 0 || !step || tabs.length < 2) return;
-    e.preventDefault();
-    const n = tabs[(i + step + tabs.length) % tabs.length];
-    n.focus(); n.click();
+  /* ---------- mode switch: Announce now | Talk live | Schedule (shared with the Schedule page) ---------- */
+  const sw = modeSwitch(ctx, {
+    current: 'say',
+    onPick: (m) => { if (m === 'schedule') return false; setMode(m); return true; },
+    onTalk: (info) => {
+      talkInfo = info;
+      talkAvail = sw.talkAvailable();
+      if (talkAvail && ctx.params[0] === 'talk' && mode !== 'talk') setMode('talk');
+      if (!talkAvail && mode === 'talk') setMode('say');
+      if (talkUi) talkUi.repaint();
+    },
   });
-  function placeThumb(animate) {
-    const b = mode === 'talk' ? segTalk : segSay;
-    segThumb.classList.toggle('no-anim', !animate);
-    segThumb.style.width = `${b.offsetWidth}px`;
-    segThumb.style.setProperty('--x', `${b.offsetLeft}px`);
-  }
-  new ResizeObserver(() => placeThumb(false)).observe(seg);
-
-  const headActs = h('div', { class: 'ann-headacts' });
-  const segSlot = h('div', { class: 'ann-segslot' });
-  const placeSeg = () => { (wideMq.matches ? headActs : segSlot).append(seg); requestAnimationFrame(() => placeThumb(false)); };
-  wideMq.addEventListener('change', placeSeg);
-  ctx.onCleanup(() => wideMq.removeEventListener('change', placeSeg));
 
   const mainCol = h('div', { class: 'ann-main' });
   const sideCol = h('div', { class: 'ann-side' });
-  const node = h('div', { class: 'page ann-page' }, ctx.header({ title: t('nav.announce'), actions: headActs }), segSlot,
+  const node = h('div', { class: 'page ann-page' }, ctx.header({ title: t('nav.announce'), actions: sw.headActs }), sw.slot,
     h('div', { class: 'ann-grid' }, mainCol, sideCol));
-  placeSeg();
 
   /* ================= Announce now ================= */
   const say = buildSay();
@@ -228,6 +210,7 @@ export async function render(ctx) {
     function setVol(v) {
       vol = v;
       volReset.hidden = v == null;
+      volHint.hidden = v == null;
       volOut.textContent = v == null ? t('ann.volCurrent') : `${v}%`;
       const shown = v == null ? Math.round(((ctx.status && ctx.status.volume) || 0.5) * 100) : v;
       volIn.value = String(shown);
@@ -237,7 +220,9 @@ export async function render(ctx) {
     }
     volIn.addEventListener('input', () => setVol(+volIn.value));
     const volRow = h('div', { class: 'ann-vol' }, h('span', { class: 'ann-vollbl', 'aria-hidden': 'true' }, aicon('vol-low', 'sm'), t('ann.volume')), volIn, volOut, volReset);
-    tip(volRow, t('ann.volHint'));
+    // the hint is page text (shown once a volume is picked), not a hover label: touch has no hover
+    const volHint = h('p', { class: 'small ann-volhint', id: `avh${Date.now().toString(36)}`, hidden: true }, t('ann.volHint'));
+    volIn.setAttribute('aria-describedby', volHint.id);
     setVol(null);
 
     text.addEventListener('input', () => {
@@ -263,7 +248,7 @@ export async function render(ctx) {
     },
     field(t('ann.textLabel'), text), err,
     h('div', { class: 'ann-foot' }, langSeg, count, btn),
-    volRow);
+    volRow, volHint);
     return { form, lang: () => lng, volume: () => (vol == null ? null : vol / 100), setLangFromStatus(l) { if (!read(LANG_KEY) && l && opts.some((o) => o.value === l)) { lng = l; langSeg.setValue(l); } } };
   }
 
@@ -599,11 +584,7 @@ export async function render(ctx) {
     if (m === 'talk' && !talkAvail) m = 'say';
     if (mode === 'talk' && m !== 'talk' && talkUi) talkUi.stopIfActive();
     mode = m;
-    segSay.setAttribute('aria-selected', String(m === 'say'));
-    segTalk.setAttribute('aria-selected', String(m === 'talk'));
-    segSay.tabIndex = m === 'say' ? 0 : -1;
-    segTalk.tabIndex = m === 'talk' ? 0 : -1;
-    placeThumb(true);
+    sw.set(m);
     if (m === 'talk') {
       if (!talkUi) talkUi = buildTalk();
       mainCol.replaceChildren(talkUi.card);
@@ -618,20 +599,10 @@ export async function render(ctx) {
   }
   setMode('say');
 
-  // Talk live: only when the server offers it, and only for operators (the socket refuses viewers)
-  if (op) {
-    ctx.api('/talk/status', { signal: ctx.signal }).then((r) => {
-      talkInfo = r || {};
-      talkAvail = !!(r && r.available);
-      segTalk.hidden = !talkAvail;
-      seg.classList.toggle('two', !talkAvail);
-      if (talkAvail && ctx.params[0] === 'talk') setMode('talk');
-      requestAnimationFrame(() => placeThumb(false));
-    }).catch(() => { seg.classList.add('two'); });
-    if (ctx.can('admin') && !micAllowedHere()) {
-      ctx.api('/settings', { signal: ctx.signal }).then((s) => { secureUrl.fromSettings = s && s.public_base_url; if (talkUi) talkUi.repaint(); }).catch(() => {});
-    }
-  } else seg.classList.add('two');
+  // Talk live: the switch asks /talk/status (operators only: the socket refuses viewers) and calls onTalk
+  if (op && ctx.can('admin') && !micAllowedHere()) {
+    ctx.api('/settings', { signal: ctx.signal }).then((st) => { secureUrl.fromSettings = st && st.public_base_url; if (talkUi) talkUi.repaint(); }).catch(() => {});
+  }
 
   return {
     node,
