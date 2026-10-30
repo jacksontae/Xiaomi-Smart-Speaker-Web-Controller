@@ -115,6 +115,63 @@ def test_phone_picker_and_viewer(make_app, seeded):
     app.clean("phone picker")
 
     viewer = make_app("viewer", "phone")
-    expect(viewer.page.locator(".topbar [data-spk='chip']")).to_be_visible()
-    assert viewer.page.locator(".spi[data-out='device']").count() == 0
+    viewer.page.locator(".topbar [data-spk='chip']").click()
+    sheet = viewer.sheet()
+    expect(sheet.locator(".spi[data-out='device']")).to_contain_text("This device")  # viewers may play here too
+    viewer.page.keyboard.press("Escape")
     viewer.clean("viewer")
+
+
+def device_plays(p):
+    p.wait_for_function("() => { const a = document.getElementById('local-audio');"
+                        " return a && !a.paused && a.currentTime > 0.3; }", timeout=15_000)
+
+
+def test_viewer_plays_on_this_device_and_it_is_logged_once(make_app, seeded, api):
+    """A viewer can't touch the speaker, but may play a playlist on their own device; the owner's Activity
+    gets one entry for it (not one per track, seek or resolve)."""
+    pid = tts_playlist(api, "Viewer device")
+    before = {e["id"] for e in api.get("/activity")}
+    app = make_app("viewer", "desktop")
+    seen = watch(app)
+    p = app.page
+    pick(app, "device")
+    app.go(f"playlists/{pid}")
+    play = p.locator("#view .pl-play")
+    expect(play).to_be_visible()
+    expect(p.locator("#view .pl-links")).to_have_count(0)  # still no editing for viewers
+    play.click()
+    device_plays(p)
+    assert ("POST", f"/playlists/{pid}/play") not in seen["calls"]
+    app.go("")
+    bar = p.locator(".np-bar")
+    bar.focus()
+    p.keyboard.press("Home")  # a seek is not a new play
+    p.wait_for_function("() => document.getElementById('local-audio').currentTime < 1.5")
+    p.wait_for_timeout(500)
+    new = [e for e in api.get("/activity") if e["id"] not in before and e["action"] != "login ok"]
+    assert [(e["action"], e["detail"]) for e in new] == [("device play", "Viewer device")], new
+    assert seen["calls"].count(("POST", "/local/played")) == 1
+    app.clean("viewer device")
+
+
+def test_stream_the_browser_cant_play_goes_through_the_relay(make_app, seeded):
+    """A type this browser reports it can't play: the player asks the server's relay (/local/stream) instead of
+    the station's own link. The relay itself is covered by tests/test_local.py (no internet here)."""
+    app = make_app("operator", "desktop")
+    p = app.page
+    wav = tone_wav()
+    relayed, direct = [], []
+    p.route(re.compile(r".*/local/stream\?.*"), lambda r: (relayed.append(r.request.url),
+                                                         r.fulfill(status=200, content_type="audio/wav", body=wav)))
+    p.route("https://radio.example.com/**", lambda r: (direct.append(r.request.url), r.abort()))
+    pick(app, "device")
+    p.evaluate("""async () => {
+      const src = document.querySelector('script[src*="app.js"]').src;
+      const m = await import(src.replace('app.js', 'local-player.js'));
+      await m.playItem({ kind: 'radio', source: 'https://radio.example.com/live', title: 'Test FM',
+                         content_type: 'audio/x-not-a-real-codec' });
+    }""")
+    device_plays(p)
+    assert relayed and "sig=" in relayed[0] and not direct
+    app.clean("relay")
