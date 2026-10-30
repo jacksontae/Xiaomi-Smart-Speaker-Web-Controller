@@ -117,11 +117,11 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker }) {
     let node;
     if (kind === 'side') {
       node = h(many ? 'button' : 'div', { class: 'spside', ...props },
-        h('span', { class: 'splogo', 'aria-hidden': 'true' }, icon('now')),
+        h('span', { class: 'splogo', 'aria-hidden': 'true' }, icon(cur.icon || 'now')),
         h('span', { class: 'spsidetx' }, h('span', { class: 'spbrand' }, t('spk.label')), h('span', { class: 'spname' }, nameEls)),
         many ? icon('chev-down', 'sm spchev') : null);
     } else {
-      node = h(many ? 'button' : 'div', { class: 'spchip', ...props }, icon('speaker', 'sm'), nameEls, many ? icon('chev-down', 'sm spchev') : null);
+      node = h(many ? 'button' : 'div', { class: 'spchip', ...props }, icon(cur.icon || 'speaker', 'sm'), nameEls, many ? icon('chev-down', 'sm spchev') : null);
     }
     if (many) node.addEventListener('click', () => openPicker(node, kind === 'side' ? 'right' : 'below'));
     node.dataset.spk = kind;
@@ -130,15 +130,18 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker }) {
   function pickerRows(close) {
     return h('div', { role: 'listbox', 'aria-label': t('spk.pick'), class: 'menu' }, speakers.map((s) => {
       const row = h('button', {
-        type: 'button', class: 'spi', role: 'option', 'aria-selected': String(!!s.current), 'aria-disabled': String(!s.online),
+        type: 'button', class: 'spi', role: 'option', 'aria-selected': String(!!s.current), 'aria-disabled': String(!s.online && !s.selectable),
+        dataset: { out: s.id || '' },
         onclick: () => {
-          if (!s.online) { row.querySelector('.spis').textContent = t('spk.why'); return; }
+          // offline speakers can't be picked, except to switch this browser back from "This device"
+          if (!s.online && !s.selectable) { row.querySelector('.spis').textContent = t('spk.why'); return; }
           close();
           if (!s.current && onPickSpeaker) onPickSpeaker(s);
         },
-      }, h('span', { class: 'spic', 'aria-hidden': 'true' }, icon('speaker', 'sm')),
-      h('span', { class: 'spitx' }, h('span', { class: 'spit' }, s.name), h('span', { class: 'spis' }, s.sub || '')),
-      s.current ? icon('check', 'sm ck') : h('span', { class: 'spst', style: s.online ? null : { color: 'var(--danger)' } }, t(s.online ? 'spk.online' : 'spk.offline')));
+      }, h('span', { class: 'spic', 'aria-hidden': 'true' }, icon(s.icon || 'speaker', 'sm')),
+      h('span', { class: 'spitx' }, h('span', { class: 'spit' }, s.name || t('spk.unknown')), h('span', { class: 'spis' }, s.sub || '')),
+      s.current ? icon('check', 'sm ck') : s.id === 'device' ? null // this device is always there: no Online/Offline
+        : h('span', { class: 'spst', style: s.online ? null : { color: 'var(--danger)' } }, t(s.online ? 'spk.online' : 'spk.offline')));
       return row;
     }));
   }

@@ -165,6 +165,9 @@ body[data-mood="off"] .ambient::before, body[data-mood="off"] .ambient::after { 
 .row + .row { border-top: 1px solid var(--line); }
 .muted { color: var(--ink-2); }
 .small { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+/* "This device" is the music output: where announcements/schedules still play (Announce, Schedule) */
+.out-note { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 12px; padding: 10px 12px; border-radius: 12px; background: var(--accent-tint); color: var(--ink-2); }
+.out-note .icon { margin-top: 1px; color: var(--accent); }
 
 /* ---------- buttons ---------- */
 .btn {

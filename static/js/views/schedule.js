@@ -11,6 +11,7 @@ import { errBox, note, spinnerLine, playlistMeta, TTS_LANGS, langNative } from '
 
 register({
   en: {
+    'sched.outNote': 'Schedules always play on the speaker, even while this device plays your music.',
     'sched.title': 'Schedule', 'sched.mode': 'Announce mode', 'sched.annNow': 'Announce now', 'sched.schedule': 'Schedule',
     'sched.clock': (tm, zone) => `Speaker time now ${tm} (${zone})`, 'sched.new': 'New schedule', 'sched.edit': 'Edit schedule',
     'sched.list': 'Scheduled announcements', 'sched.none': 'Nothing scheduled yet.',
@@ -48,6 +49,7 @@ register({
     'sched.listSep': ', ',
   },
   th: {
+    'sched.outNote': 'ตารางเวลาออกที่ลำโพงเสมอ แม้อุปกรณ์นี้กำลังเล่นเพลงอยู่',
     'sched.title': 'ตั้งเวลา', 'sched.mode': 'โหมดประกาศ', 'sched.annNow': 'ประกาศเลย', 'sched.schedule': 'ตั้งเวลา',
     'sched.clock': (tm, zone) => `เวลาของลำโพงตอนนี้ ${tm} น. (${zone})`, 'sched.new': 'ตั้งเวลาใหม่', 'sched.edit': 'แก้ไขเวลา',
     'sched.list': 'รายการตั้งเวลา', 'sched.none': 'ยังไม่มีรายการตั้งเวลา',
@@ -129,6 +131,7 @@ export async function render(ctx) {
   const node = h('div', { class: `page sc${desk ? ' sc-desk' : ''}` },
     ctx.header({ title: t('nav.announce'), actions: mode('sc-mode-lg') }),
     mode('sc-mode-ph'),
+    ctx.output === 'device' ? h('p', { class: 'out-note small' }, icon('info', 'sm'), h('span', {}, t('sched.outNote'))) : null,
     h('div', { class: 'sc-bar' }, clock, newBtn),
     desk ? h('div', { class: 'sc-split' }, listEl, pane) : listEl);
 

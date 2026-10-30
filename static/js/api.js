@@ -54,6 +54,7 @@ export function waitText(sec) {
 export function errorText(e, user, overrides = {}) {
   if (!(e instanceof ApiError)) return t('err.unexpected');
   if (overrides[e.status]) return overrides[e.status];
+  if (e.local) return e.detail; // already plain language (this device's player, local-player.js)
   switch (e.status) {
     case 0: return t('err.network');
     case 401: return t('err.session');

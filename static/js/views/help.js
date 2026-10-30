@@ -152,6 +152,21 @@ const TOPICS = [
       'เพิ่มพาสคีย์ได้ที่ บัญชี ในหัวข้อ พาสคีย์ จากนั้นที่หน้าเข้าสู่ระบบ กด เข้าสู่ระบบด้วยพาสคีย์ แล้วยืนยันตัวตนบนเครื่อง',
       'พาสคีย์ใช้ได้เฉพาะเมื่อเปิดแอปผ่านที่อยู่แบบ https:// ถ้าไม่เห็นปุ่มพาสคีย์ แปลว่าเครื่องหรือเบราว์เซอร์นี้ไม่รองรับ หรือเปิดผ่านที่อยู่แบบ http',
       'เปลี่ยนชื่อหรือลบพาสคีย์ได้ที่ บัญชี ลบพาสคีย์สุดท้ายไม่ได้ถ้าไม่มีวิธีเข้าสู่ระบบอื่นเหลืออยู่'] } },
+  { group: 'daily', id: 'device', alias: ['output', 'here'], ic: ['phone', 'sprite'], route: ['now'], min: 'operator', kw: 'this device phone iphone ipad play here headphones local output lock screen background autoplay อุปกรณ์นี้ โทรศัพท์ ไอโฟน เล่นที่เครื่อง หูฟัง หน้าจอล็อก เบื้องหลัง',
+    en: { title: 'Play on this device', where: 'Speaker button at the top', steps: [
+      'Tap the speaker name at the top and pick This device. Now playing, Music and Playlists then play on this phone, tablet or computer instead of the speaker. Only this browser changes; the speaker keeps playing whatever it was playing for everyone else.',
+      'Announcements, Talk live and schedules always play on the speaker, even while This device is picked.',
+      'Seek by tapping or dragging the progress bar. Volume follows the device; on iPhone and iPad use the side buttons.',
+      'iPhone and iPad only start sound after a tap, so press Play again if nothing starts. Music keeps going on the lock screen and in the background only while this page (or the app on your Home Screen) keeps playing; if iOS stops it, open the page and press Play.',
+      'Some radio stations only work on the speaker: an http:// stream can’t play on a page opened over https://, and HLS streams only play in Safari.',
+      'To go back, tap the button again and pick the speaker. Your choice is remembered on this device.'] },
+    th: { title: 'เล่นที่อุปกรณ์นี้', where: 'ปุ่มลำโพงด้านบน', steps: [
+      'แตะชื่อลำโพงด้านบนแล้วเลือก อุปกรณ์นี้ หน้าเล่นอยู่ เพลง และเพลย์ลิสต์ จะเล่นที่โทรศัพท์ แท็บเล็ต หรือคอมพิวเตอร์เครื่องนี้แทนลำโพง เปลี่ยนเฉพาะเบราว์เซอร์นี้ ลำโพงยังเล่นของเดิมให้คนอื่นฟังต่อ',
+      'ประกาศ พูดสด และตารางเวลา ออกที่ลำโพงเสมอ แม้จะเลือกอุปกรณ์นี้อยู่',
+      'เลื่อนตำแหน่งได้โดยแตะหรือลากแถบเวลา ระดับเสียงใช้ของเครื่อง บน iPhone และ iPad ใช้ปุ่มด้านข้าง',
+      'iPhone และ iPad จะเริ่มเล่นเสียงหลังจากแตะเท่านั้น ถ้าไม่มีเสียงให้กดเล่นอีกครั้ง เพลงเล่นต่อบนหน้าจอล็อกและเบื้องหลังได้เฉพาะตอนที่หน้านี้ (หรือแอปบนหน้าจอโฮม) ยังเล่นอยู่ ถ้า iOS หยุดไป ให้เปิดหน้านี้แล้วกดเล่น',
+      'วิทยุบางสถานีเล่นได้เฉพาะที่ลำโพง สตรีม http:// เล่นในหน้าที่เปิดผ่าน https:// ไม่ได้ และสตรีม HLS เล่นได้เฉพาะใน Safari',
+      'จะกลับไปใช้ลำโพง ให้แตะปุ่มเดิมแล้วเลือกลำโพง เครื่องนี้จะจำตัวเลือกไว้'] } },
   { group: 'admin', id: 'members', alias: ['mem'], ic: ['members', 'sprite'], route: ['members'], kw: 'member user role viewer operator admin owner disable สมาชิก ผู้ใช้ สิทธิ์ ผู้ชม ผู้ควบคุม ผู้ดูแล เจ้าของ ปิดใช้งาน',
     en: { title: 'Members and roles', where: 'Members', steps: [
       'Open Members.',

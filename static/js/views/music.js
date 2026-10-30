@@ -9,7 +9,7 @@ import { errorText, ApiError } from '../api.js';
 import { bicon } from '../teamb-icons.js';
 import {
   thumb, mediaRow, roundBtn, setRound, errBox, note, sectionLabel, spinnerLine, searchForm, sourceError,
-  playTracker, trackPlay, pickPlaylist, ibtn, deleteLater, isPending, undoDelete, isUrl, epMeta, fileMeta, size,
+  playTracker, trackPlay, pickPlaylist, ibtn, deleteLater, isPending, undoDelete, isUrl, epMeta, fileMeta, size, here,
 } from '../teamb-common.js';
 
 register({
@@ -113,7 +113,7 @@ export async function render(ctx) {
 
 /* ---------- shared row builders ---------- */
 function playButton(ctx, tracker, key, title, run, row, idleSub, live) {
-  const btn = roundBtn('play', t('tb.playOn', title), () => {
+  const btn = roundBtn('play', here('tb.playOn', title), () => {
     if (tracker.state(key) === 'playing') tracker.stop();
     else tracker.play(key, title, run, btn);
   }, 'primary');
@@ -133,7 +133,7 @@ function youtubePane(ctx, tracker) {
     out.replaceChildren(note(t('tb.resultsFor', m.q), 'tb-cap'), h('div', { class: 'list tb-list tb-grid' }, m.results.map((v) => {
       const row = mediaRow({ th: thumb('youtube', { img: v.thumbnail, badge: fmtDur(v.duration), wide: true }), title: v.title, sub: v.channel || '' });
       const play = playButton(ctx, tracker, `yt:${v.video_id}`, v.title,
-        () => ctx.api('/youtube', { body: { query: `https://www.youtube.com/watch?v=${v.video_id}` } }), row, v.channel || '');
+        () => ctx.api('/youtube', { body: { query: `https://www.youtube.com/watch?v=${v.video_id}`, title: v.title } }), row, v.channel || '');
       const add = roundBtn('plus', t('tb.addX', v.title), () => pickPlaylist(ctx, { kind: 'youtube', source: v.video_id, title: v.title }));
       row.querySelector('.tb-act').append(play, add);
       return row;
@@ -190,7 +190,9 @@ function radioPane(ctx, tracker) {
       if (heart.isConnected) { paintHeart(); heart.focus({ preventScroll: true }); }
     }));
     paintHeart();
-    const body = isFav ? { favorite_id: s.id } : s.uuid ? { uuid: s.uuid } : { url: s.url, name: s.name, content_type: s.content_type };
+    // url/name/favicon ride along for "This device" (local-player.js), which plays the stream without asking the server
+    const stream = { url: s.url, name: s.name, content_type: s.content_type, favicon: s.favicon };
+    const body = isFav ? { favorite_id: s.id, ...stream } : s.uuid ? { uuid: s.uuid, ...stream } : stream;
     const play = playButton(ctx, tracker, `radio:${s.uuid || s.url}`, s.name, () => ctx.api('/radio/play', { body }), row, sub, true);
     row.querySelector('.tb-act').append(heart, play);
     return row;

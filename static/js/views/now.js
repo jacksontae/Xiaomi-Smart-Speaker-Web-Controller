@@ -1,11 +1,13 @@
 // Now playing (boards Now / T_Now / D_Now): the 3D speaker mirrors the real state, then title + status line,
 // progress (ticks locally between polls), transport, volume and the queue with shuffle/repeat.
 // Idle, offline and announcing states come from /status; owners also see the ESP32 relay's health when the
-// server reports `relay` (mqtt transport). There is no seek endpoint, so the progress bar is display only.
+// server reports `relay` (mqtt transport). The speaker has no seek endpoint, so its progress bar is display only;
+// with "This device" as the output (status.local, local-player.js) the bar is a slider seeking the browser's player.
 import { h, icon, iconBtn, tip, busy } from '../ui.js';
 import { register, t, fmtDur, fmtRel } from '../i18n.js';
 import { speaker3d } from '../speaker3d.js';
 import { aicon } from '../a-icons.js';
+import { seek } from '../local-player.js';
 
 register({
   en: {
@@ -55,6 +57,9 @@ register({
     'now.relaySpeakerErr': (e) => `The relay can't reach the speaker${e ? ` (${e})` : ''}`,
     'now.relaySignal': (n) => `Wi‑Fi signal ${n} dBm`,
     'now.relayFw': (v) => `Firmware ${v}`,
+    'now.idleLocal': 'Nothing is playing on this device. Pick a playlist or some music.',
+    'now.localNote': (x) => `Music plays on this device only. Announcements, live talk and schedules still play on ${x || 'the speaker'}.`,
+    'now.seekHint': 'Use the arrow keys to move 10 seconds',
   },
   th: {
     'now.idleTitle': 'ไม่ได้เล่นอะไร',
@@ -103,6 +108,9 @@ register({
     'now.relaySpeakerErr': (e) => `ตัวรีเลย์ติดต่อลำโพงไม่ได้${e ? ` (${e})` : ''}`,
     'now.relaySignal': (n) => `สัญญาณ Wi‑Fi ${n} dBm`,
     'now.relayFw': (v) => `เฟิร์มแวร์ ${v}`,
+    'now.idleLocal': 'อุปกรณ์นี้ไม่ได้เล่นอะไร เลือกเพลย์ลิสต์หรือเพลงได้เลย',
+    'now.localNote': (x) => `เพลงเล่นเฉพาะที่อุปกรณ์นี้ ส่วนประกาศ พูดสด และตารางเวลายังออกที่${x || 'ลำโพง'}`,
+    'now.seekHint': 'กดปุ่มลูกศรเพื่อเลื่อนทีละ 10 วินาที',
   },
 });
 
@@ -138,6 +146,36 @@ export async function render(ctx) {
   const tPos = h('span'), tLeft = h('span');
   const prog = h('div', { class: 'np-prog', hidden: true }, bar, h('div', { class: 'np-times' }, tPos, tLeft));
   const liveTag = h('p', { class: 'np-livetag', hidden: true }, h('span', { 'aria-hidden': 'true' }), t('now.live'));
+  const localNote = h('p', { class: 'np-local small', hidden: true }, icon('info', 'sm'), h('span'));
+
+  /* ----- seeking (this device only): tap/drag the bar, arrow keys move 10 s ----- */
+  const seekable = () => !!(st && st.local && st.media && st.media.duration && !err);
+  function seekAt(clientX) {
+    const r = bar.getBoundingClientRect();
+    seek(Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * st.media.duration);
+  }
+  bar.addEventListener('pointerdown', (e) => {
+    if (!seekable()) return;
+    e.preventDefault();
+    seekAt(e.clientX);
+    bar.setPointerCapture(e.pointerId);
+    const move = (ev) => seekAt(ev.clientX);
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', () => bar.removeEventListener('pointermove', move), { once: true });
+  });
+  bar.addEventListener('keydown', (e) => {
+    if (!seekable()) return;
+    const pos = st.media.position || 0;
+    const to = { ArrowLeft: pos - 10, ArrowDown: pos - 10, ArrowRight: pos + 10, ArrowUp: pos + 10, Home: 0, End: st.media.duration }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    seek(to);
+  });
+  function setSeekable(on) {
+    bar.classList.toggle('seek', on);
+    bar.setAttribute('role', on ? 'slider' : 'progressbar');
+    if (on) { bar.tabIndex = 0; bar.setAttribute('aria-description', t('now.seekHint')); } else { bar.removeAttribute('tabindex'); bar.removeAttribute('aria-description'); }
+  }
 
   /* ----- transport ----- */
   // busy while the command is on its way (a round trip through the tunnel, then the speaker): dimmed, no double taps
@@ -192,7 +230,7 @@ export async function render(ctx) {
 
   const mainCol = h('div', { class: 'np-col' },
     h('div', { class: 'np-hero' }, h('div', { class: 'np-stage' }, spk.el), meta),
-    prog, liveTag, h('div', { class: 'np-ctrls' }, transport, volume), idleActs, offActs);
+    prog, liveTag, h('div', { class: 'np-ctrls' }, transport, volume), idleActs, offActs, localNote);
   const node = h('div', { class: 'page now-page' }, ctx.header({ title: t('nav.now') }),
     h('div', { class: 'np-grid' }, mainCol, h('div', { class: 'np-side' }, queueBox, relayBox)));
 
@@ -260,7 +298,7 @@ export async function render(ctx) {
       spk.setState('spk-idle spk-breathe');
       kindEl.textContent = '';
       title.textContent = t('now.idleTitle');
-      line.textContent = op ? t('now.idleHint') : t('now.idleLine');
+      line.textContent = st.local ? t('now.idleLocal') : op ? t('now.idleHint') : t('now.idleLine');
       setArt(null);
       prog.hidden = liveTag.hidden = transport.hidden = true;
       idleActs.hidden = !op;
@@ -278,6 +316,10 @@ export async function render(ctx) {
       prog.hidden = !m.duration;
       liveTag.hidden = !!m.duration || announcing || m.state !== 'PLAYING';
     }
+
+    localNote.hidden = !st.local;
+    if (st.local) localNote.lastChild.textContent = t('now.localNote', st.real_speaker);
+    setSeekable(seekable());
 
     // volume: hidden while the speaker doesn't report one
     volume.hidden = st.volume == null;
@@ -344,7 +386,7 @@ export async function render(ctx) {
       ? h('button', { type: 'button', class: 'linkbtn np-more', 'aria-expanded': String(showAll), onclick: () => { showAll = !showAll; queueKey = ''; renderQueue(q, m); } },
         showAll ? t('now.showNext') : t('now.showAll', q.items.length))
       : null;
-    queueBox.replaceChildren(head, list, more);
+    queueBox.replaceChildren(...[head, list, more].filter(Boolean)); // replaceChildren(null) would print "null"
   }
 
   function tick() {
