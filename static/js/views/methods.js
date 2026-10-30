@@ -3,8 +3,10 @@
 // passkey_required_for_admins. Passwords are always on (the server has no switch for them). The server refuses
 // "require a passkey" with 409 while passkeys can't work or an owner has none yet; the page explains which.
 // The boards' client secret / redirect URI / allowed domains / test sign-in have no server side (Google Identity
-// Services needs only the client ID), so they are not shown.
+// Services needs only the client ID), so they are not shown. The Google Cloud setup steps live in two info tips
+// (section heading + client ID label) instead of text on the page; they show the origin to authorise.
 import { h, icon, busy, helpLink, toast } from '../ui.js';
+import { infoTip, copyRow } from '../infotip.js';
 import { register, t } from '../i18n.js';
 import { errorText } from '../api.js';
 import { isPhone } from '../sheet.js';
@@ -17,9 +19,24 @@ register({
     'auth.gOff': 'Off. People only see the username and password form.',
     'auth.gNeedId': 'Add the OAuth client ID below to turn this on.',
     'auth.cid': 'OAuth client ID',
-    'auth.cidHelp': 'From the Google Cloud console (OAuth client of type "Web application"). Not a secret.',
     'auth.cidErr': 'The client ID ends with .apps.googleusercontent.com',
-    'auth.gWho': 'Only members can sign in with Google: each one links their own Google account in Account first.',
+    'auth.gTip': 'How to set up Sign in with Google', 'auth.gTipTitle': 'Set up in Google Cloud console',
+    'auth.cidTip': 'Where to find the client ID', 'auth.cidTipTitle': 'Where the client ID comes from',
+    'auth.g1': 'APIs & Services → OAuth consent screen: create it as External, with an app name and a support email. Add yourself and the members as test users, or publish the app.',
+    'auth.g2': 'Credentials → Create credentials → OAuth client ID. Application type: Web application.',
+    'auth.g3': 'Authorized JavaScript origins: add',
+    'auth.g3b': 'Authorized redirect URIs: leave empty (not needed).',
+    'auth.g4': 'Copy the Client ID (it ends with .apps.googleusercontent.com), paste it here, Save, then switch Sign in with Google on.',
+    'auth.g5': 'Each member links Google in Account. Only linked accounts can sign in. No client secret is used or needed.',
+    'auth.gWorks': 'Is it working? After you switch it on, the sign-in page shows "Continue with Google".',
+    'auth.cid1': 'Google Cloud console → APIs & Services → Credentials → your OAuth client (type Web application).',
+    'auth.cid2': 'Copy its Client ID. It ends with .apps.googleusercontent.com and isn\'t a secret.',
+    'auth.cid3': 'The client secret and redirect URIs aren\'t used. Leave redirect URIs empty.',
+    'auth.gTwo': 'This page is open on a different address than public_base_url. Google only accepts https:// origins (and http://localhost), so Sign in with Google only works on the https address.',
+    'auth.gHttp': 'Google only accepts https:// origins (and http://localhost). Open the app on its https address (set public_base_url, for example https://speaker.example.com) and add that one instead.',
+    'auth.gBoth': 'This page is open on a different address than public_base_url. Add both so Google sign-in works on either.',
+    'auth.gReject': 'Google won\'t accept this one: it isn\'t https.',
+    'auth.gWarn': 'Heads up:',
     'auth.pw': 'Password', 'auth.pwTitle': 'Username and password',
     'auth.pwSub': 'Always on. Members sign in with the username and password set in Members.',
     'auth.pk': 'Passkeys', 'auth.pkTitle': 'Sign in with a passkey',
@@ -45,9 +62,24 @@ register({
     'auth.gOff': 'ปิดอยู่ หน้าเข้าสู่ระบบมีแค่ชื่อผู้ใช้และรหัสผ่าน',
     'auth.gNeedId': 'ใส่ OAuth client ID ด้านล่างก่อนจึงจะเปิดได้',
     'auth.cid': 'OAuth client ID',
-    'auth.cidHelp': 'จาก Google Cloud console (OAuth client แบบ "Web application") ไม่ใช่ข้อมูลลับ',
     'auth.cidErr': 'client ID ต้องลงท้ายด้วย .apps.googleusercontent.com',
-    'auth.gWho': 'เฉพาะสมาชิกเท่านั้นที่เข้าด้วย Google ได้ แต่ละคนต้องเชื่อมบัญชี Google ของตัวเองในหน้าบัญชีก่อน',
+    'auth.gTip': 'วิธีตั้งค่าเข้าสู่ระบบด้วย Google', 'auth.gTipTitle': 'ตั้งค่าใน Google Cloud console',
+    'auth.cidTip': 'หา client ID ได้ที่ไหน', 'auth.cidTipTitle': 'client ID มาจากไหน',
+    'auth.g1': 'APIs & Services → OAuth consent screen: สร้างแบบ External ใส่ชื่อแอปและอีเมลติดต่อ เพิ่มตัวเองและสมาชิกเป็น test users หรือกด publish แอป',
+    'auth.g2': 'Credentials → Create credentials → OAuth client ID เลือก Application type เป็น Web application',
+    'auth.g3': 'Authorized JavaScript origins: ใส่',
+    'auth.g3b': 'Authorized redirect URIs: เว้นว่างไว้ (ไม่ต้องใช้)',
+    'auth.g4': 'คัดลอก Client ID (ลงท้ายด้วย .apps.googleusercontent.com) มาวางที่นี่ กดบันทึก แล้วเปิดสวิตช์เข้าสู่ระบบด้วย Google',
+    'auth.g5': 'สมาชิกแต่ละคนเชื่อม Google ในหน้าบัญชี เฉพาะบัญชีที่เชื่อมแล้วเท่านั้นที่เข้าได้ ไม่ใช้และไม่ต้องมี client secret',
+    'auth.gWorks': 'ใช้ได้หรือยัง? พอเปิดแล้ว หน้าเข้าสู่ระบบจะมีปุ่ม "ดำเนินการต่อด้วย Google"',
+    'auth.cid1': 'Google Cloud console → APIs & Services → Credentials → OAuth client ของคุณ (แบบ Web application)',
+    'auth.cid2': 'คัดลอก Client ID ที่ลงท้ายด้วย .apps.googleusercontent.com ค่านี้ไม่ใช่ข้อมูลลับ',
+    'auth.cid3': 'ไม่ใช้ client secret และ redirect URI ช่อง redirect URIs เว้นว่างไว้',
+    'auth.gTwo': 'หน้านี้เปิดผ่านที่อยู่ที่ไม่ตรงกับ public_base_url Google รับเฉพาะ origin แบบ https:// (และ http://localhost) การเข้าสู่ระบบด้วย Google จึงใช้ได้เฉพาะที่อยู่ https',
+    'auth.gHttp': 'Google รับเฉพาะ origin แบบ https:// (และ http://localhost) เปิดแอปผ่านที่อยู่ https (ตั้ง public_base_url เช่น https://speaker.example.com) แล้วใส่อันนั้นแทน',
+    'auth.gBoth': 'หน้านี้เปิดผ่านที่อยู่ที่ไม่ตรงกับ public_base_url ใส่ทั้งสองอัน เพื่อให้เข้าด้วย Google ได้จากทั้งสองที่อยู่',
+    'auth.gReject': 'Google ไม่รับอันนี้ เพราะไม่ใช่ https',
+    'auth.gWarn': 'โปรดทราบ:',
     'auth.pw': 'รหัสผ่าน', 'auth.pwTitle': 'ชื่อผู้ใช้และรหัสผ่าน',
     'auth.pwSub': 'เปิดตลอด สมาชิกเข้าด้วยชื่อผู้ใช้และรหัสผ่านที่ตั้งในหน้าสมาชิก',
     'auth.pk': 'พาสคีย์', 'auth.pkTitle': 'เข้าสู่ระบบด้วยพาสคีย์',
@@ -79,6 +111,57 @@ function secureBase(url) {
     if (/^[\d.]+$/.test(u.hostname) || u.hostname.includes(':') || u.hostname.startsWith('[')) return false;
     return u.protocol === 'https:' || u.hostname === 'localhost';
   } catch { return false; }
+}
+
+/** Origins Google accepts for a Web client: https, or http on localhost. */
+function googleOk(origin) {
+  try {
+    const u = new URL(origin);
+    return u.protocol === 'https:' || (u.protocol === 'http:' && u.hostname === 'localhost');
+  } catch { return false; }
+}
+
+/** The page's own origin, plus public_base_url's when it differs. */
+function originsFor(base) {
+  const list = [location.origin];
+  try { if (base) { const o = new URL(base).origin; if (o !== location.origin) list.push(o); } } catch { /* bad URL: ignore */ }
+  return list;
+}
+
+/** Copy rows for the JavaScript origins to authorise, with the https warning when it applies. */
+function originsBlock(base) {
+  const list = originsFor(base);
+  const rows = list.map((o) => copyRow(o, googleOk(o) ? null : t('auth.gReject')));
+  let warn = null;
+  if (list.length > 1) warn = list.every(googleOk) ? t('auth.gBoth') : t('auth.gTwo');
+  else if (!googleOk(list[0])) warn = t('auth.gHttp');
+  return { rows, warn: warn && h('p', { class: 'infotip-warn' }, h('strong', {}, t('auth.gWarn')), ' ', warn) };
+}
+
+/** Full setup guide (section tip): consent screen, Web client, origin, client ID, members. */
+function googleGuide(body, base) {
+  const { rows, warn } = originsBlock(base);
+  body.append(
+    h('ol', { class: 'infotip-steps' },
+      h('li', {}, t('auth.g1')),
+      h('li', {}, t('auth.g2')),
+      h('li', {}, t('auth.g3'), rows, h('div', { class: 'infotip-muted', style: { marginTop: '6px' } }, t('auth.g3b'))),
+      h('li', {}, t('auth.g4')),
+      h('li', {}, t('auth.g5'))),
+    warn,
+    h('p', { class: 'infotip-muted' }, t('auth.gWorks')));
+}
+
+/** Short guide next to the client ID field: where to copy it from and the origin the client must allow. */
+function cidGuide(body, base) {
+  const { rows, warn } = originsBlock(base);
+  body.append(
+    h('ol', { class: 'infotip-steps' },
+      h('li', {}, t('auth.cid1')),
+      h('li', {}, t('auth.g3'), rows),
+      h('li', {}, t('auth.cid2')),
+      h('li', {}, t('auth.cid3'))),
+    warn);
 }
 
 function settingsErr(e, user, users = []) {
@@ -141,10 +224,12 @@ export function render(ctx) {
       paintG();
     });
     paintG();
+    const base = saved.public_base_url;
+    const gTip = infoTip({ label: t('auth.gTip'), title: t('auth.gTipTitle'), build: (b) => googleGuide(b, base) });
+    const cidTip = infoTip({ label: t('auth.cidTip'), title: t('auth.cidTipTitle'), build: (b) => cidGuide(b, base) });
     const gCard = card(
       settingRow({ title: t('auth.gTitle'), sub: gSub, control: gSw, lead: tile(gMark(), 'plain') }),
-      h('div', { class: 'c-stack' }, h('label', { class: 'c-title', for: 'a-cid' }, t('auth.cid')), cid, cidErr, h('p', { class: 'small' }, t('auth.cidHelp'))),
-      h('p', { class: 'c-row c-sub' }, t('auth.gWho')));
+      h('div', { class: 'c-stack' }, h('div', { class: 'infotip-row' }, h('label', { class: 'c-title', for: 'a-cid' }, t('auth.cid')), cidTip), cid, cidErr));
 
     /* password */
     const pwCard = card(settingRow({ title: t('auth.pwTitle'), sub: t('auth.pwSub'), lead: tile(icon('lock'), 'plain') }));
@@ -161,7 +246,6 @@ export function render(ctx) {
       reqSub.textContent = !pkSw.checked && !reqSw.checked ? `${t('auth.reqOff')} ${t('auth.reqNeedsPk')}` : reqSw.checked ? t('auth.reqOn') : t('auth.reqOff');
     };
     paintPk();
-    const base = saved.public_base_url;
     const secure = secureBase(base);
     const pkCard = card(
       settingRow({ title: t('auth.pkTitle'), sub: pkSub, control: pkSw, lead: tile(icon('passkey')) }),
@@ -169,7 +253,8 @@ export function render(ctx) {
       h('p', { class: 'c-row c-sub a-secure' }, h('span', {}, secure ? t('auth.secure', base) : t('auth.insecure'), ' ', helpLink('passkey', t('auth.why')))));
     reqErrEl = reqErr;
 
-    left.replaceChildren(caption(t('auth.google')), gCard, caption(t('auth.pw')), pwCard);
+    const gCap = h('div', { class: 'infotip-row infotip-caprow' }, caption(t('auth.google')), gTip);
+    left.replaceChildren(gCap, gCard, caption(t('auth.pw')), pwCard);
     right.replaceChildren(caption(t('auth.pk')), pkCard, caption(t('auth.who')), whoCard());
   }
 
