@@ -126,17 +126,19 @@ const TOPICS = [
       'เปิด บัญชี แล้วแตะ ตั้งค่าแอป',
       'ภาษา: English หรือ ไทย ลักษณะ: ตามระบบ สว่าง หรือมืด ลดการเคลื่อนไหวได้ด้วย เปลี่ยนแล้วเห็นผลทันที',
       'ค่าพวกนี้เปลี่ยนเฉพาะแอปบนเครื่องนี้ของคุณ ไม่ได้เปลี่ยนลำโพง'] } },
-  { group: 'daily', id: 'google', ic: ['key', 'sprite'], route: ['account'], kw: 'google gmail sign in login account link unlink กูเกิล เข้าสู่ระบบ ล็อกอิน บัญชี ลิงก์ ยกเลิกลิงก์',
+  { group: 'daily', id: 'google', ic: ['key', 'sprite'], route: ['account'], kw: 'google gmail sign in login account link unlink กูเกิล เข้าสู่ระบบ ล็อกอิน บัญชี ลิงก์ ยกเลิกลิงก์ client id oauth origin javascript',
     en: { title: 'Sign in with Google', where: 'Account', steps: [
       'Google sign-in only works after you link Google to your account: sign in with your password, open Account and link your Google account.',
       'From then on, tap Continue with Google on the sign-in page and pick that account.',
       'If there’s no Google button on the sign-in page, the owner hasn’t turned it on.',
-      'You can unlink Google in Account, as long as you still have another way to sign in.'] },
+      'You can unlink Google in Account, as long as you still have another way to sign in.',
+      'Owner setup: in Google Cloud console create an OAuth client ID of type Web application. Add the app’s https address (for example https://speaker.example.com) under Authorized JavaScript origins and leave redirect URIs empty. Paste the Client ID in Sign-in methods and switch it on. No client secret is needed.'] },
     th: { title: 'เข้าสู่ระบบด้วย Google', where: 'หน้าบัญชี', steps: [
       'ต้องลิงก์ Google กับบัญชีก่อนถึงจะใช้ได้: เข้าสู่ระบบด้วยรหัสผ่าน เปิด บัญชี แล้วลิงก์บัญชี Google',
       'หลังจากนั้น ที่หน้าเข้าสู่ระบบ กด ดำเนินการต่อด้วย Google แล้วเลือกบัญชีนั้น',
       'ถ้าไม่เห็นปุ่ม Google ที่หน้าเข้าสู่ระบบ แปลว่าเจ้าของยังไม่ได้เปิดใช้',
-      'ยกเลิกลิงก์ Google ได้ที่ บัญชี ถ้ายังมีวิธีเข้าสู่ระบบอื่นเหลืออยู่'] } },
+      'ยกเลิกลิงก์ Google ได้ที่ บัญชี ถ้ายังมีวิธีเข้าสู่ระบบอื่นเหลืออยู่',
+      'สำหรับเจ้าของ: ใน Google Cloud console สร้าง OAuth client ID แบบ Web application ใส่ที่อยู่ https ของแอป (เช่น https://speaker.example.com) ใน Authorized JavaScript origins และเว้น redirect URIs ว่างไว้ แล้ววาง Client ID ในหน้าวิธีเข้าสู่ระบบและเปิดใช้ ไม่ต้องใช้ client secret'] } },
   { group: 'daily', id: 'passkey', alias: ['pk'], ic: ['passkey', 'sprite'], route: ['account'], kw: 'passkey webauthn face id touch id windows hello fingerprint pin พาสคีย์ ลายนิ้วมือ ใบหน้า',
     en: { title: 'Sign in with a passkey', where: 'Account', steps: [
       'A passkey lets you sign in with Face ID, your fingerprint or your device PIN instead of a password.',
@@ -175,12 +177,12 @@ const TOPICS = [
   { group: 'admin', id: 'signin', ic: ['lock', 'sprite'], route: ['auth'], kw: 'sign-in methods google passkey password owner require วิธีเข้าสู่ระบบ กูเกิล พาสคีย์ รหัสผ่าน เจ้าของ',
     en: { title: 'Sign-in methods (owner only)', where: 'Sign-in methods', steps: [
       'Open Account, then Sign-in methods. Only the owner can change these.',
-      'Turn Google sign-in on or off. It needs a Google client ID in the server settings, and each member links their own Google account.',
+      'Turn Google sign-in on or off. Paste the OAuth client ID (Web application) on this page first; the (i) button next to Google shows the Google Cloud steps. Each member links their own Google account.',
       'Turn passkeys on or off, and choose whether admins must use a passkey.',
       'Everyone keeps at least one way to sign in. The app won’t remove the last one.'] },
     th: { title: 'วิธีเข้าสู่ระบบ (เฉพาะเจ้าของ)', where: 'หน้าวิธีเข้าสู่ระบบ', steps: [
       'เปิด บัญชี แล้วแตะ วิธีเข้าสู่ระบบ มีแค่เจ้าของที่แก้ได้',
-      'เปิดหรือปิดการเข้าสู่ระบบด้วย Google ต้องใส่ Google client ID ในการตั้งค่าเซิร์ฟเวอร์ และสมาชิกแต่ละคนต้องลิงก์บัญชี Google ของตัวเอง',
+      'เปิดหรือปิดการเข้าสู่ระบบด้วย Google ต้องวาง OAuth client ID (แบบ Web application) ในหน้านี้ก่อน ปุ่ม (i) ข้าง Google บอกขั้นตอนใน Google Cloud และสมาชิกแต่ละคนต้องลิงก์บัญชี Google ของตัวเอง',
       'เปิดหรือปิดพาสคีย์ และเลือกว่าผู้ดูแลต้องใช้พาสคีย์หรือไม่',
       'ทุกคนต้องเหลือวิธีเข้าสู่ระบบอย่างน้อยหนึ่งวิธีเสมอ แอปจะไม่ยอมลบวิธีสุดท้าย'] } },
   { group: 'fix', id: 'offline', alias: ['fix'], ic: ['wrench'], route: ['settings'], kw: 'offline unreachable disconnected wifi plug light ออฟไลน์ ติดต่อไม่ได้ หลุด ปลั๊ก ไฟ',
