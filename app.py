@@ -24,6 +24,7 @@ import os
 import random
 import re
 import secrets
+import shutil
 import socket
 import time
 import urllib.parse
@@ -45,6 +46,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from yt_dlp.postprocessor.sponsorblock import SponsorBlockPP
 
 import talk
 from auth import (
@@ -104,6 +106,9 @@ SPEAKER_NAME_MAX = 64  # the settings page's input has the same maxLength
 TIME_RE = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 AUDIO_SUFFIXES = {".m4a", ".webm", ".mp3", ".opus", ".ogg", ".mp4", ".aac"}
+# SponsorBlock segment kinds yt-dlp can cut out (highlight/chapter only mark a point, so they aren't offered).
+YT_SEGMENT_CATEGORIES = tuple(c for c in SponsorBlockPP.CATEGORIES if c not in SponsorBlockPP.NON_SKIPPABLE_CATEGORIES)
+YT_SKIP_DEFAULT = ("interaction", "selfpromo", "sponsor")
 MEDIA_DIR = Path(os.environ.get("MEDIA_DIR", DATA_PATH.parent / "media"))  # uploaded audio ("My files")
 UPLOAD_MAX = int(os.environ.get("UPLOAD_MAX_MB", "50")) * 1024 * 1024  # per file
 UPLOAD_QUOTA = int(os.environ.get("UPLOAD_QUOTA_MB", "2000")) * 1024 * 1024  # all uploads together
@@ -212,6 +217,8 @@ class Settings(BaseModel):
     cache_keep: int = Field(20, ge=1)  # most recent YouTube tracks kept on disk
     resume_after_say: bool = True  # continue the interrupted YouTube track after /say
     talk_max_seconds: int = Field(120, ge=10, le=600)  # a live talk ends after this long
+    # SponsorBlock segments cut out of downloaded YouTube audio (needs ffmpeg); [] = keep the whole video.
+    yt_skip_segments: list[str] = Field(default_factory=lambda: list(YT_SKIP_DEFAULT))
     # Base of the signed media URLs given to the speaker, e.g. a Cloudflare Tunnel hostname.
     # None = this machine's LAN address (only works when the speaker is on the same LAN).
     public_base_url: str | None = None
@@ -242,6 +249,17 @@ class Settings(BaseModel):
         if len(v) > SPEAKER_NAME_MAX:
             raise ValueError(f"speaker_name must be at most {SPEAKER_NAME_MAX} characters")
         return v
+
+    @field_validator("yt_skip_segments")
+    @classmethod
+    def check_skip_segments(cls, v):
+        """Lowercased, de-duplicated and sorted, so the same choice always gives the same cache name."""
+        cats = {c.strip().lower() for c in v}
+        unknown = sorted(cats - set(YT_SEGMENT_CATEGORIES))
+        if unknown:
+            raise ValueError(f"yt_skip_segments: unknown categories {', '.join(unknown)}; "
+                             f"known: {', '.join(YT_SEGMENT_CATEGORIES)}")
+        return sorted(cats)
 
     @field_validator("public_base_url")
     @classmethod
@@ -339,6 +357,7 @@ def save_settings(s, environ=None):
 def public_settings(s):
     data = s.model_dump(exclude={"api_token"})
     data["mqtt"]["password_set"] = bool(data["mqtt"].pop("password"))
+    data["yt_skip_available"] = talk.ffmpeg_available()  # read-only: cutting segments needs ffmpeg
     return data
 
 
@@ -744,30 +763,76 @@ def split_text(text, size=TTS_CHUNK):
 
 # --- YouTube ---
 
+def yt_skip_segments():
+    """Categories actually cut right now: none when ffmpeg is missing (yt-dlp would fail the download)."""
+    return settings.yt_skip_segments if settings.yt_skip_segments and talk.ffmpeg_available() else []
+
+
+def yt_cache_stem(video_id, segments):
+    """Cache file stem: the bare id for the whole video (the name used before SponsorBlock), else id + a short
+    tag of the cut categories, so changing them downloads a fresh copy instead of reusing a differently cut one."""
+    if not segments:
+        return video_id
+    return f"{video_id}.sb-{hashlib.sha256(','.join(sorted(segments)).encode()).hexdigest()[:8]}"
+
+
+def yt_sponsorblock_opts(segments):
+    """yt-dlp postprocessors that look up SponsorBlock segments after the download and cut them with ffmpeg."""
+    return [
+        {"key": "SponsorBlock", "categories": segments, "when": "post_process"},
+        {"key": "ModifyChapters", "remove_sponsor_segments": segments},
+    ]
+
+
 def yt_download(query):
-    """Download the audio track into CACHE_DIR; googlevideo rejects proxied Range requests."""
+    """Download the audio track into CACHE_DIR; googlevideo rejects proxied Range requests.
+
+    Only the audio stream is fetched (YT_FORMAT), so YouTube's inserted ads never play; what can remain are
+    sponsor reads inside the video itself, which yt_skip_segments cuts out with SponsorBlock after the download.
+    """
     target = query if query.startswith(("http://", "https://")) else f"ytsearch1:{query}"
+    segments = yt_skip_segments()
+    finished = {}  # the downloaded file, kept even when the SponsorBlock step fails afterwards
     opts = {
         "format": YT_FORMAT,
-        "outtmpl": str(CACHE_DIR / "%(id)s.%(ext)s"),
+        "outtmpl": str(CACHE_DIR / f"{yt_cache_stem('%(id)s', segments)}.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
         "js_runtimes": {"node": {}},
         "retries": 5,
         "extractor_retries": 3,
+        "progress_hooks": [lambda d: d["status"] == "finished" and finished.update(d)],
     }
+    if segments:
+        opts["postprocessors"] = yt_sponsorblock_opts(segments)
+        opts["ffmpeg_location"] = shutil.which(talk.FFMPEG)  # the same ffmpeg live talk uses ($FFMPEG)
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(target, download=True)
     except yt_dlp.utils.DownloadError as e:
+        uncut = segments and yt_keep_uncut(finished)
+        if uncut:
+            print(f"SponsorBlock step failed, playing the whole video: {e.msg or e}")
+            return uncut
         raise HTTPException(502, f"YouTube download failed: {e.msg or e}") from e
     if "entries" in info:
         if not info["entries"]:
             raise HTTPException(404, f"No YouTube result for {query!r}")
         info = info["entries"][0]
-    path = Path(info["requested_downloads"][0]["filepath"])
-    return {"id": info["id"], "title": info.get("title"), "duration": info.get("duration"), "path": path}
+    done = info["requested_downloads"][0]
+    duration = done.get("duration") or info.get("duration")  # the cut length when segments were removed
+    return {"id": info["id"], "title": info.get("title"), "duration": duration, "path": Path(done["filepath"])}
+
+
+def yt_keep_uncut(finished):
+    """After a failed SponsorBlock step: rename the whole download to the plain cache name and use it as is."""
+    path, info = Path(finished.get("filename") or ""), finished.get("info_dict") or {}
+    if not finished or not path.is_file() or not YT_ID_RE.fullmatch(info.get("id") or ""):
+        return None
+    plain = path.with_name(f"{info['id']}{path.suffix}")
+    path.replace(plain)
+    return {"id": info["id"], "title": info.get("title"), "duration": info.get("duration"), "path": plain}
 
 
 def yt_thumbnail(video_id):
@@ -835,9 +900,14 @@ def yt_info(query):
 
 
 def cached_track(video_id):
-    for path in CACHE_DIR.glob(f"{video_id}.*"):
-        if path.stem == video_id and path.suffix in AUDIO_SUFFIXES:
-            return path
+    """The cached file cut with today's categories, else the whole video (every file cached before SponsorBlock
+    has the bare-id name, so old caches keep playing without a new download)."""
+    stems = list(dict.fromkeys([yt_cache_stem(video_id, yt_skip_segments()), video_id]))
+    files = [p for p in CACHE_DIR.glob(f"{video_id}.*") if p.suffix in AUDIO_SUFFIXES]
+    for stem in stems:
+        for path in files:
+            if path.stem == stem:
+                return path
     return None
 
 

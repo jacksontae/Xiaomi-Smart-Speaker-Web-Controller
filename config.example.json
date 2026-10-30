@@ -8,6 +8,7 @@
   "cache_keep": 20,
   "resume_after_say": true,
   "talk_max_seconds": 120,
+  "yt_skip_segments": ["interaction", "selfpromo", "sponsor"],
   "public_base_url": null,
   "api_token": null,
   "google_client_id": "change-me.apps.googleusercontent.com",
