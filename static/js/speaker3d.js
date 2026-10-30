@@ -5,8 +5,11 @@
 //   wrapper.append(spk.el); spk.setState('spk-speaking'); spk.flash('spk-success');
 //
 // Drag turns it (yaw) and tilts it; tilt springs back on release. Reduced motion: static view, drag still works.
+// Rest: any motion in the model recomposites all 28 faces every frame (about half a CPU core, phones run hot), so
+// it plays for AWAKE_MS after the model appears, changes state or is touched, then pauses where it is.
 import { h } from './ui.js';
 
+const AWAKE_MS = 8000;
 const STATES = ['spk-idle', 'spk-listening', 'spk-speaking', 'spk-success', 'spk-error', 'spk-off', 'spk-breathe'];
 
 export function speaker3d({ size = null, state = 'spk-idle' } = {}) {
@@ -19,8 +22,17 @@ export function speaker3d({ size = null, state = 'spk-idle' } = {}) {
   const el = h('div', { class: 'spk-stage', 'aria-hidden': 'true' }, model);
   if (size) el.style.setProperty('--spk-size', size); // else the stylesheet sizes it (responsive clamp())
 
+  let restTimer = 0;
+  const wake = () => {
+    model.classList.remove('spk-rest');
+    clearTimeout(restTimer);
+    restTimer = setTimeout(() => model.classList.add('spk-rest'), AWAKE_MS);
+  };
+  wake();
+
   let drag = null;
   model.addEventListener('pointerdown', (e) => {
+    wake();
     const cs = getComputedStyle(model);
     drag = { x: e.clientX, y: e.clientY, yaw: parseFloat(cs.getPropertyValue('--spk-drag')) || 0 };
     model.setAttribute('data-drag', '');
@@ -44,10 +56,11 @@ export function speaker3d({ size = null, state = 'spk-idle' } = {}) {
   return {
     el,
     /** Steady state: 'spk-idle spk-breathe' | 'spk-listening' | 'spk-speaking' | 'spk-off'. */
-    setState(cls) { base = cls; if (!flashTimer) apply(cls); },
+    setState(cls) { if (cls === base) return; base = cls; wake(); if (!flashTimer) apply(cls); },
     /** One-shot: 'spk-success' (900 ms) or 'spk-error' (1.2 s), then back to the steady state. */
     flash(cls) {
       clearTimeout(flashTimer);
+      wake();
       apply('spk-idle'); void model.offsetWidth; apply(cls);
       flashTimer = setTimeout(() => { flashTimer = 0; apply(base); }, cls === 'spk-error' ? 1200 : 900);
     },

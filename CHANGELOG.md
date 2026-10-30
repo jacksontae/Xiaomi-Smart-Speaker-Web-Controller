@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-30
+
+### Fixed
+- Phones ran hot with Now playing or Sign in open: the 3D speaker's spin, float, LED pulse and sound rings
+  redrew the whole model every frame. It now moves for 8 s after it appears, changes state or is touched, then
+  rests; the sign-in glow breathes three times instead of forever (about 55% -> 5% CPU on Now playing).
+
+## [0.3.0] - 2026-10-30
+
 ### Added
 - Web app v3, rebuilt from the approved prototype for iPhone, iPad and desktop: English by default with Thai,
   light/dark/system theme, app-wide reduce motion, self-hosted Anuphan font, 3D speaker art. Pages: sign-in and
