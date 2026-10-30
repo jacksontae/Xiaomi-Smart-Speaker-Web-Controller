@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- ESP32 relay transport: the service can drive the speaker through an ESP32/ESP8266 board over MQTT
+  (`transport: "mqtt"`, `<base>/cmd`, `/result`, `/status`, `/online`), with offline detection and
+  `public_base_url` for media links served through a tunnel. Firmware under `firmware/` (PlatformIO:
+  `esp32dev`, `esp32-s3`, `esp8266`).
+- The relay publishes its status within a second of a change and reports media duration and content type;
+  the service only safety-polls relays that push changes.
+- MQTT over WebSocket on the ESP32 (`ws://` / `wss://` broker URL, verified against public root CAs or an
+  uploaded CA).
+- Self-hosted broker for remote deployments: `deploy/remote` runs Mosquitto (no anonymous clients, per-user
+  passwords and ACL) next to the service, published through the Cloudflare Tunnel.
+
+### Fixed
+- The relay no longer reports the last track's title and position after the speaker app stops.
+
 ## [0.1.0] - 2026-10-29
 
 ### Added
