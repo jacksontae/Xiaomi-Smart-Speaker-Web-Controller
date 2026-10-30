@@ -156,10 +156,14 @@ def test_talk_live_real_session_speaker_error(make_app, seeded, drained):
     ptt = p.locator("button.tk-ptt")
     expect(ptt).to_have_accessible_name("Start talking live")
     ptt.click()
+    started = time.monotonic()
     expect(card).to_have_attribute("data-state", re.compile("connecting|live"), timeout=10_000)
     expect(ptt).to_have_attribute("aria-pressed", "true")
-    # the server answers "ready", the browser streams audio, then the speaker can't be reached
-    expect(card).to_have_attribute("data-state", "error", timeout=60_000)
+    # the server answers "ready", the browser starts streaming, then the speaker can't be reached: within one
+    # connect attempt (~10 s), or at once when earlier tests already found it offline
+    expect(card).to_have_attribute("data-state", "error", timeout=20_000)
+    took = time.monotonic() - started
+    assert took < 20, "talk start waited behind more than one speaker timeout"
     msg = card.locator(".tk-msg")
     expect(msg.locator("h3")).to_have_text("Speaker didn’t respond")
     expect(msg.get_by_role("button", name="Try again")).to_be_visible()
@@ -168,7 +172,10 @@ def test_talk_live_real_session_speaker_error(make_app, seeded, drained):
     assert any('"type": "start"' in f or '"type":"start"' in f for f in texts), texts[:5]
     assert any('"ready"' in f for f in texts), texts[:5]
     assert any("speaker_error" in f for f in texts), texts[-5:]
-    assert p.evaluate("window.__binSent") > 4, "no audio chunks were sent"
+    # Audio flows only while the speaker is being tried. One already known to be offline fails before the
+    # recorder's first chunk, so only a slow failure has to show streamed chunks.
+    if took > 3:
+        assert p.evaluate("window.__binSent") > 4, "no audio chunks were sent"
     # Try again starts a new attempt; leaving the page ends it cleanly
     msg.get_by_role("button", name="Try again").click()
     expect(card).to_have_attribute("data-state", re.compile("connecting|live|error"))

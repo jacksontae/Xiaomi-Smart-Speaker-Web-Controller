@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 
+import pytest
 from conftest import BASE, path_of
 
 from transport import DEFAULT_MEDIA_RECEIVER
@@ -85,6 +86,48 @@ def test_settings_partial_update_persists(client, app):
 
 def test_settings_reject_invalid(client):
     assert client.post("/settings", json={"default_volume": 5}).status_code == 422
+
+
+@pytest.mark.parametrize("ip", ["192.0.2.10", "2001:db8::10", "speaker.local", "speaker", "kitchen-1.example.com.",
+                                "  192.0.2.11  "])
+def test_speaker_ip_accepts_addresses_and_hostnames(app, ip):
+    assert app.Settings(speaker_ip=ip).speaker_ip == ip.strip()
+
+
+@pytest.mark.parametrize("ip", ["", "   ", "999.1.1.1", "192.0.2", "http://192.0.2.10", "192.0.2.10:8009",
+                                "my speaker", "-bad.example.com", "a..b", "speaker_1.local", "x" * 64 + ".com"])
+def test_speaker_ip_rejects_garbage(app, ip):
+    with pytest.raises(ValueError, match="speaker_ip must be an IP address"):
+        app.Settings(speaker_ip=ip)
+
+
+def test_speaker_name_is_trimmed_and_required(app):
+    assert app.Settings(speaker_name="  Living\troom  ").speaker_name == "Living room"
+    for bad, why in (("", "can't be empty"), ("  \n ", "can't be empty"), ("x" * 65, "at most 64")):
+        with pytest.raises(ValueError, match=why):
+            app.Settings(speaker_name=bad)
+    assert len(app.Settings(speaker_name="x" * 64).speaker_name) == 64
+
+
+def test_settings_api_rejects_bad_speaker_without_saving(client, app):
+    before = app.CONFIG_PATH.read_text()
+    transport = app.transport
+    r = client.post("/settings", json={"speaker_ip": "not an ip"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "speaker_ip must be an IP address like 192.0.2.10 or a hostname like speaker.local"
+    r = client.post("/settings", json={"speaker_name": "   "})
+    assert r.status_code == 422 and r.json()["detail"] == "speaker_name can't be empty"
+    r = client.post("/settings", json={"speaker_name": "", "speaker_ip": ""})
+    assert r.status_code == 422
+    assert "speaker_ip must be" in r.json()["detail"] and "; speaker_name can't be empty" in r.json()["detail"]
+    assert app.CONFIG_PATH.read_text() == before and app.transport is transport  # nothing saved or restarted
+
+
+def test_settings_api_422_names_the_field(client):
+    r = client.post("/settings", json={"default_volume": 5})
+    assert r.json()["detail"] == "default_volume: Input should be less than or equal to 1"
+    r = client.post("/settings", json={"mqtt": {"base_topic": "a/#"}})
+    assert r.json()["detail"].startswith("mqtt.base_topic: base_topic must be")
 
 
 def test_settings_port_change_requests_restart(client, app, monkeypatch):
