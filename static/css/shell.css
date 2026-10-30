@@ -141,3 +141,6 @@ button.spside:hover, .spside[aria-expanded="true"] { background: var(--glass-sof
 
 /* main#view has tabindex -1 so the router can move focus to it; never draw a ring across the page. */
 .main:focus-visible { outline: none; }
+
+/* Header bars bleed past the column (.phd::before); clip, not hidden, so position: sticky keeps working. */
+html, body { overflow-x: clip; }

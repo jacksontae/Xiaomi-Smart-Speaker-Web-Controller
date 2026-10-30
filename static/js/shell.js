@@ -178,7 +178,7 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker }) {
   function markRoute(route, animate = true) {
     current = route;
     for (const a of el.querySelectorAll('[data-route]')) {
-      if (a.dataset.route === route.id) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+      if (a.dataset.route === (route.parent || route.id)) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     }
     barLeft.replaceChildren();
     barRight.replaceChildren();

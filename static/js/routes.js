@@ -43,13 +43,13 @@
 export const RANK = { viewer: 0, operator: 1, admin: 2 };
 
 // section: 'main' = tab bar (phone) + top group of the sidebar; 'admin' = lower sidebar group (phone: Account page);
-// 'none' = reachable by link only. tab: the label in the phone tab bar.
+// 'none' = reachable by link only. tab: the label in the phone tab bar. parent: the nav item to highlight instead.
 export const ROUTES = [
   { id: 'now', label: 'nav.now', tab: 'tab.now', icon: 'now', min: 'viewer', section: 'main', chip: true, load: () => import('./views/now.js') },
   { id: 'announce', label: 'nav.announce', tab: 'nav.announce', icon: 'announce', min: 'viewer', section: 'main', load: () => import('./views/announce.js') },
   { id: 'music', label: 'nav.music', tab: 'nav.music', icon: 'music', min: 'operator', section: 'main', load: () => import('./views/music.js') },
   { id: 'playlists', label: 'nav.playlists', tab: 'nav.playlists', icon: 'playlists', min: 'viewer', section: 'main', load: () => import('./views/playlists.js') },
-  { id: 'schedule', label: 'sched.title', icon: 'announce', min: 'viewer', section: 'none', load: () => import('./views/schedule.js') },
+  { id: 'schedule', label: 'sched.title', icon: 'announce', min: 'viewer', section: 'none', parent: 'announce', load: () => import('./views/schedule.js') },
   { id: 'members', label: 'nav.members', icon: 'members', min: 'admin', section: 'admin', load: () => import('./views/members.js') },
   { id: 'settings', label: 'nav.settings', icon: 'settings', min: 'admin', section: 'admin', load: () => import('./views/settings.js') },
   { id: 'activity', label: 'nav.activity', icon: 'activity', min: 'admin', section: 'admin', load: () => import('./views/activity.js') },

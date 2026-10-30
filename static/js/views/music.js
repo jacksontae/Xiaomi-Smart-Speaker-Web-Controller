@@ -84,7 +84,7 @@ export async function render(ctx) {
   let source = SOURCES.some((s) => s.id === asked) ? asked : memo.source;
   const tracker = playTracker(ctx);
   const panel = h('div', { class: 'mu-panel' });
-  const why = (cls) => h('div', { class: cls }, helpLink('sources', t(cls === 'mu-why-lg' ? 'music.whyJooxShort' : 'music.whyJoox')));
+  const why = (cls) => h('div', { class: cls }, helpLink('joox', t(cls === 'mu-why-lg' ? 'music.whyJooxShort' : 'music.whyJoox')));
 
   const seg = segmented({
     label: t('music.sources'), cls: 'mu-src', value: source,
