@@ -1,5 +1,6 @@
-"""Android look (static/css/android.css, js/boot.js, js/prefs.js 'os', shell.js branches): detection by user agent,
-?os= forcing (saved as spk.os), the floating nav pill on phones, the navigation rail on tablets, the Now Bar
+"""Android look (static/css/android.css, js/boot.js, shell.js branches): it follows the OS (a Chrome-on-Android user
+agent here), the floating nav pill with filled active icons and drag-to-select on phones, the navigation rail with
+Help on tablets, the Now Bar
 (operators+, only while something plays, never on Now; play/pause through /pause and /resume), and the Android back
 gesture closing a sheet instead of leaving the page. The speaker is offline in this suite, so /status is mocked."""
 import json
@@ -33,7 +34,7 @@ def android_app(browser, server, request):
     app.sent lists the speaker commands the page POSTed (/pause, /resume); app.status is the mocked body."""
     made = []
 
-    def factory(role="owner", device=ANDROID_PHONE, route="", playing=True, prefs=None, query=""):
+    def factory(role="owner", device=ANDROID_PHONE, route="", playing=True, prefs=None):
         ctx = browser.new_context(base_url=BASE, locale="en-GB", timezone_id="Asia/Bangkok", **device)
         ctx.add_init_script(PREFS_JS.replace("PREFS", json.dumps({"spk.lang": "en", "spk.theme": "light",
                                                                     "spk.pkOffer": "never", **(prefs or {})})))
@@ -63,7 +64,7 @@ def android_app(browser, server, request):
         made.append(app)
         if role:
             app.login_api(ROLES[role])
-        page.goto(f"{BASE}/{query}#/{route}")
+        page.goto(f"{BASE}/#/{route}")
         if role:
             app.header()
         return app
@@ -73,43 +74,47 @@ def android_app(browser, server, request):
         a.ctx.close()
 
 
+FETCHED_ANDROID_CSS = "performance.getEntriesByType('resource').some((e) => e.name.includes('android.css'))"
+
+
 def is_android(p):
     return p.evaluate("document.documentElement.dataset.os || null") == "android"
 
 
-def test_detection_and_forcing(android_app, seeded):
+def test_follows_the_os(android_app, make_app, seeded):
     app = android_app("owner", route="playlists", playing=False)
     p = app.page
     assert is_android(p), "an Android user agent gets the Android look"
     assert p.evaluate("!!document.getElementById('android-css')")
-    # forced iOS on an Android phone: saved, the parameter leaves the address, android.css is never fetched
-    p.goto(f"{BASE}/?os=ios#/playlists")
-    app.header()
-    assert not is_android(p)
-    assert p.evaluate("location.search") == ""
-    assert p.evaluate("localStorage.getItem('spk.os')") == "ios"
-    assert not p.evaluate("performance.getEntriesByType('resource').some((e) => e.name.includes('android.css'))")
-    # App settings: Look -> Android applies right away (the shell is rebuilt with the avatar in the top bar)
-    app.go("prefs")
-    p.get_by_role("radiogroup", name="Look").get_by_role("radio", name="Android").click()
-    expect(p.locator(".topbar .me-top")).to_be_visible()
-    assert is_android(p)
+    assert p.evaluate("localStorage.getItem('spk.os')") is None, "no stored look: it follows the OS"
+    # a wide window on Android is still Android (rail); the tablet test covers it
+    # iPhone and desktop: the glass look, and android.css is never fetched
+    for device in ("phone", "desktop"):
+        other = make_app("owner", device=device, route="playlists")
+        assert not is_android(other.page)
+        assert not other.page.evaluate(FETCHED_ANDROID_CSS)
+        # the old ?os= override is gone
+        other.page.goto(f"{BASE}/?os=android#/playlists")
+        other.header()
+        assert not is_android(other.page)
+        other.clean(f"{device} keeps the glass look")
     app.clean("android detection")
 
 
-def test_forced_on_desktop_browser(make_app, seeded):
-    app = make_app("owner", device="desktop", route="playlists")
-    p = app.page
-    assert not is_android(p), "desktop keeps the glass look"
-    p.goto(f"{BASE}/?os=android#/playlists")
-    app.header()
-    assert is_android(p)
-    expect(p.locator(".sb .nv[data-route='playlists']")).to_have_attribute("aria-current", "page")
-    assert p.locator(".sb").evaluate("(e) => e.getBoundingClientRect().width") == 80, "navigation rail"
-    p.goto(f"{BASE}/?os=auto#/playlists")
-    app.header()
-    assert not is_android(p)
-    app.clean("forced android on desktop")
+def drag(p, bar, frm, to, axis="x"):
+    """A touch slide along the nav from one item to another (synthetic pointer events, pointerType touch)."""
+    a, b = p.locator(frm).bounding_box(), p.locator(to).bounding_box()
+    x0, y0 = a["x"] + a["width"] / 2, a["y"] + a["height"] / 2
+    x1, y1 = (b["x"] + b["width"] / 2, y0) if axis == "x" else (x0, b["y"] + b["height"] / 2)
+    ev = {"pointerId": 7, "pointerType": "touch", "isPrimary": True, "bubbles": True}
+    p.locator(frm).dispatch_event("pointerdown", {**ev, "clientX": x0, "clientY": y0})
+    for i in range(1, 7):
+        f = i / 6
+        at = {"clientX": x0 + (x1 - x0) * f, "clientY": y0 + (y1 - y0) * f}
+        p.locator(bar).dispatch_event("pointermove", {**ev, **at})
+    hot = p.locator(f"{bar} [data-hot]").get_attribute("data-route")
+    p.locator(bar).dispatch_event("pointerup", {**ev, "clientX": x1, "clientY": y1})
+    return hot
 
 
 def test_phone_nav_pill_and_now_bar(android_app, seeded):
@@ -123,6 +128,16 @@ def test_phone_nav_pill_and_now_bar(android_app, seeded):
     expect(p.locator(".me-btn")).to_be_hidden()
     expect(p.locator(".topbar .me-top")).to_be_visible()
     expect(p.locator(".tab[data-route='playlists']")).to_have_attribute("aria-current", "page")
+    # filled icon on the active destination only
+    expect(p.locator(".tab[data-route='playlists'] .ic-f")).to_be_visible()
+    expect(p.locator(".tab[data-route='playlists'] .ic-o")).to_be_hidden()
+    expect(p.locator(".tab[data-route='music'] .ic-o")).to_be_visible()
+    expect(p.locator(".tab[data-route='music'] .ic-f")).to_be_hidden()
+    # slide along the pill: the item under the finger lights up, release opens it
+    assert drag(p, ".tabbar", ".tab[data-route='playlists']", ".tab[data-route='announce']") == "announce"
+    expect(p).to_have_url(f"{BASE}/#/announce")
+    p.evaluate("location.hash = '#/playlists'")
+    app.header("Playlists")
 
     nb = p.locator(".nowbar")
     expect(nb).to_be_visible()
@@ -182,10 +197,16 @@ def test_tablet_rail(android_app, seeded):
     expect(rail).to_be_visible()
     assert rail.bounding_box()["width"] == 80
     expect(p.locator(".sb .sb-sep")).to_be_visible()  # admin items under a divider
-    for rid in ("now", "announce", "music", "playlists", "members", "settings", "activity"):
+    for rid in ("now", "announce", "music", "playlists", "members", "settings", "activity", "help"):
         expect(p.locator(f".sb .nv[data-route='{rid}']")).to_be_visible()
     expect(p.locator(".sb .nv[data-route='members']")).to_have_attribute("aria-current", "page")
     expect(p.locator(".sb-foot .uchip .avatar")).to_be_visible()
+    expect(p.locator("#view .phd .help-btn")).to_be_hidden()  # Help lives in the rail
+    expect(p.locator(".sb .nv[data-route='members'] .ic-f")).to_be_visible()
+    p.locator(".sb .nv[data-route='help']").click()
+    expect(p.locator(".sb .nv[data-route='help']")).to_have_attribute("aria-current", "page")
+    p.go_back()
+    app.header("Members")
     expect(p.locator(".tabdock")).to_be_hidden()
     nb = p.locator(".nowbar")
     expect(nb).to_be_visible()

@@ -72,7 +72,7 @@ def test_prefs_phone_and_account_page(make_app, seeded):
     expect(p.locator("#view a.c-row", has_text="Members").locator(".c-val")).to_have_text(re.compile(r"\d+ people"))
     p.locator("#view a.c-row", has_text="App settings").click()
     app.header("App settings")
-    expect(p.locator(".c-seg-wrap")).to_have_count(4)  # language, appearance, reduce motion, look
+    expect(p.locator(".c-seg-wrap")).to_have_count(3)
     expect(p.locator("#view a.c-row", has_text="Speaker settings")).to_be_visible()  # owner only
     # back link on the phone header returns to Account
     p.locator("a.phd-back").click()

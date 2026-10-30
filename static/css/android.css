@@ -8,7 +8,7 @@
    switches, fields, chips, cards, sheets, popovers, snackbars, picker, tips, tour, loading) are restyled below.
    Page layouts (css/views/*) are the page teams' (phase 2).
 
-   CPU on phones: no glass except the nav pill (small), no infinite animation unless something is happening
+   CPU on phones: no glass except the nav pill (small) and the sheet scrim (6 px, measured cheap), no infinite animation unless something is happening
    (the Now Bar equalizer only while playing, the progress bar only while a page loads). Motion follows
    <html data-motion> like the rest of the app (base.css collapses durations under "reduce"). */
 
@@ -71,7 +71,7 @@
 /* ---------- base: no ambient blobs, no glass ---------- */
 :root[data-os="android"] .ambient::before, :root[data-os="android"] .ambient::after { display: none; }
 /* backdrop blur repaints everything under it on every scroll frame: only the small nav pill keeps it */
-:root[data-os="android"] *:not(.tabbar), :root[data-os="android"] *::before, :root[data-os="android"] *::after {
+:root[data-os="android"] *:not(.tabbar):not(.ov-scrim), :root[data-os="android"] *::before, :root[data-os="android"] *::after {
   -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
 }
 :root[data-os="android"] :focus-visible { outline-color: var(--md-primary); }
@@ -104,9 +104,25 @@
 :root[data-os="android"] .tab[aria-current="page"] .icon { color: var(--md-on-secondary-container); }
 :root[data-os="android"] .tab:focus-visible { outline-offset: -6px; border-radius: 30px; }
 
+/* nav icons: outlined, filled on the active destination (and on the one under the finger while sliding) */
+:root[data-os="android"] .tab, :root[data-os="android"] .nv { --icon-knock: var(--md-secondary-container); }
+:root[data-os="android"] .ic-f, :root[data-os="android"] [aria-current="page"] > .ic-o { display: none; }
+:root[data-os="android"] [aria-current="page"] > .ic-f { display: block; }
+/* drag to select (shell.js dragToSelect): the indicator follows the finger */
+:root[data-os="android"] .tabbar { touch-action: pan-y; -webkit-user-select: none; user-select: none; }
+:root[data-os="android"] [data-dragging] [aria-current="page"]:not([data-hot]) { color: var(--md-on-surface-variant); font-weight: 500; }
+:root[data-os="android"] [data-dragging] [aria-current="page"]:not([data-hot])::before { background: transparent; }
+:root[data-os="android"] [data-dragging] [aria-current="page"]:not([data-hot]) > .ic-f { display: none; }
+:root[data-os="android"] [data-dragging] [aria-current="page"]:not([data-hot]) > .ic-o { display: block; }
+:root[data-os="android"] [data-dragging] [data-hot] { color: var(--md-on-surface); font-weight: 700; }
+:root[data-os="android"] [data-dragging] [data-hot]::before { background: var(--md-secondary-container); }
+:root[data-os="android"] [data-dragging] [data-hot] > .ic-o { display: none; }
+:root[data-os="android"] [data-dragging] [data-hot] > .ic-f { display: block; color: var(--md-on-secondary-container); }
+
 /* top bar: 56 px, title left-aligned (M3 small top app bar); back arrow or speaker chip left, avatar right */
 :root[data-os="android"] .topbar { grid-template-columns: auto minmax(0, 1fr) auto; padding: var(--safe-t) max(4px, calc((100% - 560px) / 2)) 0; gap: 4px; }
 :root[data-os="android"] .topbar[data-under="true"] { background: var(--md-bar); border-bottom-color: transparent; }
+:root[data-os="android"] .topbar[data-title="true"] { box-shadow: 0 1px 0 var(--md-surface-high); }
 :root[data-os="android"] .topbar-l { padding-left: 4px; }
 :root[data-os="android"] .topbar-t { justify-self: start; padding-left: 12px; font-size: 20px; font-weight: 700; transform: translateY(4px); }
 :root[data-os="android"] .topbar:has(.topbar-l > *) .topbar-t { padding-left: 4px; }
@@ -120,14 +136,17 @@
 :root[data-os="android"] .me-top[aria-current="page"] .avatar { box-shadow: 0 0 0 2px var(--md-surface), 0 0 0 4px var(--md-primary); }
 
 /* One UI big header: the title sits low in a tall header area (thumb reach); the top bar takes it on scroll */
-:root[data-os="android"] .phd .pt { font-size: 34px; line-height: 1.2; font-weight: 700; letter-spacing: -.01em; }
+:root[data-os="android"] .phd .pt { font-size: 34px; line-height: 44px; font-weight: 700; letter-spacing: -.2px; }
 :root[data-os="android"] .phd-sub { margin-top: 6px; font-size: 15px; line-height: 1.5; color: var(--md-on-surface-variant); }
 :root[data-os="android"] .phd-back { gap: 6px; min-height: 40px; margin: 0 0 6px -8px; padding: 0 14px 0 8px; border-radius: 20px; color: var(--md-primary); font-size: 14px; }
 :root[data-os="android"] .phd-back:hover { background: color-mix(in srgb, var(--md-primary) 8%, transparent); }
 @media (max-width: 743.98px) {
   :root[data-os="android"] .main { padding-bottom: calc(108px + var(--safe-b)); }
   :root[data-os="android"][data-nowbar] .main { padding-bottom: calc(164px + var(--safe-b)); }
-  :root[data-os="android"] .phd { min-height: clamp(104px, 19vh, 184px); align-items: flex-end; padding: 0 4px 6px; }
+  /* A_ boards: the big title sits right under the 56 px bar (no band above it) and fades as the bar takes over */
+  :root[data-os="android"] .phd { padding: 0 8px 4px; }
+  :root[data-os="android"] .phd .pt, :root[data-os="android"] .phd-sub { transition: opacity var(--t-mid) var(--ease); }
+  :root[data-os="android"][data-bar-title] .phd .pt, :root[data-os="android"][data-bar-title] .phd-sub { opacity: 0; }
   :root[data-os="android"] .phd-back { display: none; } /* it is the arrow in the top bar */
 }
 
@@ -178,7 +197,7 @@
     border: 0; border-radius: 0; background: var(--md-surface); box-shadow: none;
   }
   :root[data-os="android"] .sb-spk, :root[data-os="android"] .nv-thumb { display: none; }
-  :root[data-os="android"] .sbn { width: 100%; align-items: center; gap: 4px; padding-top: 4px; }
+  :root[data-os="android"] .sbn { width: 100%; align-items: center; gap: 4px; padding-top: 4px; touch-action: pan-x; -webkit-user-select: none; user-select: none; }
   :root[data-os="android"] .nv {
     flex-direction: column; justify-content: flex-start; gap: 4px; width: 100%; height: auto; min-height: 60px; padding: 4px 2px 6px;
     border-radius: 0; background: transparent; color: var(--md-on-surface-variant); font-size: 12px; line-height: 16px; font-weight: 500; text-align: center;
@@ -206,7 +225,8 @@
   :root[data-os="android"] .main { padding: calc(32px + var(--safe-t)) 24px calc(40px + var(--safe-b)) calc(var(--rail) + 24px); }
   :root[data-os="android"][data-nowbar] .main { padding-bottom: calc(96px + var(--safe-b)); }
   :root[data-os="android"] .phd { margin-top: -32px; padding: 32px 0 12px; }
-  :root[data-os="android"] .phd .pt { font-size: 32px; }
+  :root[data-os="android"] .phd .pt { font-size: 34px; }
+  :root[data-os="android"] .phd-r .help-btn { display: none; } /* Help is in the rail */
   :root[data-os="android"] .phd::before { background: var(--md-bar); box-shadow: none; }
 
   :root[data-os="android"] .nowbar { left: var(--rail); bottom: calc(16px + var(--safe-b)); width: min(560px, calc(100% - var(--rail) - 48px)); }
@@ -335,7 +355,7 @@
 :root[data-os="android"] .sheet-head h2 { font-size: 22px; line-height: 28px; font-weight: 700; }
 :root[data-os="android"] .sheet-close { background: transparent; color: var(--md-on-surface-variant); }
 :root[data-os="android"] .sheet-body { padding: 4px 20px calc(24px + var(--safe-b)); gap: 16px; }
-:root[data-os="android"] .ov-scrim { background: var(--md-scrim); }
+:root[data-os="android"] .ov-scrim { background: var(--md-scrim); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
 @media (min-width: 744px) {
   :root[data-os="android"] .sheet { border: 0; border-radius: 28px; background: var(--md-surface-low); box-shadow: var(--md-pop-shadow); animation-timing-function: var(--ease); }
   :root[data-os="android"] .sheet::after { display: none; }

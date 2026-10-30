@@ -11,8 +11,63 @@ import { errorText } from './api.js';
 import { isAndroid } from './prefs.js';
 import { aicon } from './a-icons.js';
 
+/**
+ * Android nav pill and rail: press and slide along it (touch or pen), the destination under the finger lights up
+ * (data-hot) and releasing there opens it (prototype snippets/seg-drag.html). Taps and mouse clicks are untouched;
+ * the pill keeps vertical page panning (touch-action pan-y), the rail horizontal (pan-x). Listeners only.
+ */
+function dragToSelect(bar, axis) {
+  let g = null;           // { pid, x0, y0, on, hot }
+  let swallowUntil = 0;   // the click that follows a drag release must not also fire on the start item
+  const items = () => [...bar.querySelectorAll('a[data-route]')].filter((a) => a.offsetParent);
+  const setHot = (a) => {
+    if (g.hot === a) return;
+    if (g.hot) g.hot.removeAttribute('data-hot');
+    g.hot = a;
+    if (a) a.setAttribute('data-hot', '');
+  };
+  const end = (go) => {
+    if (!g) return;
+    const { on, hot } = g;
+    if (hot) hot.removeAttribute('data-hot');
+    bar.removeAttribute('data-dragging');
+    g = null;
+    if (!on) return;
+    swallowUntil = Date.now() + 500;
+    if (go && hot && !hot.hasAttribute('aria-current')) location.hash = hot.getAttribute('href');
+  };
+  bar.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' || g) return;
+    g = { pid: e.pointerId, x0: e.clientX, y0: e.clientY, on: false, hot: null };
+  });
+  bar.addEventListener('pointermove', (e) => {
+    if (!g || e.pointerId !== g.pid) return;
+    const along = axis === 'x' ? e.clientX - g.x0 : e.clientY - g.y0;
+    const across = axis === 'x' ? e.clientY - g.y0 : e.clientX - g.x0;
+    if (!g.on) {
+      if (Math.abs(along) < 8) { if (Math.abs(across) > 10) g = null; return; }
+      if (Math.abs(across) > Math.abs(along)) { g = null; return; }
+      g.on = true;
+      bar.setAttribute('data-dragging', '');
+      try { bar.setPointerCapture(e.pointerId); } catch { /* still tracks while over the bar */ }
+    }
+    const pos = axis === 'x' ? e.clientX : e.clientY;
+    let best = null, bd = Infinity;
+    for (const a of items()) {
+      const r = a.getBoundingClientRect();
+      const lo = axis === 'x' ? r.left : r.top, hi = axis === 'x' ? r.right : r.bottom;
+      const d = pos < lo ? lo - pos : pos > hi ? pos - hi : 0;
+      if (d < bd) { bd = d; best = a; }
+    }
+    setHot(best);
+  });
+  bar.addEventListener('pointerup', (e) => { if (g && e.pointerId === g.pid) end(true); });
+  bar.addEventListener('pointercancel', () => end(false));
+  bar.addEventListener('click', (e) => { if (Date.now() < swallowUntil) { e.preventDefault(); e.stopPropagation(); } }, true);
+}
+
 // Android rail: labels that fit an 80 px column (the phone tab label, else a short form, else the full name)
-const RAIL_LABEL = { settings: 'rail.settings', activity: 'rail.activity' };
+const RAIL_LABEL = { settings: 'rail.settings', activity: 'rail.activity', help: 'rail.help' };
 
 /**
  * buildShell({ user, api, onSignOut, onPickSpeaker, onCommand }) -> shell
@@ -36,17 +91,22 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker, onCommand }) {
   const topbar = h('div', { class: 'topbar', 'data-under': 'false', 'data-title': 'false' }, barLeft, barTitle, barRight);
 
   const tabThumb = h('span', { class: 'tab-thumb', 'aria-hidden': 'true' });
+  // Android: the active destination shows a filled icon (sprite i-<name>-fill), the others the outlined one
+  const navIcon = (r) => (android ? [icon(r.icon, 'ic-o'), icon(`${r.icon}-fill`, 'ic-f')] : icon(r.icon));
   const tabbar = h('div', { class: 'tabbar glass' }, tabThumb,
-    main.map((r) => h('a', { class: 'tab', href: href(r.id), dataset: { route: r.id } }, icon(r.icon), h('span', {}, t(r.tab)))));
+    main.map((r) => h('a', { class: 'tab', href: href(r.id), dataset: { route: r.id } }, navIcon(r), h('span', {}, t(r.tab)))));
   const meBtn = h('a', { class: 'me-btn glass', href: href('account'), dataset: { route: 'account' }, 'aria-label': t('acct.aria', user.display_name, roleLabel(user.role)) }, avatar(user));
   const tabdock = h('nav', { class: 'tabdock', 'aria-label': t('nav.main') }, tabbar, meBtn);
 
   /* ----- iPad / desktop: sidebar ----- */
   const navThumb = h('span', { class: 'nv-thumb', 'aria-hidden': 'true' });
-  const link = (r) => h('a', { class: 'nv', href: href(r.id), dataset: { route: r.id } }, icon(r.icon),
+  const link = (r) => h('a', { class: 'nv', href: href(r.id), dataset: { route: r.id } }, navIcon(r),
     h('span', {}, t(android ? r.tab || RAIL_LABEL[r.id] || r.label : r.label)));
+  // Android rail (AT_ boards): Help joins the lower group; the page header then has no Help button
+  const lower = android ? [...admin, ROUTES.find((r) => r.id === 'help')] : admin;
   const sbn = h('nav', { class: 'sbn', 'aria-label': t('nav.main') }, navThumb, main.map(link),
-    admin.length ? [h('span', { class: 'sb-sep', 'aria-hidden': 'true' }), admin.map(link)] : null);
+    lower.length ? [h('span', { class: 'sb-sep', 'aria-hidden': 'true' }), lower.map(link)] : null);
+  if (android) { dragToSelect(tabbar, 'x'); dragToSelect(sbn, 'y'); }
   const sideSpeaker = h('div', { class: 'sb-spk' });
   const uchip = h('button', {
     type: 'button', class: 'uchip', 'aria-haspopup': 'dialog', 'aria-expanded': 'false',
@@ -293,16 +353,21 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker, onCommand }) {
   ro.observe(sbn);
 
   /* ----- scroll: phone top bar background/title, large-screen sticky header ----- */
-  // Android phone: the big One UI header is taller, so the bar takes the title once the big title has gone under it
-  const bigTitleGone = () => {
+  // Android phone (A_ boards): the big title sits right under the bar and hands over to the bar's title once it is
+  // half under it; data-bar-title on <html> fades the big one out meanwhile
+  const bigTitleUnder = () => {
     const pt = content.querySelector('.phd .pt');
-    return !pt || pt.getBoundingClientRect().bottom < topbar.offsetHeight;
+    if (!pt) return true;
+    const r = pt.getBoundingClientRect();
+    return (r.top + r.bottom) / 2 < topbar.offsetHeight;
   };
   const onScroll = () => {
     const y = window.scrollY;
     document.documentElement.toggleAttribute('data-scrolled', y > 8);
     topbar.dataset.under = String(y > 4);
-    topbar.dataset.title = String(!!barTitle.textContent && (android && isPhone() ? y > 8 && bigTitleGone() : y > 44));
+    const barTitleOn = !!barTitle.textContent && (android && isPhone() ? y > 8 && bigTitleUnder() : y > 44);
+    topbar.dataset.title = String(barTitleOn);
+    if (android) document.documentElement.toggleAttribute('data-bar-title', barTitleOn);
   };
   window.addEventListener('scroll', onScroll, { passive: true });
 
@@ -310,7 +375,7 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker, onCommand }) {
     el, content, markRoute, setSpeakers, setStatus, header, accountItems, changePassword, onScroll,
     destroy() {
       ro.disconnect(); window.removeEventListener('scroll', onScroll); closePopover();
-      document.documentElement.removeAttribute('data-scrolled'); document.documentElement.removeAttribute('data-nowbar');
+      ['data-scrolled', 'data-nowbar', 'data-bar-title'].forEach((n) => document.documentElement.removeAttribute(n));
     },
   };
 }

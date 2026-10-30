@@ -2,7 +2,7 @@
 // language/theme re-render. Views follow the contract documented in routes.js.
 import { api, errorText, setUnauthorizedHandler } from './api.js';
 import { t, roleLabel, onLang } from './i18n.js';
-import { motionReduced, isAndroid, onChange as onPrefs } from './prefs.js';
+import { motionReduced, onChange as onPrefs } from './prefs.js';
 import { h, icon, toast } from './ui.js';
 import { openSheet, popover, closeAllSheets } from './sheet.js';
 import { buildShell } from './shell.js';
@@ -330,14 +330,6 @@ onLang(() => {
   if (shell) startApp();
   else if (screenLoad) showScreen(screenLoad); // login/setup keep their typed values (module-level drafts)
 });
-// the look (Android / glass) changes chrome markup (nav pill, rail, Now Bar): rebuild the shell like a language change
-let wasAndroid = isAndroid();
-onPrefs((p) => {
-  if (p.android !== wasAndroid) {
-    wasAndroid = p.android;
-    if (shell) { startApp(); return; }
-  }
-  if (shell) shell.onScroll();
-});
+onPrefs(() => { if (shell) shell.onScroll(); });
 
 boot();
