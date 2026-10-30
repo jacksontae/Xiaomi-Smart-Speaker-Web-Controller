@@ -344,7 +344,7 @@ export async function render(ctx) {
       ? h('button', { type: 'button', class: 'linkbtn np-more', 'aria-expanded': String(showAll), onclick: () => { showAll = !showAll; queueKey = ''; renderQueue(q, m); } },
         showAll ? t('now.showNext') : t('now.showAll', q.items.length))
       : null;
-    queueBox.replaceChildren(head, list, more);
+    queueBox.replaceChildren(...[head, list, more].filter(Boolean)); // no "Show all" link: nothing, not the text "null"
   }
 
   function tick() {
