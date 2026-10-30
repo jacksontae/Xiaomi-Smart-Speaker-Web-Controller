@@ -10,7 +10,9 @@ fetches it (from the speaker service or the cloud).
 ```
 
 > **Status:** builds for `esp32dev`, `esp32-s3` and `esp8266` (D1 mini / NodeMCU); the Cast codec has
-> host unit tests. Not yet tested on hardware.
+> host unit tests. Tested on an ESP32-D0WDQ6 (`esp32dev`) with a Xiaomi Mi Smart Speaker over MQTT:
+> status, volume, play, pause/resume/stop, and the speaker service's announcements, YouTube and
+> resume-after-announcement, over plain MQTT and over MQTT on WebSocket (Mosquitto `ws://`). ESP32-S3 and ESP8266 are not yet tested on hardware.
 
 ## Build and flash
 
@@ -30,6 +32,7 @@ pio test -e native                # codec tests on your computer
 | Recommended | Yes | For boards you already have |
 | Free heap | ~250 KB | ~46 KB at boot |
 | MQTT over TLS (cloud broker) | Yes, with CA verification | **No**: RAM fits only the speaker's TLS session. Use plain MQTT on a trusted LAN or VPN |
+| MQTT over WebSocket (`wss://`, e.g. through a Cloudflare Tunnel) | Yes; trusts the built-in public root CAs | No |
 | Pick speaker by `speaker_name` | From mDNS TXT records | Asks each speaker over HTTP :8008 (slower) |
 
 On ESP8266 the speaker connection needs a 16 KB TLS buffer unless the speaker accepts smaller
@@ -39,7 +42,8 @@ TLS records (probed on each connect). If you see out-of-memory resets, use an ES
 
 1. Power the board. With no Wi-Fi saved it opens an access point **SpeakerRelay-XXXX**.
 2. Join it and open `http://192.168.4.1/`.
-3. Enter the 2.4 GHz Wi-Fi name and password (same network as the speaker), optional MQTT broker,
+3. Enter the 2.4 GHz Wi-Fi name and password (same network as the speaker), optional MQTT broker
+   (a host name, or a `wss://host/path` URL for MQTT over WebSocket; the port and TLS fields are then ignored),
    and **copy the API token shown on the page**.
 4. Save. The board restarts, joins Wi-Fi, and prints its address on the serial monitor
    (also reachable as `http://<device-name>.local/`).
@@ -66,8 +70,10 @@ curl -X POST http://speaker-relay.local/api/play -H "Authorization: Bearer $TOKE
   -d '{"url":"http://192.0.2.20:8090/yt/abc.m4a?exp=…&sig=…","content_type":"audio/mp4"}'
 ```
 
-Over MQTT, add an `"id"` to match replies: results go to `<base>/result`, a retained status is
-published to `<base>/status` every 30 s, and `<base>/online` is `true`/`false` (last will).
+Over MQTT, add an `"id"` to match replies: results go to `<base>/result` (with the firmware `version`),
+a retained status is published to `<base>/status` every 30 s and within a second of any change (app,
+player state, track, volume) with `proto`, `seq` and `uptime`, and `<base>/online` is `true`/`false`
+(last will). `media` includes `content_type` and `duration` when the speaker reports them.
 `<base>` defaults to `speaker-relay/<device-name>`.
 
 Settings: `GET/POST /api/config` (secrets are never returned), `POST /api/token/rotate`

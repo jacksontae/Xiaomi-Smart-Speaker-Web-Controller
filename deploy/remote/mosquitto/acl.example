@@ -1,0 +1,14 @@
+# Copy to deploy/remote/mosquitto/acl. One user per relay, limited to its own base topic
+# (speaker-relay/<device-name> unless you set "mqtt_topic" on the relay).
+
+user speaker-service
+topic write speaker-relay/+/cmd
+topic read speaker-relay/+/result
+topic read speaker-relay/+/status
+topic read speaker-relay/+/online
+
+user relay-1
+topic read speaker-relay/speaker-relay/cmd
+topic write speaker-relay/speaker-relay/result
+topic write speaker-relay/speaker-relay/status
+topic write speaker-relay/speaker-relay/online

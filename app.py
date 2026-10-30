@@ -1,7 +1,8 @@
 """HTTP service that makes a Google Cast speaker announce text and play YouTube audio.
 
-The speaker fetches every stream from this service (TTS and YouTube are proxied),
-so it only needs to reach this machine on the LAN.
+The speaker fetches every stream from this service (TTS and YouTube are proxied). The service
+drives the speaker directly over Cast on the LAN, or through the ESP32 relay (firmware/) over MQTT
+when it runs elsewhere; see transport.py. Media URLs then go out under `public_base_url`.
 
 Callers authenticate with either `Authorization: Bearer <api_token>` (acts as admin) or the
 `sid` session cookie of a web account (admin, operator or viewer). The speaker cannot send
@@ -19,23 +20,20 @@ import secrets
 import socket
 import time
 import urllib.parse
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal
 
 import httpx
-import pychromecast
 import pychromecast.discovery
-import pychromecast.error
 import yt_dlp
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from pychromecast.const import CAST_TYPE_AUDIO
-from pychromecast.models import CastInfo, HostServiceInfo
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from auth import (
     DUMMY_HASH,
@@ -51,12 +49,12 @@ from auth import (
 )
 from player import Queue
 from store import SESSION_TTL, Conflict, Store
+from transport import SPEAKER_ERRORS, TransportError, make_transport
 
 ROOT = Path(__file__).parent
 CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", ROOT / "config.json"))
 DATA_PATH = Path(os.environ.get("DATA_PATH", ROOT / "data.db"))
 STATIC_DIR = ROOT / "static"
-DEFAULT_MEDIA_RECEIVER = "CC1AD845"
 TTS_CHUNK = 180  # Google Translate TTS rejects queries longer than ~200 chars
 YT_FORMAT = os.environ.get("YT_FORMAT", "bestaudio[ext=m4a]/bestaudio")
 CACHE_DIR = Path(os.environ.get("CACHE_DIR", ROOT / "cache"))
@@ -75,7 +73,51 @@ YT_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
 AUDIO_SUFFIXES = {".m4a", ".webm", ".mp3", ".opus", ".ogg", ".mp4", ".aac"}
 
 
+class MqttSettings(BaseModel):
+    """Broker the ESP32 relay listens on (transport "mqtt"). Secrets may come from the environment instead."""
+    host: str | None = None
+    port: int = Field(8883, ge=1, le=65535)
+    tls: bool = True
+    ca_file: str | None = None  # PEM bundle to trust; None = the system's CAs (fine for managed brokers)
+    username: str | None = None
+    password: str | None = Field(None, repr=False)
+    base_topic: str = "speaker-relay/speaker-relay"  # the relay's <base>; its default is speaker-relay/<device-name>
+    client_id: str | None = None  # None = random; must differ from the relay's own id (its device name)
+    keepalive: int = Field(60, ge=10, le=600)
+    offline_after: float = Field(90, ge=5)  # relay counts as offline after this long without a message
+    status_refresh: float = Field(2.0, ge=0.5)  # ask the relay for fresh state when ours is older than this
+    command_timeout: float = Field(10, gt=0)
+    play_timeout: float = Field(45, gt=0)  # a cold start on the speaker can take ~40 s
+    reconnect_min: float = Field(1, gt=0)
+    reconnect_max: float = Field(60, gt=0)
+
+    @field_validator("host", "username", "ca_file", "client_id")
+    @classmethod
+    def blank_is_none(cls, v):
+        return (v.strip() or None) if isinstance(v, str) else v
+
+    @field_validator("password")
+    @classmethod
+    def empty_password_is_none(cls, v):
+        return v or None  # spaces are legal in passwords, so no strip
+
+    @field_validator("base_topic")
+    @classmethod
+    def check_topic(cls, v):
+        v = v.strip().strip("/")
+        if not v or any(c in v for c in "+#\0"):
+            raise ValueError("base_topic must be a non-empty topic without wildcards (+ #)")
+        return v
+
+    @model_validator(mode="after")
+    def check_backoff(self):
+        if self.reconnect_max < self.reconnect_min:
+            raise ValueError("reconnect_max must be at least reconnect_min")
+        return self
+
+
 class Settings(BaseModel):
+    transport: Literal["cast", "mqtt"] = "cast"  # cast: speaker on this LAN; mqtt: through the ESP32 relay
     speaker_ip: str = "192.0.2.10"
     speaker_name: str = "Air Purifier speaker"
     port: int = Field(8090, ge=1024, le=65535)
@@ -83,34 +125,135 @@ class Settings(BaseModel):
     tts_lang: str = "th"
     cache_keep: int = Field(20, ge=1)  # most recent YouTube tracks kept on disk
     resume_after_say: bool = True  # continue the interrupted YouTube track after /say
-    public_base_url: str | None = None  # override when auto-detected LAN address is wrong
+    # Base of the signed media URLs given to the speaker, e.g. a Cloudflare Tunnel hostname.
+    # None = this machine's LAN address (only works when the speaker is on the same LAN).
+    public_base_url: str | None = None
     api_token: str | None = None  # Bearer token for the control API; generated on first run, never served
+    mqtt: MqttSettings = Field(default_factory=MqttSettings)
+
+    @field_validator("public_base_url")
+    @classmethod
+    def check_base_url(cls, v):
+        if v is None or not v.strip():
+            return None
+        v = v.strip().rstrip("/")
+        parts = urllib.parse.urlsplit(v)
+        if parts.scheme not in ("http", "https") or not parts.netloc or parts.query or parts.fragment:
+            raise ValueError("public_base_url must be an http(s) URL like https://speaker.example.com")
+        return v
+
+    @model_validator(mode="after")
+    def check_transport(self):
+        if self.transport == "mqtt" and not self.mqtt.host:
+            raise ValueError("transport \"mqtt\" needs mqtt.host (config or MQTT_HOST)")
+        return self
 
 
-def load_settings():
-    s = Settings(**json.loads(CONFIG_PATH.read_text())) if CONFIG_PATH.exists() else Settings()
+# Environment variables that override config.json (handy for secrets in Docker). Never written back to disk.
+ENV_OVERRIDES = {
+    "SPEAKER_TRANSPORT": ("transport",),
+    "PUBLIC_BASE_URL": ("public_base_url",),
+    "MQTT_HOST": ("mqtt", "host"),
+    "MQTT_PORT": ("mqtt", "port"),
+    "MQTT_TLS": ("mqtt", "tls"),
+    "MQTT_CA_FILE": ("mqtt", "ca_file"),
+    "MQTT_USERNAME": ("mqtt", "username"),
+    "MQTT_PASSWORD": ("mqtt", "password"),
+    "MQTT_BASE_TOPIC": ("mqtt", "base_topic"),
+    "MQTT_CLIENT_ID": ("mqtt", "client_id"),
+}
+
+
+def _env_overrides(environ=None):
+    environ = os.environ if environ is None else environ
+    return {path: environ[name] for name, path in ENV_OVERRIDES.items() if environ.get(name, "") != ""}
+
+
+def _with_overrides(data, overrides):
+    data = json.loads(json.dumps(data))  # deep copy
+    for path, value in overrides.items():
+        node = data
+        for key in path[:-1]:
+            node = node.setdefault(key, {})
+        node[path[-1]] = value
+    return data
+
+
+def load_settings(environ=None):
+    data = json.loads(CONFIG_PATH.read_text()) if CONFIG_PATH.exists() else {}
+    s = Settings(**_with_overrides(data, _env_overrides(environ)))
     if not s.api_token:
         s.api_token = secrets.token_urlsafe(32)
-        save_settings(s)
+        save_settings(s, environ)
+    if s.transport == "mqtt" and not s.public_base_url:
+        print("warning: transport is mqtt but public_base_url is unset; the speaker gets LAN media URLs")
+    if s.mqtt.username and not s.mqtt.tls:
+        print("warning: MQTT credentials are sent without TLS (mqtt.tls is false)")
     return s
 
 
-def save_settings(s):
-    CONFIG_PATH.write_text(json.dumps(s.model_dump(), indent=2, ensure_ascii=False) + "\n")
-    CONFIG_PATH.chmod(0o600)  # holds the API token
+def save_settings(s, environ=None):
+    """Write config.json, keeping what the file had for values that came from the environment."""
+    on_disk = json.loads(CONFIG_PATH.read_text()) if CONFIG_PATH.exists() else {}
+    data = s.model_dump()
+    for path in _env_overrides(environ):
+        node, disk = data, on_disk
+        for key in path[:-1]:
+            node, disk = node[key], disk.get(key) if isinstance(disk.get(key), dict) else {}
+        if path[-1] in disk:
+            node[path[-1]] = disk[path[-1]]
+        else:
+            node.pop(path[-1], None)
+    CONFIG_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    CONFIG_PATH.chmod(0o600)  # holds the API token (and maybe the MQTT password)
 
 
 def public_settings(s):
-    return s.model_dump(exclude={"api_token"})
+    data = s.model_dump(exclude={"api_token"})
+    data["mqtt"]["password_set"] = bool(data["mqtt"].pop("password"))
+    return data
+
+
+def merge_settings(current, changes):
+    """Partial update; `mqtt` merges field by field so a change doesn't wipe the stored password."""
+    data = current.model_dump()
+    for key, value in changes.items():
+        if key == "mqtt" and isinstance(value, dict):
+            data["mqtt"] = {**data["mqtt"], **value}
+        else:
+            data[key] = value
+    return Settings(**data)
+
+
+def describe_changes(changes):
+    """Settings changes for the activity log, with secrets masked."""
+    parts = []
+    for key, value in changes.items():
+        if key == "mqtt" and isinstance(value, dict):
+            parts += [f"mqtt.{k}={'***' if k == 'password' else v}" for k, v in value.items()]
+        else:
+            parts.append(f"{key}={value}")
+    return ", ".join(parts)[:500]
 
 
 settings = load_settings()
+transport = make_transport(settings)
 db = Store(DATA_PATH)
 login_throttle = Throttle(limit=5, window=300)
-app = FastAPI(title="Speaker Service")
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    transport.start()  # the mqtt transport connects to the broker here; cast connects on first use
+    try:
+        yield
+    finally:
+        transport.close()
+
+
+app = FastAPI(title="Speaker Service", lifespan=lifespan)
 http = httpx.AsyncClient(timeout=30, follow_redirects=True)
 cast_lock = asyncio.Lock()
-_cast = None
 bearer = HTTPBearer(auto_error=False, description="The api_token from config.json (`./speakerctl token`)")
 
 
@@ -241,52 +384,12 @@ def base_url():
     return settings.public_base_url or f"http://{host_ip()}:{settings.port}"
 
 
-# --- Cast ---
-
-def connect_speaker(ip):
-    """Connect without pychromecast's blocking 30 s HTTP probe for the cast type.
-
-    Bounded retries make an unreachable speaker fail in ~10 s instead of hanging;
-    when the worker later gives up, get_cast() sees a dead thread and reconnects.
-    """
-    info = CastInfo({HostServiceInfo(ip, 8009)}, None, None, None, ip, 8009, CAST_TYPE_AUDIO, None)
-    return pychromecast.Chromecast(info, tries=2, retry_wait=1, timeout=4)
-
-
-def get_cast():
-    global _cast
-    if _cast is not None and not _cast.socket_client.is_alive():
-        drop_cast()  # worker thread is gone; pychromecast won't reconnect it
-    if _cast is None:
-        _cast = connect_speaker(settings.speaker_ip)
-        _cast.wait(timeout=10)
-    elif not _cast.socket_client.is_connected:
-        _cast.wait(timeout=10)  # pychromecast is already reconnecting; let it finish
-    return _cast
-
-
-def drop_cast():
-    global _cast
-    if _cast is not None:
-        # Signal the worker to stop without joining: Chromecast.disconnect(timeout=0) raises if it's still alive.
-        _cast.socket_client.disconnect()
-        _cast = None
-
+# --- Speaker ---
 
 def cast_play(url, content_type, title=None, volume=None, current_time=None, keep_volume=False):
-    cast = get_cast()
     if volume is None and not keep_volume:
         volume = settings.default_volume
-    if volume is not None:
-        cast.set_volume(volume)
-    # Other apps (e.g. Spotify) ignore LOAD for arbitrary URLs, so switch receivers first.
-    if cast.app_id != DEFAULT_MEDIA_RECEIVER:
-        cast.start_app(DEFAULT_MEDIA_RECEIVER)
-        cast.wait(timeout=10)
-    mc = cast.media_controller
-    # BUFFERED (not the LIVE default) so the receiver honours current_time and allows seeking.
-    mc.play_media(url, content_type, title=title, current_time=current_time, stream_type="BUFFERED")
-    mc.block_until_active(timeout=10)
+    transport.play(url, content_type, title, volume, current_time)
 
 
 # --- Resume YouTube after an announcement ---
@@ -297,7 +400,7 @@ _say_gen = 0  # bumped by every play action so stale resume watchers give up
 
 def capture_youtube():
     """Snapshot the YouTube track (or current queue item) this service is playing, if any."""
-    m = get_cast().media_controller.status
+    m = transport.media()
     content_id = m.content_id or ""
     from_queue = _queue is not None and content_id == _queue.current_url
     if not (content_id.startswith(f"{base_url()}/yt/") or from_queue):
@@ -335,7 +438,7 @@ async def _watch_and_resume(gen, tts_prefix):
         await asyncio.sleep(0.5)
         if gen != _say_gen:
             return  # a newer action took over
-        m = await run_cast(lambda: get_cast().media_controller.status)
+        m = await run_cast(transport.media)
         content_id = m.content_id or ""
         if _resume and content_id == _resume["url"]:
             continue  # status hasn't switched to the announcement yet
@@ -349,13 +452,12 @@ async def _watch_and_resume(gen, tts_prefix):
         await run_cast(cast_play, track["url"], track["content_type"], track["title"], None, track["position"])
 
 
-SPEAKER_ERRORS = (pychromecast.error.PyChromecastError, OSError)
-
-
 async def run_cast(fn, *args, **kwargs):
     async with cast_lock:
         try:
             return await asyncio.to_thread(fn, *args, **kwargs)
+        except TransportError as e:
+            raise HTTPException(503, str(e)) from e
         except SPEAKER_ERRORS as e:
             detail = f"Speaker {settings.speaker_ip} is not responding ({type(e).__name__}); is it on the same network?"
             raise HTTPException(503, detail) from e
@@ -599,10 +701,10 @@ async def queue_tick():
     q, gen = _queue, _queue_gen
     if q is None:
         return
-    m = await run_cast(lambda: get_cast().media_controller.status)
+    m = await run_cast(transport.media)
     if q is not _queue or gen != _queue_gen or m.player_state != "IDLE":
         return
-    content_id, reason = m.content_id or "", getattr(m, "idle_reason", None)
+    content_id, reason = m.content_id or "", m.idle_reason
     if q.current_url and content_id == q.current_url:
         if reason == "ERROR":
             if not skip_failed(q, "the speaker could not play it"):
@@ -642,12 +744,12 @@ def ensure_queue_watcher():
 
 def queue_after_say(q):
     """Whether the queue should move on once an announcement ends (its track won't be resumed)."""
-    m = get_cast().media_controller.status
+    m = transport.media()
     if (m.content_id or "") != q.current_url:
         return q.after_say  # back-to-back announcements keep the earlier decision
     if m.player_state in ("PLAYING", "BUFFERING"):
         return True  # replaced without a resume (resume_after_say is off)
-    return m.player_state == "IDLE" and getattr(m, "idle_reason", None) == "FINISHED"
+    return m.player_state == "IDLE" and m.idle_reason == "FINISHED"
 
 
 def thumbnail_for(content_id):
@@ -941,16 +1043,17 @@ async def delete_user(user_id: int, who: Who):
 # --- Player ---
 
 @viewer_api.get("/status")
-async def status():
+async def status(who: Who):
+    relay = transport.relay_status() if who.role == "admin" else None  # relay details are admin-only
+
     def read():
-        cast = get_cast()
-        s, m = cast.status, cast.media_controller.status
+        r, m = transport.receiver(), transport.media()
         return {
-            "speaker": cast.cast_info.friendly_name or settings.speaker_name,
-            "ip": settings.speaker_ip,
-            "app": s.display_name,
-            "volume": round(s.volume_level, 2),
-            "muted": s.volume_muted,
+            "speaker": r.name or settings.speaker_name,
+            "ip": r.ip,
+            "app": r.app,
+            "volume": round(r.volume, 2) if r.volume is not None else None,
+            "muted": r.muted,
             "media": {
                 "title": m.title,
                 "state": m.player_state,
@@ -963,7 +1066,16 @@ async def status():
             "queue": _queue.summary() if _queue is not None else None,
         }
 
-    return await run_cast(read)
+    try:
+        result = await run_cast(read)
+    except HTTPException as e:
+        if relay is None:
+            raise
+        # Admins still get the relay's health while it (or the speaker behind it) is unreachable.
+        return JSONResponse({"detail": e.detail, "relay": transport.relay_status()}, status_code=e.status_code)
+    if who.role == "admin":
+        result["relay"] = relay
+    return result
 
 
 @operator_api.post("/say")
@@ -1019,27 +1131,27 @@ async def youtube_search(q: Annotated[str, Query(min_length=1, max_length=200)],
 async def volume(body: VolumeBody, who: Who):
     if not 0 <= body.level <= 1:
         raise HTTPException(400, "level must be between 0 and 1")
-    await run_cast(lambda: get_cast().set_volume(body.level))
+    await run_cast(transport.set_volume, body.level)
     record(who, "volume", f"{round(body.level * 100)}%", coalesce=VOLUME_COALESCE)
     return {"ok": True, "volume": body.level}
 
 
 @operator_api.post("/pause")
 async def pause():
-    await run_cast(lambda: get_cast().media_controller.pause())
+    await run_cast(transport.pause)
     return {"ok": True}
 
 
 @operator_api.post("/resume")
 async def resume():
-    await run_cast(lambda: get_cast().media_controller.play())
+    await run_cast(transport.resume)
     return {"ok": True}
 
 
 async def stop_everything():
     cancel_resume()
     clear_queue()
-    await run_cast(lambda: get_cast().quit_app())
+    await run_cast(transport.stop)
 
 
 @operator_api.post("/stop")
@@ -1059,18 +1171,22 @@ async def get_settings():
 @admin_api.post("/settings")
 async def update_settings(changes: dict, background: BackgroundTasks, who: Who):
     """Partial update. Changing the port restarts the process; launchd brings it back up."""
-    global settings
+    global settings, transport
     if "api_token" in changes:
         raise HTTPException(400, "api_token can't be changed over the API; rotate it with ./speakerctl token --rotate")
     try:
-        new = Settings(**{**settings.model_dump(), **changes})
+        new = merge_settings(settings, changes)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     old, settings = settings, new
     save_settings(new)
-    record(who, "settings change", ", ".join(f"{k}={v}" for k, v in changes.items())[:500])
-    if new.speaker_ip != old.speaker_ip:
-        await run_cast(drop_cast)
+    record(who, "settings change", describe_changes(changes))
+    if (new.transport, new.speaker_ip, new.speaker_name, new.mqtt) != (
+        old.transport, old.speaker_ip, old.speaker_name, old.mqtt
+    ):
+        old_transport, transport = transport, make_transport(new)
+        await run_cast(old_transport.close)
+        transport.start()
     restart = new.port != old.port
     if restart:
         background.add_task(lambda: os._exit(0))

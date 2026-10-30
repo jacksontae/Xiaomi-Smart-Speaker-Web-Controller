@@ -19,3 +19,8 @@ firmware/.pio/
 # Local database (users, sessions, playlists)
 data.db
 data.db-*
+
+# Remote deployment secrets (deploy/remote/.env.example is the template)
+deploy/remote/.env
+deploy/remote/mosquitto/passwd
+deploy/remote/mosquitto/acl

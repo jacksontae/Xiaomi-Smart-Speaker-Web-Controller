@@ -57,6 +57,8 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 | `tts_lang` | `th` | ภาษาเริ่มต้นของ `/say` |
 | `cache_keep` | `20` | จำนวนเพลง YouTube ที่เก็บใน `cache/` |
 | `resume_after_say` | `true` | ประกาศเสร็จแล้วเล่นเพลง YouTube ที่ค้างอยู่ต่อจากจุดเดิม (ย้อน 1 วินาที) |
+| `transport` | `cast` | `cast` = สั่งลำโพงตรงในวง LAN · `mqtt` = สั่งผ่าน ESP32 relay (ดู Remote deployment) |
+| `mqtt` | ดู `config.example.json` | broker ของ relay: `host`, `port`, `tls`, `username`, `password`, `base_topic`, `client_id` |
 | `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.0.2.20:8090` |
 
 ```bash
@@ -145,6 +147,53 @@ curl -X POST localhost:8090/youtube -H "Authorization: Bearer $TOKEN" -H 'Conten
 curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"shuffle":true,"repeat":"all"}'
 ```
 
+## Remote deployment (ESP32 relay + self-hosted MQTT + Cloudflare Tunnel)
+
+Use this when the service runs somewhere other than the speaker's LAN (e.g. a VM without a fixed IP).
+Everything runs on the VM: the service, a Mosquitto broker and `cloudflared`. Nothing is published on
+the VM's own ports; the relay reaches the broker over `wss://` through the tunnel.
+
+```
+[ESP32 relay] --wss://mqtt.example.com--> [Cloudflare Tunnel] --> [mosquitto :9001 (WebSocket)]
+      |                                                                   ^ :1883 (compose network)
+      +--Cast--> [speaker] --HTTPS (signed media URLs)--> [tunnel] --> [speaker-service]
+```
+
+1. **Broker logins.** `cp deploy/remote/mosquitto/acl.example deploy/remote/mosquitto/acl`, then
+   `sh deploy/remote/mosquitto/add-user.sh speaker-service` and `sh deploy/remote/mosquitto/add-user.sh relay-1`
+   (one login per relay; the ACL limits each relay to its own base topic). Anonymous clients are refused.
+2. **Tunnel.** Create a Cloudflare Tunnel with two public hostnames:
+   `speaker.example.com` → `http://speaker-service:8090` (web UI and the signed media paths) and
+   `mqtt.example.com` → `http://mosquitto:9001` (Cloudflare carries WebSockets; it terminates TLS).
+3. **Service.** `cp deploy/remote/.env.example deploy/remote/.env`, fill it in (`PUBLIC_BASE_URL` =
+   `https://speaker.example.com`, `MQTT_PASSWORD` = the `speaker-service` password), then
+   `docker compose -f deploy/remote/docker-compose.yml up -d --build`.
+4. **Relay.** Flash `firmware/` to an ESP32 next to the speaker (see `firmware/README.md`) and set the
+   broker to `wss://mqtt.example.com` with the `relay-1` login. The firmware trusts the public root CAs
+   Cloudflare uses; no CA upload is needed. ESP8266 can't do MQTT over WebSocket.
+
+A managed broker (HiveMQ Cloud, EMQX Cloud, ...) still works: point `MQTT_HOST`/`MQTT_PORT`/`MQTT_TLS` at it
+instead of the `mosquitto` service, and give the relay its host, port 8883 and TLS.
+
+Settings can also live in `config.json` (`"transport": "mqtt"`, an `mqtt` block, `public_base_url`).
+The environment variables `SPEAKER_TRANSPORT`, `PUBLIC_BASE_URL`, `MQTT_HOST`, `MQTT_PORT`, `MQTT_TLS`,
+`MQTT_CA_FILE`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_BASE_TOPIC` and `MQTT_CLIENT_ID` override it and
+are never written back to the file. The MQTT password is never returned by `/settings` or written to the
+activity log.
+
+How it behaves:
+
+- Commands go to `<base>/cmd`; the relay answers on `<base>/result`. The service refreshes the speaker
+  state with a `status` command when it is older than `mqtt.status_refresh` seconds (only while
+  something asks: the queue watcher, a resume after an announcement, or `/status`).
+- The relay counts as **offline** when its last will (`<base>/online` = `false`) fires or nothing has
+  arrived from it for `mqtt.offline_after` seconds (it publishes status every 30 s). Commands then
+  fail fast with `503`.
+- Admins see `relay` in `GET /status`: `online`, `broker_connected`, `last_seen`, `firmware_version`,
+  `relay_ip`, `rssi`. While the relay is down, admins still get it in the `503` body.
+- The broker connection reconnects on its own with exponential backoff (`mqtt.reconnect_min`..`reconnect_max`).
+- Without `public_base_url` the service falls back to its LAN address, which a remote speaker can't reach.
+
 ## หมายเหตุ
 
 - **service ยังเป็น HTTP ธรรมดา (ไม่มี TLS)** token จึงวิ่งแบบไม่เข้ารหัสในวง LAN ถ้าจะเรียกจากนอกบ้าน ให้ผ่าน Tailscale หรือ tunnel ที่เป็น HTTPS อย่าเปิดพอร์ต 8090 ออกอินเทอร์เน็ตตรงๆ
@@ -159,13 +208,14 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 ## โครงสร้างโปรเจกต์
 
 ```
-app.py                 FastAPI service: Cast control, TTS, YouTube cache, settings, API ทั้งหมด
+app.py                 FastAPI service: TTS, YouTube cache, คิว, settings, API ทั้งหมด
+transport.py           ช่องทางสั่งลำโพง: Cast ตรง (pychromecast) หรือผ่าน ESP32 relay ทาง MQTT
 auth.py                รหัสผ่าน (scrypt), session token, จำกัดการล็อกอินผิด
 store.py               SQLite: ผู้ใช้ session เพลย์ลิสต์ ข้อความด่วน บันทึกกิจกรรม
 player.py              คิวเพลง (ลำดับเล่น shuffle repeat)
 static/                หน้าเว็บควบคุม
 speakerctl             จัดการ LaunchAgent บน macOS
-deploy/                template ของ LaunchAgent
+deploy/                template ของ LaunchAgent · deploy/remote/ = Docker Compose สำหรับ VM (service + Mosquitto + cloudflared)
 tests/                 pytest + ลำโพงจำลอง (ไม่ต้องมีลำโพงจริง)
 firmware/              firmware ESP32 / ESP8266 (PlatformIO) ตัวกลางสั่งลำโพงในวง LAN
 config.example.json    ตัวอย่างไฟล์ตั้งค่า (คัดลอกเป็น config.json)

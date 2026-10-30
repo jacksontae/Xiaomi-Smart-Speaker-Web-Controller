@@ -102,6 +102,9 @@ void CastClient::handle(const castmsg::Message& m) {
         connectedTransport_ = "";
         return;
     }
+    const String beforeApp = appId_, beforeState = playerState_, beforeIdle = idleReason_, beforeId = contentId_;
+    const float beforeVolume = volume_;
+    const bool beforeMuted = muted_;
     if (type == "RECEIVER_STATUS") {
         JsonVariantConst st = doc["status"];
         if (!st["volume"]["level"].isNull()) volume_ = st["volume"]["level"].as<float>();
@@ -118,6 +121,10 @@ void CastClient::handle(const castmsg::Message& m) {
             appId_ = appName_ = transportId_ = sessionId_ = connectedTransport_ = "";
             mediaSessionId_ = 0;
             playerState_ = "";
+            // no app means no media: drop the last track so status doesn't report it after a stop
+            title_ = contentId_ = contentType_ = idleReason_ = "";
+            duration_ = -1;
+            position_ = 0;
         }
     } else if (type == "MEDIA_STATUS") {
         JsonArrayConst list = doc["status"].as<JsonArrayConst>();
@@ -134,11 +141,18 @@ void CastClient::handle(const castmsg::Message& m) {
                 positionAt_ = millis();
             }
             if (!s["media"].isNull()) {
-                contentId_ = s["media"]["contentId"] | contentId_.c_str();
+                String id = s["media"]["contentId"] | contentId_.c_str();
+                if (id != contentId_) duration_ = -1;  // a new track; don't carry the old length over
+                contentId_ = id;
+                contentType_ = s["media"]["contentType"] | contentType_.c_str();
                 title_ = s["media"]["metadata"]["title"] | title_.c_str();
+                if (!s["media"]["duration"].isNull()) duration_ = s["media"]["duration"].as<float>();
             }
         }
     }
+    if (appId_ != beforeApp || playerState_ != beforeState || idleReason_ != beforeIdle || contentId_ != beforeId ||
+        volume_ != beforeVolume || muted_ != beforeMuted)
+        changes_++;
     uint32_t id = doc["requestId"] | 0;
     if (id) {
         replyId_ = id;
@@ -314,4 +328,6 @@ void CastClient::status(JsonObject out) const {
     if (playerState_ == "PLAYING") pos += (millis() - positionAt_) / 1000.0f;
     media["position"] = pos;
     media["content_id"] = contentId_;
+    if (contentType_.length()) media["content_type"] = contentType_;
+    if (duration_ >= 0) media["duration"] = duration_;
 }

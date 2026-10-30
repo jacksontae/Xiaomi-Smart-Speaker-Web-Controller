@@ -3,6 +3,8 @@ import json
 
 from conftest import BASE, path_of
 
+from transport import DEFAULT_MEDIA_RECEIVER
+
 
 def test_status_reports_speaker(client):
     r = client.get("/status")
@@ -15,7 +17,7 @@ def test_status_reports_speaker(client):
 def test_say_switches_receiver_and_loads_tts(client, fake_speaker, app):
     r = client.post("/say", json={"text": "ทดสอบ"})
     assert r.status_code == 200
-    assert fake_speaker.started == [app.DEFAULT_MEDIA_RECEIVER]
+    assert fake_speaker.started == [DEFAULT_MEDIA_RECEIVER]
     load = fake_speaker.media_controller.loads[-1]
     assert load["url"].startswith(f"{BASE}/tts.mp3?")
     assert load["title"] == "Announcement"
@@ -135,7 +137,7 @@ def test_unreachable_speaker_returns_503(client, app, monkeypatch):
     def unreachable():
         raise pychromecast.error.RequestTimeout("wait", 10)
 
-    monkeypatch.setattr(app, "get_cast", unreachable)
+    monkeypatch.setattr(app.transport, "get_cast", unreachable)
     r = client.get("/status")
     assert r.status_code == 503
     assert "not responding" in r.json()["detail"]
@@ -149,7 +151,7 @@ def test_resume_dropped_when_speaker_disappears(app, monkeypatch):
 
     app._resume = {"url": f"{BASE}/yt/abc.m4a", "content_type": "audio/mp4", "title": "Song", "position": 1}
     app._say_gen = 2
-    monkeypatch.setattr(app, "get_cast", unreachable)
+    monkeypatch.setattr(app.transport, "get_cast", unreachable)
     asyncio.run(app.resume_after_announcement(2, f"{BASE}/tts.mp3"))
     assert app._resume is None
 

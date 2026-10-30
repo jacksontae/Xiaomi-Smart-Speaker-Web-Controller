@@ -3,4 +3,5 @@ uvicorn>=0.54
 httpx>=0.28
 pydantic>=2.14
 PyChromecast>=14.0
+paho-mqtt==2.1.0
 yt-dlp[default]>=2026.10.26

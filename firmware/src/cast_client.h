@@ -29,6 +29,9 @@ class CastClient {
     bool resume(String& err);
     bool refresh(String& err);
     void status(JsonObject out) const;
+    // Bumped whenever the app, player state, idle reason, track or volume changes; lets the
+    // caller publish status on change instead of polling.
+    uint32_t changes() const { return changes_; }
 
    private:
     bool send(const char* dest, const char* ns, JsonDocument& doc);
@@ -65,6 +68,9 @@ class CastClient {
     String idleReason_;
     String title_;
     String contentId_;
+    String contentType_;
+    float duration_ = -1;
     float position_ = 0;
     uint32_t positionAt_ = 0;
+    uint32_t changes_ = 0;
 };
