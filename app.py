@@ -1,4 +1,5 @@
-"""HTTP service that makes a Google Cast speaker announce text and play YouTube audio.
+"""HTTP service that makes a Google Cast speaker announce text and play YouTube audio, internet radio,
+podcast episodes and uploaded audio files.
 
 The speaker fetches every stream from this service (TTS and YouTube are proxied). The service
 drives the speaker directly over Cast on the LAN, or through the ESP32 relay (firmware/) over MQTT
@@ -9,8 +10,11 @@ Callers authenticate with either `Authorization: Bearer <api_token>` (acts as ad
 headers, so the media URLs handed to it are signed with an HMAC of the token instead.
 """
 import asyncio
+import email.utils
 import hashlib
 import hmac
+import html
+import ipaddress
 import itertools
 import json
 import mimetypes
@@ -26,6 +30,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
+from xml.etree import ElementTree
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -93,6 +98,26 @@ GOOGLE_CLIENT_ID_RE = re.compile(r"[A-Za-z0-9.-]+\.apps\.googleusercontent\.com"
 TIME_RE = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 AUDIO_SUFFIXES = {".m4a", ".webm", ".mp3", ".opus", ".ogg", ".mp4", ".aac"}
+MEDIA_DIR = Path(os.environ.get("MEDIA_DIR", DATA_PATH.parent / "media"))  # uploaded audio ("My files")
+UPLOAD_MAX = int(os.environ.get("UPLOAD_MAX_MB", "50")) * 1024 * 1024  # per file
+UPLOAD_QUOTA = int(os.environ.get("UPLOAD_QUOTA_MB", "2000")) * 1024 * 1024  # all uploads together
+UPLOAD_TITLE_MAX = 200
+# Uploads are recognised by their first bytes (name and Content-Type aren't trusted) and stored with
+# this extension; the value is the content type the speaker is told.
+FILE_TYPES = {
+    ".mp3": "audio/mpeg", ".aac": "audio/aac", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".wav": "audio/wav",
+    ".flac": "audio/flac", ".webm": "audio/webm",
+}
+RADIO_API = os.environ.get("RADIO_BROWSER_URL", "https://all.api.radio-browser.info").rstrip("/")
+RADIO_CODECS = {"MP3": "audio/mpeg", "AAC": "audio/aac", "AAC+": "audio/aac", "OGG": "audio/ogg",
+                "OPUS": "audio/ogg", "FLAC": "audio/flac"}
+PODCAST_SEARCH = os.environ.get("PODCAST_SEARCH_URL", "https://itunes.apple.com/search")
+FEED_MAX = 10 * 1024 * 1024  # bytes of RSS we read at most
+FEED_REDIRECTS = 5
+EPISODES_MAX = 200
+USER_AGENT = "speaker-service/0.2"  # radio-browser asks clients to identify themselves
+STATION_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+ITUNES_NS = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
 
 
 class MqttSettings(BaseModel):
@@ -315,6 +340,8 @@ async def lifespan(_app):
 
 app = FastAPI(title="Speaker Service", lifespan=lifespan)
 http = httpx.AsyncClient(timeout=30, follow_redirects=True)
+# For URLs users type in (podcast feeds): redirects are followed by hand so each hop is checked first.
+feed_http = httpx.AsyncClient(timeout=20, follow_redirects=False)
 cast_lock = asyncio.Lock()
 bearer = HTTPBearer(auto_error=False, description="The api_token from config.json (`./speakerctl token`)")
 
@@ -448,32 +475,36 @@ def base_url():
 
 # --- Speaker ---
 
-def cast_play(url, content_type, title=None, volume=None, current_time=None, keep_volume=False):
+def cast_play(url, content_type, title=None, volume=None, current_time=None, keep_volume=False, live=False):
     if volume is None and not keep_volume:
         volume = settings.default_volume
-    transport.play(url, content_type, title, volume, current_time)
+    transport.play(url, content_type, title, volume, current_time, live=live)
 
 
 # --- Resume YouTube after an announcement ---
 
-_resume = None  # track interrupted by an announcement: {"url", "content_type", "title", "position"}
+_resume = None  # track interrupted by an announcement: {"url", "content_type", "title", "position", "live"}
 _say_gen = 0  # bumped by every play action so stale resume watchers give up
+_direct = None  # radio station, podcast episode or file started outside the queue: {"url", "live", "thumbnail"}
 
 
 def capture_youtube():
-    """Snapshot the YouTube track (or current queue item) this service is playing, if any."""
+    """Snapshot the YouTube track, queue item or other source this service is playing, if any."""
     m = transport.media()
     content_id = m.content_id or ""
     from_queue = _queue is not None and content_id == _queue.current_url
-    if not (content_id.startswith(f"{base_url()}/yt/") or from_queue):
+    from_direct = _direct is not None and content_id == _direct["url"]
+    if not (content_id.startswith(f"{base_url()}/yt/") or from_queue or from_direct):
         return None
     if m.player_state not in ("PLAYING", "BUFFERING"):
         return None
+    live = (from_queue and _queue.current["kind"] == "radio") or (from_direct and _direct["live"])
     return {
         "url": m.content_id,
         "content_type": m.content_type,
         "title": m.title,
-        "position": max(0.0, m.adjusted_current_time - RESUME_REWIND),
+        "position": None if live else max(0.0, m.adjusted_current_time - RESUME_REWIND),
+        "live": live,
     }
 
 
@@ -511,7 +542,8 @@ async def _watch_and_resume(gen, tts_prefix):
             break
     track, _resume = _resume, None
     if track and gen == _say_gen:
-        await run_cast(cast_play, track["url"], track["content_type"], track["title"], None, track["position"])
+        await run_cast(cast_play, track["url"], track["content_type"], track["title"], None, track["position"],
+                       live=track.get("live", False))
 
 
 async def run_cast(fn, *args, **kwargs):
@@ -668,9 +700,11 @@ def spawn(coro):
 
 
 def clear_queue():
-    global _queue, _queue_gen
+    """Forget the queue (and a direct radio/podcast/file play): something else is about to play."""
+    global _queue, _queue_gen, _direct
     _queue = None
     _queue_gen += 1
+    _direct = None
 
 
 def end_queue(q):
@@ -701,8 +735,21 @@ async def queue_media(item):
     if item["kind"] == "tts":
         lang = item["lang"] or settings.tts_lang
         return media_url("/tts.mp3", text=item["source"], lang=lang, n=nonce), "audio/mp3"
-    guessed = mimetypes.guess_type(urllib.parse.urlparse(item["source"]).path)[0]
-    return item["source"], guessed if guessed and guessed.startswith("audio/") else "audio/mpeg"
+    if item["kind"] == "file":
+        row = db.get_file(int(item["source"])) if item["source"].isdigit() else None
+        if row is None or not (MEDIA_DIR / row["stored_name"]).is_file():
+            raise HTTPException(404, "The uploaded file is gone")
+        return media_url(f"/media/{row['stored_name']}", n=nonce), row["content_type"]
+    # url, radio and podcast items are fetched by the speaker straight from their source.
+    return item["source"], item.get("content_type") or guess_audio_type(item["source"])
+
+
+def guess_audio_type(url):
+    """Content type from the URL's extension; the speaker copes with audio/mpeg for unknown streams."""
+    suffix = Path(urllib.parse.urlparse(url).path).suffix.lower()
+    known = FILE_TYPES | {".mp4": "audio/mp4", ".opus": "audio/ogg", ".m3u8": "application/x-mpegurl"}
+    guessed = known.get(suffix) or mimetypes.guess_type(urllib.parse.urlparse(url).path)[0]
+    return guessed if guessed and guessed.startswith(("audio/", "application/x-mpegurl")) else "audio/mpeg"
 
 
 async def prefetch(video_id):
@@ -725,10 +772,10 @@ def skip_failed(q, reason):
     return q.failures < len(q) and q.advance(auto=False)
 
 
-def load_if_current(gen, url, content_type, title, keep_volume):
+def load_if_current(gen, url, content_type, title, keep_volume, live=False):
     if gen != _queue_gen:
         return False  # something else was cast while this load waited for the speaker
-    cast_play(url, content_type, title, keep_volume=keep_volume)
+    cast_play(url, content_type, title, keep_volume=keep_volume, live=live)
     return True
 
 
@@ -749,7 +796,8 @@ async def play_queue(q, keep_volume=True):
                 continue
             end_queue(q)
             return False
-        if await run_cast(load_if_current, gen, url, content_type, item["title"], keep_volume):
+        live = item["kind"] == "radio"  # a station never ends; the queue stays on it until skipped
+        if await run_cast(load_if_current, gen, url, content_type, item["title"], keep_volume, live):
             q.current_url, q.after_say = url, False
             schedule_prefetch(q)
             keep = {p.name for i in (q.current, q.peek_next()) if i and i["kind"] == "youtube"
@@ -817,6 +865,8 @@ def queue_after_say(q):
 def thumbnail_for(content_id):
     if _queue is not None and content_id and content_id == _queue.current_url:
         return _queue.current.get("thumbnail")
+    if _direct is not None and content_id and content_id == _direct["url"]:
+        return _direct["thumbnail"]
     match = re.match(re.escape(f"{base_url()}/yt/") + r"([A-Za-z0-9_-]{11})\.", content_id or "")
     return yt_thumbnail(match[1]) if match else None
 
@@ -897,10 +947,45 @@ class PlaylistBody(BaseModel):
 
 
 class ItemBody(BaseModel):
-    kind: Literal["youtube", "url", "tts"]
+    """`source` per kind: youtube = URL/id/words, url/podcast = audio URL, tts = text,
+    radio = radio-browser station uuid or stream URL, file = id of an uploaded file."""
+    kind: Literal["youtube", "url", "tts", "radio", "podcast", "file"]
     source: str
     title: str | None = None
     lang: str | None = None
+    thumbnail: str | None = None  # radio (stream URL) and podcast items
+    duration: float | None = Field(None, ge=0)  # podcast items
+    content_type: str | None = None  # radio (stream URL) and podcast items
+
+
+class StationBody(BaseModel):
+    """A radio-browser station (uuid) or a stream URL of your own (url + name)."""
+    uuid: str | None = None
+    url: str | None = None
+    name: str | None = None
+    content_type: str | None = None
+    favicon: str | None = None
+
+
+class RadioPlayBody(StationBody):
+    favorite_id: int | None = None
+    volume: float | None = Field(None, ge=0, le=1)
+
+
+class EpisodePlayBody(BaseModel):
+    url: str  # the episode's enclosure URL
+    title: str
+    thumbnail: str | None = None
+    content_type: str | None = None
+    volume: float | None = Field(None, ge=0, le=1)
+
+
+class FilePatch(BaseModel):
+    title: str
+
+
+class FilePlayBody(BaseModel):
+    volume: float | None = Field(None, ge=0, le=1)
 
 
 class OrderBody(BaseModel):
@@ -1562,12 +1647,29 @@ async def build_item(body):
         return {"kind": "youtube", "source": meta["video_id"], "title": title or meta["title"],
                 "duration": meta["duration"], "thumbnail": meta["thumbnail"], "lang": None}
     if body.kind == "url":
-        source = body.source.strip()
-        if urllib.parse.urlparse(source).scheme not in ("http", "https") or len(source) > 2000:
-            raise HTTPException(400, "source must be an http(s) URL")
+        source = http_url(body.source, "source")
         if not title:
             raise HTTPException(400, "title is required for a url item")
         return {"kind": "url", "source": source, "title": title, "duration": None, "thumbnail": None, "lang": None}
+    if body.kind == "radio":
+        source = body.source.strip()
+        station = await radio_station(source) if STATION_UUID_RE.fullmatch(source) else custom_station(
+            StationBody(url=source, name=title, content_type=body.content_type, favicon=body.thumbnail))
+        return {"kind": "radio", "source": station["url"], "title": title or station["name"], "duration": None,
+                "thumbnail": station["favicon"], "lang": None, "content_type": station["content_type"]}
+    if body.kind == "podcast":
+        source = http_url(body.source, "source")
+        if not title:
+            raise HTTPException(400, "title is required for a podcast item")
+        return {"kind": "podcast", "source": source, "title": title, "duration": body.duration,
+                "thumbnail": optional_http_url(body.thumbnail), "lang": None,
+                "content_type": audio_type(body.content_type) or guess_audio_type(source)}
+    if body.kind == "file":
+        row = db.get_file(int(body.source)) if body.source.strip().isdigit() else None
+        if row is None:
+            raise HTTPException(400, "source must be the id of an uploaded file")
+        return {"kind": "file", "source": str(row["id"]), "title": title or row["title"], "duration": row["duration"],
+                "thumbnail": None, "lang": None, "content_type": row["content_type"]}
     text = clean_text(body.source, "source", TTS_TEXT_MAX)
     lang = (body.lang or settings.tts_lang).strip()[:16]
     return {"kind": "tts", "source": text, "title": title or text[:60], "duration": None, "thumbnail": None,
@@ -1689,6 +1791,429 @@ async def update_queue(body: QueuePatch):
 async def queue_clear(who: Who):
     record(who, "stop", "queue cleared")
     await stop_everything()
+
+
+# --- Music sources: shared helpers ---
+
+def http_url(value, field):
+    value = (value or "").strip()
+    if urllib.parse.urlsplit(value).scheme not in ("http", "https") or len(value) > 2000:
+        raise HTTPException(400, f"{field} must be an http(s) URL")
+    return value
+
+
+def optional_http_url(value):
+    """A picture URL from a directory or a feed: kept when it is http(s), dropped otherwise."""
+    value = (value or "").strip()
+    return value if urllib.parse.urlsplit(value).scheme in ("http", "https") and len(value) <= 2000 else None
+
+
+def audio_type(value):
+    value = (value or "").strip().lower()[:100]
+    return value if value.startswith("audio/") or value in ("application/x-mpegurl", "application/vnd.apple.mpegurl") \
+        else None
+
+
+async def get_json(url, params, what):
+    """GET a JSON API we trust (radio-browser, iTunes); 502 with a readable reason on any failure."""
+    try:
+        r = await http.get(url, params=params, headers={"User-Agent": USER_AGENT})
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"{what} is unreachable ({type(e).__name__})") from e
+    if r.status_code != 200:
+        raise HTTPException(502, f"{what} failed: HTTP {r.status_code}")
+    try:
+        return r.json()
+    except ValueError as e:
+        raise HTTPException(502, f"{what} sent an unreadable answer") from e
+
+
+async def play_source(url, content_type, title, volume, who, action, live=False, thumbnail=None):
+    """Play a radio station, podcast episode or uploaded file outside the queue (announcements resume it)."""
+    global _direct
+    cancel_resume()
+    clear_queue()
+    _direct = {"url": url, "live": live, "thumbnail": thumbnail}
+    record(who, action, title[:200])
+    await run_cast(cast_play, url, content_type, title, volume, live=live)
+    return {"ok": True, "title": title}
+
+
+# --- Internet radio (radio-browser.info) ---
+
+def station_from_api(s):
+    url = optional_http_url(s.get("url_resolved")) or optional_http_url(s.get("url"))
+    if not url or not STATION_UUID_RE.fullmatch(s.get("stationuuid") or ""):
+        return None
+    codec = (s.get("codec") or "").upper()
+    return {
+        "uuid": s["stationuuid"],
+        "name": (s.get("name") or "").strip()[:200] or "Radio",
+        "url": url,
+        "content_type": "application/x-mpegurl" if s.get("hls") else RADIO_CODECS.get(codec, "audio/mpeg"),
+        "favicon": optional_http_url(s.get("favicon")),
+        "country": (s.get("countrycode") or s.get("country") or "")[:64] or None,
+        "tags": (s.get("tags") or "")[:200] or None,
+        "bitrate": s.get("bitrate") if isinstance(s.get("bitrate"), int) and s["bitrate"] > 0 else None,
+    }
+
+
+async def radio_search(name, country, tag, limit):
+    params = {"limit": limit, "hidebroken": "true", "order": "clickcount", "reverse": "true"}
+    if name:
+        params["name"] = name
+    if country:
+        params["countrycode"] = country
+    if tag:
+        params["tag"] = tag
+    found = await get_json(f"{RADIO_API}/json/stations/search", params, "Radio directory")
+    stations = [station_from_api(s) for s in found if isinstance(s, dict)] if isinstance(found, list) else []
+    return [s for s in stations if s]
+
+
+async def radio_station(uuid):
+    found = await get_json(f"{RADIO_API}/json/stations/byuuid", {"uuids": uuid}, "Radio directory")
+    stations = [station_from_api(s) for s in found if isinstance(s, dict)] if isinstance(found, list) else []
+    if not any(stations):
+        raise HTTPException(404, "No such radio station")
+    return next(s for s in stations if s)
+
+
+def custom_station(body):
+    """A stream URL the user typed in, instead of a directory station."""
+    url = http_url(body.url, "url")
+    name = clean_text(body.name or "", "name", 200)
+    return {"uuid": None, "name": name, "url": url,
+            "content_type": audio_type(body.content_type) or guess_audio_type(url),
+            "favicon": optional_http_url(body.favicon), "country": None, "tags": None, "bitrate": None}
+
+
+async def resolve_station(body):
+    if getattr(body, "favorite_id", None) is not None:
+        favorite = db.get_favorite(body.favorite_id)
+        if favorite is None:
+            raise HTTPException(404, "No such favourite")
+        return favorite
+    if body.uuid:
+        if not STATION_UUID_RE.fullmatch(body.uuid.strip()):
+            raise HTTPException(400, "uuid is not a radio-browser station id")
+        return await radio_station(body.uuid.strip())
+    if body.url:
+        return custom_station(body)
+    raise HTTPException(400, "Give a station uuid, a favorite_id, or a url and name")
+
+
+@operator_api.get("/radio/search")
+async def search_radio(
+    q: Annotated[str, Query(max_length=100)] = "",
+    country: Annotated[str, Query(pattern=r"^([A-Za-z]{2})?$")] = "",
+    tag: Annotated[str, Query(max_length=50)] = "",
+    limit: int = Query(20, ge=1, le=50),
+):
+    """Most-listened stations matching a name, a two-letter country code and/or a tag (all optional)."""
+    return await radio_search(q.strip(), country.upper(), tag.strip(), limit)
+
+
+@viewer_api.get("/radio/favorites")
+async def list_favorites():
+    return db.list_favorites()
+
+
+@operator_api.post("/radio/favorites")
+async def add_favorite(body: StationBody, who: Who):
+    station = await resolve_station(body)
+    try:
+        favorite = db.add_favorite(station, who.user and who.user["id"])
+    except Conflict as e:
+        raise HTTPException(409, str(e)) from e
+    record(who, "radio favourite", station["name"])
+    return favorite
+
+
+@operator_api.delete("/radio/favorites/{favorite_id}", status_code=204)
+async def delete_favorite(favorite_id: int, who: Who):
+    favorite = db.get_favorite(favorite_id)
+    if favorite is None or not db.delete_favorite(favorite_id):
+        raise HTTPException(404, "No such favourite")
+    record(who, "radio unfavourite", favorite["name"])
+
+
+@operator_api.post("/radio/play")
+async def play_radio(body: RadioPlayBody, who: Who):
+    station = await resolve_station(body)
+    return await play_source(station["url"], station["content_type"], station["name"], body.volume, who, "radio",
+                             live=True, thumbnail=station["favicon"])
+
+
+# --- Podcasts (iTunes Search API + the show's RSS feed) ---
+
+def resolve_host(host):
+    return {info[4][0] for info in socket.getaddrinfo(host, None)}
+
+
+def check_public_url(url):
+    """Refuse feed URLs that point into this machine's networks (the server fetches them, not the speaker)."""
+    host = urllib.parse.urlsplit(url).hostname
+    if not host:
+        raise HTTPException(400, "feed must be an http(s) URL")
+    try:
+        addresses = resolve_host(host)
+    except OSError as e:
+        raise HTTPException(502, f"Can't resolve {host}") from e
+    for address in addresses:
+        if not ipaddress.ip_address(address.split("%")[0]).is_global:
+            raise HTTPException(400, "feed must be on the public internet")
+
+
+async def fetch_feed(url):
+    """The feed's bytes, following redirects by hand (each hop checked) and reading at most FEED_MAX."""
+    for _ in range(FEED_REDIRECTS + 1):
+        url = http_url(url, "feed")
+        await asyncio.to_thread(check_public_url, url)
+        try:
+            async with feed_http.stream("GET", url, headers={"User-Agent": USER_AGENT}) as r:
+                if r.is_redirect and r.headers.get("location"):
+                    url = urllib.parse.urljoin(url, r.headers["location"])
+                    continue
+                if r.status_code != 200:
+                    raise HTTPException(502, f"Podcast feed failed: HTTP {r.status_code}")
+                body = bytearray()
+                async for chunk in r.aiter_bytes():
+                    body += chunk
+                    if len(body) > FEED_MAX:
+                        raise HTTPException(502, "Podcast feed is too large")
+                return bytes(body)
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"Podcast feed is unreachable ({type(e).__name__})") from e
+    raise HTTPException(502, "Podcast feed redirects too many times")
+
+
+def parse_duration(value):
+    """itunes:duration is seconds, MM:SS or HH:MM:SS."""
+    try:
+        seconds = 0.0
+        for part in (value or "").strip().split(":"):
+            seconds = seconds * 60 + float(part)
+        return seconds or None
+    except ValueError:
+        return None
+
+
+def parse_date(value):
+    try:
+        return utc_iso(email.utils.parsedate_to_datetime(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def plain_text(value, limit):
+    text = html.unescape(re.sub(r"<[^>]+>", " ", value or ""))
+    return " ".join(text.split())[:limit] or None
+
+
+def parse_feed(data, limit):
+    """Show details and the newest `limit` audio episodes of an RSS podcast feed."""
+    if b"<!ENTITY" in data:
+        raise HTTPException(502, "Podcast feed declares XML entities; refusing to parse it")
+    try:
+        channel = ElementTree.fromstring(data).find("channel")
+    except ElementTree.ParseError as e:
+        raise HTTPException(502, "Not a podcast feed (invalid XML)") from e
+    if channel is None:
+        raise HTTPException(502, "Not a podcast feed (no RSS channel)")
+    image = channel.find(f"{ITUNES_NS}image")
+    artwork = optional_http_url(image.get("href") if image is not None else channel.findtext("image/url"))
+    episodes = []
+    for item in channel.iter("item"):
+        enclosure = item.find("enclosure")
+        url = optional_http_url(enclosure.get("url") if enclosure is not None else None)
+        kind = (enclosure.get("type") or "").lower() if enclosure is not None else ""
+        if not url or (kind and not audio_type(kind)):
+            continue  # no audio (video episodes too: the speaker can't show them)
+        picture = item.find(f"{ITUNES_NS}image")
+        episodes.append({
+            "guid": (item.findtext("guid") or url).strip()[:500],
+            "title": (item.findtext("title") or "").strip()[:200] or "Untitled episode",
+            "published": parse_date(item.findtext("pubDate")),
+            "duration": parse_duration(item.findtext(f"{ITUNES_NS}duration")),
+            "url": url,
+            "content_type": audio_type(kind) or guess_audio_type(url),
+            "thumbnail": optional_http_url(picture.get("href") if picture is not None else None) or artwork,
+            "description": plain_text(item.findtext(f"{ITUNES_NS}summary") or item.findtext("description"), 300),
+        })
+        if len(episodes) >= limit:
+            break
+    return {
+        "title": (channel.findtext("title") or "").strip()[:200] or None,
+        "author": (channel.findtext(f"{ITUNES_NS}author") or "").strip()[:200] or None,
+        "artwork": artwork,
+        "description": plain_text(channel.findtext("description"), 500),
+        "episodes": episodes,
+    }
+
+
+@operator_api.get("/podcasts/search")
+async def search_podcasts(
+    q: Annotated[str, Query(min_length=1, max_length=100)],
+    country: Annotated[str, Query(pattern=r"^([A-Za-z]{2})?$")] = "",
+    limit: int = Query(20, ge=1, le=50),
+):
+    """Shows matching the words, from Apple's podcast directory; `country` picks its store (e.g. TH)."""
+    params = {"media": "podcast", "entity": "podcast", "term": q.strip(), "limit": limit}
+    if country:
+        params["country"] = country.upper()
+    found = await get_json(PODCAST_SEARCH, params, "Podcast search")
+    shows = []
+    for r in found.get("results") or [] if isinstance(found, dict) else []:
+        feed = optional_http_url(r.get("feedUrl")) if isinstance(r, dict) else None
+        if feed:
+            shows.append({
+                "id": r.get("collectionId"),
+                "title": (r.get("collectionName") or "").strip()[:200] or "Untitled show",
+                "author": (r.get("artistName") or "").strip()[:200] or None,
+                "feed_url": feed,
+                "artwork": optional_http_url(r.get("artworkUrl600") or r.get("artworkUrl100")),
+                "genre": r.get("primaryGenreName"),
+                "episode_count": r.get("trackCount"),
+            })
+    return shows
+
+
+@operator_api.get("/podcasts/episodes")
+async def podcast_episodes(
+    feed: Annotated[str, Query(min_length=1, max_length=2000)], limit: int = Query(50, ge=1, le=EPISODES_MAX)
+):
+    return parse_feed(await fetch_feed(feed), limit)
+
+
+@operator_api.post("/podcasts/play")
+async def play_episode(body: EpisodePlayBody, who: Who):
+    url = http_url(body.url, "url")
+    title = clean_text(body.title, "title", 200)
+    content_type = audio_type(body.content_type) or guess_audio_type(url)
+    return await play_source(url, content_type, title, body.volume, who, "podcast",
+                             thumbnail=optional_http_url(body.thumbnail))
+
+
+# --- My files (uploaded audio) ---
+
+def sniff_audio(head):
+    """FILE_TYPES extension for the audio format these first bytes start, or None."""
+    if head.startswith(b"ID3"):
+        return ".mp3"
+    if len(head) >= 2 and head[0] == 0xFF and head[1] & 0xF6 == 0xF0:
+        return ".aac"  # ADTS frame (layer bits 00)
+    if len(head) >= 2 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0 and head[1] & 0x06:
+        return ".mp3"  # MPEG audio frame without an ID3 tag
+    if head[4:8] == b"ftyp":
+        return ".m4a"
+    if head.startswith(b"OggS"):
+        return ".ogg"
+    if head.startswith(b"RIFF") and head[8:12] == b"WAVE":
+        return ".wav"
+    if head.startswith(b"fLaC"):
+        return ".flac"
+    if head.startswith(b"\x1aE\xdf\xa3"):
+        return ".webm"
+    return None
+
+
+def public_file(row):
+    return {k: v for k, v in row.items() if k != "stored_name"}
+
+
+def file_or_404(file_id):
+    row = db.get_file(file_id)
+    if row is None:
+        raise HTTPException(404, "No such file")
+    return row
+
+
+def check_file_owner(row, who):
+    if who.role != "admin" and (who.user is None or row["owner_id"] != who.user["id"]):
+        raise HTTPException(403, "Only the member who uploaded this file or an admin can change it")
+
+
+@viewer_api.get("/files")
+async def list_files():
+    return {
+        "items": [public_file(r) for r in db.list_files()],
+        "used": db.files_size(),
+        "quota": UPLOAD_QUOTA,
+        "max_size": UPLOAD_MAX,
+        "types": sorted(FILE_TYPES),
+    }
+
+
+@operator_api.post("/files")
+async def upload_file(
+    request: Request,
+    who: Who,
+    name: Annotated[str, Query(min_length=1, max_length=255)],
+    duration: Annotated[float | None, Query(ge=0, le=24 * 3600)] = None,
+):
+    """The request body is the audio file itself (not a form); `name` is its original file name and
+    `duration` (seconds, optional) what the browser measured. The format is checked from the content."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > UPLOAD_MAX:
+        raise HTTPException(413, f"Files can be at most {UPLOAD_MAX // (1024 * 1024)} MB")
+    room = UPLOAD_QUOTA - db.files_size()
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    part = MEDIA_DIR / f".upload-{secrets.token_hex(8)}.part"
+    size, head = 0, b""
+    try:
+        with part.open("wb") as f:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > UPLOAD_MAX:
+                    raise HTTPException(413, f"Files can be at most {UPLOAD_MAX // (1024 * 1024)} MB")
+                if size > room:
+                    raise HTTPException(507, "Not enough upload space left; delete some files first")
+                if len(head) < 64:
+                    head = (head + chunk)[:64]
+                f.write(chunk)  # small chunks to the local disk; not worth a thread hop each
+        if not size:
+            raise HTTPException(400, "The file is empty")
+        ext = sniff_audio(head)
+        if ext is None:
+            raise HTTPException(415, f"Not a supported audio file (use {', '.join(sorted(FILE_TYPES))})")
+        stored = f"{secrets.token_urlsafe(12)}{ext}"
+        part.rename(MEDIA_DIR / stored)
+    finally:
+        part.unlink(missing_ok=True)
+    original = Path(name.replace("\\", "/")).name.strip()[:255] or "upload"
+    title = Path(original).stem.strip()[:UPLOAD_TITLE_MAX] or "Untitled"
+    row = db.add_file(stored, title, original, FILE_TYPES[ext], size, duration, who.user and who.user["id"])
+    record(who, "file upload", f"{title} ({size // 1024} KB)")
+    return public_file(row)
+
+
+@operator_api.patch("/files/{file_id}")
+async def rename_file(file_id: int, body: FilePatch, who: Who):
+    row = file_or_404(file_id)
+    check_file_owner(row, who)
+    title = clean_text(body.title, "title", UPLOAD_TITLE_MAX)
+    record(who, "file rename", f"{row['title']} -> {title}"[:200])
+    return public_file(db.rename_file(file_id, title))
+
+
+@operator_api.delete("/files/{file_id}", status_code=204)
+async def delete_file(file_id: int, who: Who):
+    row = file_or_404(file_id)
+    check_file_owner(row, who)
+    if db.delete_file(file_id) is None:
+        raise HTTPException(404, "No such file")
+    (MEDIA_DIR / row["stored_name"]).unlink(missing_ok=True)
+    record(who, "file delete", row["title"])
+
+
+@operator_api.post("/files/{file_id}/play")
+async def play_file(file_id: int, body: FilePlayBody, who: Who):
+    row = file_or_404(file_id)
+    if not (MEDIA_DIR / row["stored_name"]).is_file():
+        raise HTTPException(410, "The file is missing from the server's disk")
+    url = media_url(f"/media/{row['stored_name']}")
+    return await play_source(url, row["content_type"], row["title"], body.volume, who, "file play")
 
 
 # --- Quick phrases ---
@@ -1906,6 +2431,14 @@ async def yt_file(filename: str):
     if not path.is_file():
         raise HTTPException(404, "not cached")
     return FileResponse(path, media_type=content_type_for(path))
+
+
+@app.get("/media/{filename}", dependencies=[Depends(verify_media)])
+async def media_file(filename: str):
+    path = MEDIA_DIR / Path(filename).name
+    if path.name.startswith(".") or not path.is_file():
+        raise HTTPException(404, "No such file")
+    return FileResponse(path, media_type=FILE_TYPES.get(path.suffix, "application/octet-stream"))
 
 
 # --- Web UI (public) ---

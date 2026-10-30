@@ -15,6 +15,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `/auth/passkey/options` + `/auth/passkey/verify`. The RP ID is the host of `public_base_url` (HTTPS, or
   localhost); single-use challenges, sign-counter checks. Owner settings `passkey_signin` and
   `passkey_required_for_admins`; members carry `has_passkey`. Schema version 3 adds the `passkeys` table.
+- Music sources: internet radio (radio-browser.info search, favourites, played as a LIVE stream), podcasts
+  (iTunes Search API + RSS episodes) and "My files" (audio uploads with size/type/quota limits, served through
+  signed `/media/...` links). All three play directly, resume after an announcement, and can be playlist items
+  (`radio`, `podcast`, `file`). Database schema version 3.
 
 ## [0.2.0] - 2026-10-30
 
