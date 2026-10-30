@@ -1,0 +1,47 @@
+/* Help (boards Help / T_Help / D_Help): search + grouped accordion. One column, max 680px (page.narrow). */
+
+.help-page { gap: 14px; }
+.hp-sub { display: none; font-size: 15px; color: var(--ink-2); margin-top: -8px; }
+
+.hp-search { position: relative; display: flex; align-items: center; }
+.hp-sic { position: absolute; left: 16px; color: var(--ink-2); pointer-events: none; }
+.hp-input { height: 48px; padding: 0 48px 0 46px; border-radius: var(--pill); font-size: 16px; -webkit-appearance: none; appearance: none; }
+.hp-input:focus { padding-left: 45px; padding-right: 47px; }
+.hp-input::-webkit-search-cancel-button { display: none; }
+.hp-clear { position: absolute; right: 2px; }
+
+.hp-groups { display: flex; flex-direction: column; gap: 18px; }
+.hp-group { display: flex; flex-direction: column; gap: 8px; }
+.hp-gt { padding: 0 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.hp-list { border-radius: var(--r-xl); background: var(--glass-strong); border: 1px solid var(--glass-edge); box-shadow: var(--glass-hi); overflow: hidden; }
+.hp-topic { scroll-margin-top: 72px; }
+.hp-topic + .hp-topic { border-top: 1px solid var(--line); }
+.hp-q { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 10px 16px; border: 0; background: transparent; color: var(--ink); text-align: left; font-size: 16px; font-weight: 500; line-height: 1.4; }
+.hp-q:hover { background: var(--fill); }
+.hp-q[aria-expanded="true"] { font-weight: 600; }
+.hp-qt { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.hp-ic { display: none; flex: 0 0 auto; width: 40px; height: 40px; border-radius: 12px; align-items: center; justify-content: center; background: var(--accent-tint); color: var(--accent); }
+.hp-chev { flex: 0 0 auto; color: var(--ink-2); transition: transform var(--t-mid) var(--ease); }
+.hp-q[aria-expanded="true"] .hp-chev { transform: rotate(180deg); }
+.hp-a { padding: 0 16px 18px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.hp-steps { margin: 0; padding: 0; list-style: none; counter-reset: s; display: flex; flex-direction: column; gap: 10px; }
+.hp-steps li { position: relative; padding-left: 34px; font-size: 15px; line-height: 1.6; counter-increment: s; }
+.hp-steps li::before { content: counter(s); position: absolute; left: 0; top: 1px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-tint); color: var(--accent); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.hp-try { min-height: 44px; gap: 4px; }
+
+.hp-none { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 8px; }
+.hp-none-t { font-size: 17px; font-weight: 600; }
+
+@media (min-width: 744px) {
+  .hp-sub { display: block; }
+  .hp-input { height: 52px; }
+  .hp-q { min-height: 64px; padding: 12px 20px; }
+  .hp-a { padding: 0 20px 20px; }
+  .hp-topic { scroll-margin-top: 110px; }
+}
+@media (min-width: 1280px) {
+  .hp-ic { display: flex; }
+  .hp-a { padding-left: 72px; }
+}
+/* deep links focus the topic: keep the ring inside the grouped list */
+.hp-q:focus-visible { outline-offset: -3px; border-radius: 0; }
