@@ -49,6 +49,7 @@ export const ROUTES = [
   { id: 'announce', label: 'nav.announce', tab: 'nav.announce', icon: 'announce', min: 'viewer', section: 'main', load: () => import('./views/announce.js') },
   { id: 'music', label: 'nav.music', tab: 'nav.music', icon: 'music', min: 'operator', section: 'main', load: () => import('./views/music.js') },
   { id: 'playlists', label: 'nav.playlists', tab: 'nav.playlists', icon: 'playlists', min: 'viewer', section: 'main', load: () => import('./views/playlists.js') },
+  { id: 'schedule', label: 'sched.title', icon: 'announce', min: 'viewer', section: 'none', load: () => import('./views/schedule.js') },
   { id: 'members', label: 'nav.members', icon: 'members', min: 'admin', section: 'admin', load: () => import('./views/members.js') },
   { id: 'settings', label: 'nav.settings', icon: 'settings', min: 'admin', section: 'admin', load: () => import('./views/settings.js') },
   { id: 'activity', label: 'nav.activity', icon: 'activity', min: 'admin', section: 'admin', load: () => import('./views/activity.js') },
