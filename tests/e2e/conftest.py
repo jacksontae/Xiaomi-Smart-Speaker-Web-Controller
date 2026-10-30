@@ -30,6 +30,11 @@ if not (HAVE_PW and os.environ.get("E2E") == "1"):
 ROOT = Path(__file__).resolve().parents[2]
 PREFS_JS = """(() => { const p = PREFS; for (const [k, v] of Object.entries(p)) {
   try { if (localStorage.getItem(k) === null) localStorage.setItem(k, v); } catch (e) { /* private mode */ } } })();"""
+# The first-run quick tour (static/js/tour.js) would cover every page on a first sign-in: other tests read any
+# unset spk.tour.<userId> as "already seen". test_13_tour.py turns this off with make_app(tour=True).
+NO_TOUR_JS = """(() => { const get = Storage.prototype.getItem;
+  Storage.prototype.getItem = function (k) { const v = get.call(this, k);
+    return v === null && typeof k === 'string' && k.startsWith('spk.tour.') ? '999' : v; }; })();"""
 
 
 # ------------------------------------------------------------------ server
@@ -151,12 +156,13 @@ def pytest_runtest_makereport(item, call):
 
 @pytest.fixture
 def make_app(browser, server, request, workdir):
-    """make_app(role='owner'|'operator'|'viewer'|None, device='phone'|'ipad'|'desktop', lang, theme, motion, offer)."""
+    """make_app(role='owner'|'operator'|'viewer'|None, device='phone'|'ipad'|'desktop', lang, theme, motion, offer,
+    tour)."""
     os.environ.setdefault("E2E_DIR", str(workdir))
     apps = []
 
     def factory(role="owner", device="desktop", lang="en", theme="light", motion=None, offer=False, route="", go=True,
-                reduced_media=False):
+                reduced_media=False, tour=False):
         opts = dict(VIEWPORTS[device])
         if reduced_media:
             opts["reduced_motion"] = "reduce"
@@ -169,6 +175,8 @@ def make_app(browser, server, request, workdir):
             prefs["spk.pkOffer"] = "never"
         # only fills keys that are not set yet, so settings changed in the UI survive reloads
         ctx.add_init_script(PREFS_JS.replace("PREFS", json.dumps(prefs)))
+        if not tour:
+            ctx.add_init_script(NO_TOUR_JS)
         page = ctx.new_page()
         page.set_default_timeout(10_000)
         app = App(ctx, page, f"{request.node.name}-{len(apps)}")
