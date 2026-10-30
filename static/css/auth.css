@@ -1,0 +1,106 @@
+/* Sign-in and first-time setup (boards Login / T_Login / D_Login / Setup). No card around the form: the fields sit
+   on the page backdrop, in one composition with the 3D speaker and the clock (proto LOGIN2.md, R6-LOGIN.md). */
+
+.screen { min-height: 100dvh; }
+.auth { position: relative; min-height: 100dvh; overflow: hidden; isolation: isolate; }
+.auth-bloom { position: absolute; z-index: -1; inset: 0; pointer-events: none; animation: auth-bloom .6s var(--ease-out) both, auth-breath 7s ease-in-out .6s infinite; }
+.auth-bloom::before, .auth-bloom::after { content: ""; position: absolute; inset: 0; }
+.auth-bloom::before { background: radial-gradient(120% 60% at 0% 0%, var(--amb-a) 0%, transparent 60%); }
+.auth-bloom::after { background: radial-gradient(90% 50% at 100% 100%, var(--amb-b) 0%, transparent 65%); }
+body:has(.auth) .toasts { top: calc(var(--safe-t) + 60px); bottom: auto; } /* keep the form buttons visible */
+body:has(.auth) .ambient::before, body:has(.auth) .ambient::after { opacity: 0; } /* the bloom draws the backdrop here */
+.auth-glow { position: absolute; z-index: -1; right: -100px; top: -12px; width: 360px; height: 360px; border-radius: 50%; background: radial-gradient(closest-side, var(--login-glow), transparent); pointer-events: none; animation: auth-glow .55s ease-out both; }
+
+/* EN | ไทย, top right */
+.lang-toggle { position: absolute; z-index: 3; top: calc(var(--safe-t) + 8px); right: max(12px, calc((100% - 560px) / 2)); display: flex; align-items: center; font-size: 14px; }
+.lang-toggle button { min-width: 44px; height: 44px; padding: 0 8px; border: 0; background: transparent; color: var(--ink-2); font-weight: 400; }
+.lang-toggle button[aria-pressed="true"] { color: var(--accent); font-weight: 600; }
+.lang-toggle span { color: var(--ink-3); }
+
+/* ---------- phone (Login board) ---------- */
+.auth-col { position: relative; min-height: 100dvh; max-width: 560px; margin-inline: auto; display: flex; flex-direction: column; padding: calc(var(--safe-t) + 64px) 24px calc(var(--safe-b) + 30px); }
+.auth-lg { flex: 1 1 auto; display: flex; flex-direction: column; }
+.auth-top-gap { flex: .45 1 0; min-height: 0; }
+.auth-mid-gap { flex: 1 1 0; min-height: 24px; }
+.auth-hero { position: relative; min-height: clamp(150px, 42vw, 210px); }
+.auth-hero .spk-stage { position: absolute; right: -18px; top: -6px; --spk-size: clamp(160px, 46vw, 230px); animation: auth-markin .6s var(--ease-out) .15s both; }
+.auth-date { position: relative; margin-top: 8px; font-size: 17px; font-weight: 500; color: var(--ink-2); animation: auth-settle .5s var(--ease-out) .15s both; }
+.auth-clock { position: relative; margin: -6px 0 0 -4px; font-size: clamp(64px, 19vw, 100px); line-height: 1.1; font-weight: 300; letter-spacing: -4px; font-variant-numeric: tabular-nums; animation: auth-settle .5s var(--ease-out) .25s both; }
+
+.auth-form { display: flex; flex-direction: column; gap: 14px; }
+.auth-form h1 { font-size: 22px; line-height: 1.3; font-weight: 700; }
+.auth-fields { display: flex; flex-direction: column; gap: 14px; }
+.auth-fields.shake { animation: auth-shake .42s; }
+.forgot-row { display: flex; justify-content: flex-end; margin-top: -10px; }
+.forgot-help { margin-top: -12px; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+.auth-or { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--ink-2); }
+.auth-or::before, .auth-or::after { content: ""; flex: 1; height: 1px; background: var(--line-2); }
+.alt-btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 52px; border-radius: var(--pill); border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); font-size: 16px; font-weight: 600; }
+.alt-btn:hover { background: var(--surface-2); }
+.alt-btn.busy { cursor: progress; opacity: .7; }
+.alt-btn .icon.pk { color: var(--accent); }
+.alt-btn svg.g { width: 20px; height: 20px; }
+.auth-note { font-size: 14px; line-height: 1.6; color: var(--ink-2); text-align: center; }
+.auth-form > * { animation: auth-rise .48s var(--ease-out) both; }
+.auth-form > :nth-child(1) { animation-delay: .38s; }
+.auth-form > :nth-child(2) { animation-delay: .46s; }
+.auth-form > :nth-child(n+3) { animation-delay: .54s; }
+.auth.leaving { transition: opacity .3s, transform .3s; opacity: 0; transform: scale(.98); }
+.gsi-slot { display: flex; justify-content: center; min-height: 44px; }
+
+/* ---------- iPad (T_Login) ---------- */
+@media (min-width: 744px) {
+  .lang-toggle { top: 20px; right: 24px; }
+  .auth-col { max-width: none; padding: 56px 32px; justify-content: center; }
+  .auth-top-gap, .auth-mid-gap { display: none; }
+  .auth-glow { display: none; }
+  .auth-lg { margin: auto; width: 100%; max-width: 480px; display: flex; flex-direction: column; }
+  .auth-hero { min-height: 0; display: flex; flex-direction: column; }
+  .auth-hero .spk-stage { position: relative; right: auto; top: auto; --spk-size: clamp(200px, 26vh, 300px); margin: calc(var(--spk-size) * -.1) calc(var(--spk-size) * -.12) calc(var(--spk-size) * -.08) calc(var(--spk-size) * -.2); }
+  .auth-date { margin-top: 20px; font-size: 22px; }
+  .auth-clock { margin: -10px 0 0 -8px; font-size: 176px; letter-spacing: -7px; }
+  .auth-form { margin-top: 72px; gap: 16px; }
+  .auth-form h1 { font-size: 30px; margin-bottom: 6px; }
+  .auth-fields { gap: 16px; }
+}
+@media (min-width: 960px) and (orientation: landscape) {
+  .auth-lg { max-width: 1060px; flex-direction: row; align-items: center; justify-content: space-between; gap: 64px; }
+  .auth-form { margin-top: 0; flex: 0 1 480px; }
+}
+
+/* ---------- desktop (D_Login): clock left, speaker + form right ---------- */
+@media (min-width: 1280px) {
+  .auth-bloom::before { background: radial-gradient(70% 80% at 0% 0%, var(--amb-a) 0%, transparent 60%); }
+  .auth-bloom::after { background: radial-gradient(55% 70% at 100% 100%, var(--amb-b) 0%, transparent 65%); }
+  .auth-col { padding: 0 64px; min-height: 100dvh; }
+  .auth-lg { max-width: none; width: auto; margin: 0 auto; min-height: 100dvh; flex-direction: row; align-items: stretch; justify-content: center; gap: 0; }
+  .auth-hero { flex: 0 1 600px; min-width: 0; padding: 64px 0; justify-content: center; }
+  .auth-date { font-size: 24px; margin-top: 0; }
+  .auth-clock { margin: -16px 0 0 -10px; font-size: 220px; letter-spacing: -9px; }
+  .auth-form { flex: 0 0 424px; margin: 0 -12px 0 calc(clamp(64px, 13vw, 192px) - 12px); padding: 48px 12px; justify-content: center; gap: 16px; }
+  .auth-form .spk-stage { width: 100%; --spk-size: clamp(140px, 24vh, 280px); height: var(--spk-size); margin: calc(var(--spk-size) * -.14) 0 12px; animation: auth-markin .6s var(--ease-out) .15s both; }
+  .auth-form h1 { font-size: 32px; margin-bottom: 4px; }
+}
+
+/* ---------- first-time setup (Setup board): no card on iPhone, the form sits on the backdrop ---------- */
+.setup-col { position: relative; max-width: 560px; margin-inline: auto; padding: calc(var(--safe-t) + 52px) 24px calc(var(--safe-b) + 24px); }
+.setup-col form { display: flex; flex-direction: column; gap: 16px; }
+.setup-col .intro { font-size: 15px; line-height: 1.6; color: var(--ink-2); margin-top: 4px; }
+.setup-col h1 { font-size: 26px; font-weight: 700; }
+.setup-err { padding: 10px 14px; border-radius: var(--r-md); background: var(--danger-tint); font-size: 14px; line-height: 1.6; color: var(--danger-ink); }
+.setup-err:empty { display: none; }
+.setup-foot { margin: 16px 8px 0; font-size: 14px; color: var(--ink-2); text-align: center; }
+.setup-foot .linkbtn { display: inline-flex; padding: 0 4px; font-size: 14px; text-decoration: underline; }
+.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .95em; }
+@media (min-width: 744px) {
+  .setup-col { max-width: 480px; min-height: 100dvh; display: flex; flex-direction: column; justify-content: center; padding: 56px 0; }
+}
+
+@keyframes auth-bloom { from { opacity: 0; transform: scale(1.25); } }
+@keyframes auth-breath { 0%, 100% { opacity: 1; } 50% { opacity: .6; } }
+@keyframes auth-glow { from { opacity: 0; transform: scale(.3); } }
+@keyframes auth-settle { from { opacity: 0; transform: translateY(-10px) scale(1.03); } }
+@keyframes auth-markin { from { opacity: 0; transform: translateY(14px) scale(.92); } }
+@keyframes auth-rise { from { opacity: 0; transform: translateY(22px); } }
+@keyframes auth-shake { 0%, 100% { translate: 0; } 20% { translate: -10px; } 40% { translate: 9px; } 60% { translate: -6px; } 80% { translate: 3px; } }
+/* the breathing backdrop is ambience, not information: it simply stops under reduced motion (base.css switch) */
