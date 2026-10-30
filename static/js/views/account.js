@@ -1,21 +1,75 @@
-// Account (phone; the avatar in the tab bar). Minimal for now: who you are, the owner pages that have no tab
-// on phones, app settings, and the account actions (same rows as the iPad/desktop account menu).
-// The full board (Account.dc.html: linked Google, passkeys, ...) is a later task.
-import { h, icon, avatar } from '../ui.js';
-import { t, roleLabel } from '../i18n.js';
-import { ROUTES, href } from '../routes.js';
+// Account (board Account; phone: the avatar in the tab bar). Who you are, the owner pages that have no tab on
+// phones, app settings + help, passkeys, and your account actions (password, Google, sign out everywhere / here).
+// On iPad/desktop the same content is "Account & app settings" (views/prefs.js), so this renders that layout.
+import { h, icon, busy } from '../ui.js';
+import { register, t, roleLabel, lang } from '../i18n.js';
+import { isPhone } from '../sheet.js';
+import { caption, card, linkRow, tile, cIcon, toneOf, initialOf } from '../c-kit.js';
+import { freshAuth, googleRow, passkeySection } from '../c-account.js';
+import { large } from './prefs.js';
 
-export function render(ctx) {
-  const u = ctx.user;
-  const row = (r) => h('a', { class: 'mi', href: href(r.id) }, h('span', { class: 'mic' }, icon(r.icon, 'xs')), h('span', { style: { flex: '1' } }, t(r.label)), icon('chev-right', 'xs'));
-  const owner = ROUTES.filter((r) => r.section === 'admin' && ctx.can(r.min));
-  const group = (...kids) => h('div', { class: 'list menu', style: { padding: '4px' } }, kids);
-  return h('div', { class: 'page' },
+register({
+  en: { 'acc.manage': 'Manage', 'acc.people': (n) => (n === 1 ? '1 person' : `${n} people`), 'acc.who': (u, r) => `${u} (${r})` },
+  th: { 'acc.manage': 'จัดการ', 'acc.people': (n) => `${n} คน`, 'acc.who': (u, r) => `${u} (${r})` },
+});
+
+export async function render(ctx) {
+  await ctx.css('views/c-common.css');
+  ctx.css('views/prefs.css');
+  const auth = await freshAuth(ctx);
+  if (!isPhone()) return large(ctx, auth, t('nav.prefs'));
+  const user = { ...ctx.user, ...(auth.user || {}) };
+  const admin = ctx.can('admin');
+
+  const head = h('div', { class: 'ca-head acc-head' },
+    h('span', { class: 'avatar lg', style: { background: toneOf(user.id) }, 'aria-hidden': 'true' }, initialOf(user.display_name)),
+    h('div', { class: 'ca-head-tx' }, h('p', { class: 'ca-name' }, user.display_name), h('p', { class: 'small' }, t('acc.who', user.username, roleLabel(user.role)))));
+
+  let manage = null;
+  if (admin) {
+    const count = h('span', {});
+    manage = [caption(t('acc.manage')), card(
+      withValue(linkRow({ href: '#/members', title: t('nav.members'), lead: tile(icon('members')) }), count),
+      linkRow({ href: '#/settings', title: t('nav.settings'), lead: tile(icon('settings'), 'lamp') }),
+      linkRow({ href: '#/auth', title: t('nav.auth'), lead: tile(cIcon('shield')) }),
+      linkRow({ href: '#/activity', title: t('nav.activity'), lead: tile(icon('activity'), 'lotus') }))];
+    ctx.api('/users', { signal: ctx.signal }).then((u) => { count.textContent = t('acc.people', u.length); }).catch(() => {});
+  }
+  const general = card(
+    linkRow({ href: '#/prefs', title: t('nav.appSettings'), value: lang() === 'th' ? 'ไทย' : 'English', lead: tile(cIcon('phone')) }),
+    linkRow({ href: '#/help', title: t('nav.help'), lead: tile(icon('help')) }));
+
+  const pk = passkeySection(ctx, auth);
+
+  const row = (ic, label, onclick, tone = 'plain', cls = '') => h('button', { type: 'button', class: `c-row c-link ${cls}`.trim(), onclick },
+    tile(icon(ic), tone), h('span', { class: 'c-row-tx' }, h('span', { class: 'c-title' }, label)), cls ? null : h('span', { class: 'c-chev', 'aria-hidden': 'true' }, '›'));
+  const mine = card(
+    row('key', t('acct.changePw'), () => ctx.changePassword()),
+    googleRow(ctx, auth, user),
+    row('devices', t('acct.signOutAll'), () => confirmAll(ctx)),
+    row('logout', t('acct.signOut'), (e) => busy(e.currentTarget, () => ctx.signOut()).catch(() => {}), 'danger', 'danger'));
+
+  return h('div', { class: 'page p-page' },
     ctx.header({ title: t('nav.account') }),
-    h('div', { class: 'row', style: { padding: '4px 0' } }, avatar(u, 'lg'),
-      h('div', {}, h('p', { style: { fontSize: '18px', fontWeight: 700 } }, u.display_name),
-        h('p', { class: 'small' }, `@${u.username}`), h('p', { class: 'small' }, roleLabel(u.role)))),
-    owner.length ? group(owner.map(row)) : null,
-    group(h('a', { class: 'mi', href: href('prefs') }, h('span', { class: 'mic' }, icon('settings', 'xs')), h('span', { style: { flex: '1' } }, t('nav.appSettings')), icon('chev-right', 'xs'))),
-    group(ctx.accountItems()));
+    head, manage, general,
+    pk ? [caption(t('ca.passkeys')), pk.card, pk.note] : null,
+    caption(t('acct.my')), mine);
+}
+
+function withValue(rowEl, valueEl) {
+  valueEl.className = 'c-val';
+  rowEl.insertBefore(valueEl, rowEl.querySelector('.c-chev'));
+  return rowEl;
+}
+
+function confirmAll(ctx) {
+  ctx.sheet({
+    title: t('acct.signOutAll'),
+    build(body, s) {
+      const go = h('button', { type: 'button', class: 'btn danger big wide' }, t('acct.signOutAll'));
+      go.addEventListener('click', () => busy(go, () => ctx.signOut('/auth/logout-all')).then(() => s.close(), () => {}));
+      body.append(h('p', { class: 'muted' }, t('acct.signOutAllText')), go,
+        h('button', { type: 'button', class: 'btn big wide', onclick: () => s.close() }, t('common.cancel')));
+    },
+  });
 }
