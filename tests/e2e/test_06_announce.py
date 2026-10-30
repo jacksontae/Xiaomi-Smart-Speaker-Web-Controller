@@ -150,8 +150,14 @@ def test_talk_live_real_session_speaker_error(make_app, seeded, drained):
     expect(p.locator("#tk-two")).to_be_visible()
     expect(two).to_have_attribute("aria-expanded", "true")
     frames = []
+    seen = {}  # when "ready" / "speaker_error" arrived: audio only has to flow in between
+    def received(f):
+        frames.append(("in", f))
+        for key in ("ready", "speaker_error"):
+            if isinstance(f, str) and key in f:
+                seen.setdefault(key, time.monotonic())
     p.on("websocket", lambda ws: (ws.on("framesent", lambda f: frames.append(("out", f))),
-                                  ws.on("framereceived", lambda f: frames.append(("in", f)))))
+                                  ws.on("framereceived", received)))
     p.evaluate(COUNT_SENDS)  # Playwright doesn't report Blob frames: count what the page sends
     ptt = p.locator("button.tk-ptt")
     expect(ptt).to_have_accessible_name("Start talking live")
@@ -173,8 +179,9 @@ def test_talk_live_real_session_speaker_error(make_app, seeded, drained):
     assert any('"ready"' in f for f in texts), texts[:5]
     assert any("speaker_error" in f for f in texts), texts[-5:]
     # Audio flows only while the speaker is being tried. One already known to be offline fails before the
-    # recorder's first chunk, so only a slow failure has to show streamed chunks.
-    if took > 3:
+    # recorder's first chunk, so only a slow failure after "ready" has to show streamed chunks (a busy machine
+    # can be slow before "ready", which says nothing about streaming).
+    if seen.get("speaker_error", 0) - seen.get("ready", 0) > 3:
         assert p.evaluate("window.__binSent") > 4, "no audio chunks were sent"
     # Try again starts a new attempt; leaving the page ends it cleanly
     msg.get_by_role("button", name="Try again").click()
