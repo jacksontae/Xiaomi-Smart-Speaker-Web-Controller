@@ -12,6 +12,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   first-account setup, Now playing (queue, volume, relay health), Announce (quick phrases, live talk), Music
   (YouTube, radio, podcasts, my files), Playlists, Schedule, Members, Activity, Speaker settings, App settings,
   Account (Google link, passkeys), Sign-in methods and searchable Help. Offers a passkey after sign-in.
+- "This device" output: the speaker picker offers this phone/tablet/computer to operators. Now playing, Music and
+  Playlists then play in the browser (local queue with shuffle/repeat, seek, volume, lock-screen controls via the
+  Media Session API), per browser (`spk.output`), without changing what anyone else hears. `POST /local/resolve`
+  hands out the same signed media links without contacting the speaker. Announcements, live talk and schedules
+  still play on the speaker, and the Announce/Schedule pages say so.
 - Scheduled announcements and playlists (`/schedules`), now working with both transports.
 - Nightly SQLite + config backups for the remote deployment (`backup` service), with restore.
 - Sign in with Google: members link their Google account (`POST/DELETE /me/google`) and then sign in with it

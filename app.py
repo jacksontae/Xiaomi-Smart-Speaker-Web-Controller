@@ -500,12 +500,17 @@ def _media_sig(path, params):
     return hmac.new(settings.api_token.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
-def media_url(path, **params):
-    """A URL the speaker can fetch without a header: signed with the API token and time-limited."""
+def media_path(path, **params):
+    """Signed, time-limited path + query of a media link, relative to this server (a browser plays it as is)."""
     params = {k: str(v) for k, v in params.items()}
     params["exp"] = str(int(time.time()) + MEDIA_URL_TTL)
     params["sig"] = _media_sig(path, params)
-    return f"{base_url()}{path}?{urllib.parse.urlencode(params)}"
+    return f"{path}?{urllib.parse.urlencode(params)}"
+
+
+def media_url(path, **params):
+    """A URL the speaker can fetch without a header: signed with the API token and time-limited."""
+    return f"{base_url()}{media_path(path, **params)}"
 
 
 def verify_media(request: Request):
@@ -892,20 +897,21 @@ async def ensure_track(video_id):
     return (await asyncio.shield(task))["path"]
 
 
-async def queue_media(item):
-    """(url, content_type) the speaker loads for a queue item."""
+async def queue_media(item, sign=media_url):
+    """(url, content_type) the speaker loads for a queue item. `sign=media_path` gives this server's own links
+    relative, for a browser playing on "This device"."""
     nonce = next(_nonce)
     if item["kind"] == "youtube":
         path = await ensure_track(item["source"])
-        return media_url(f"/yt/{path.name}", n=nonce), content_type_for(path)
+        return sign(f"/yt/{path.name}", n=nonce), content_type_for(path)
     if item["kind"] == "tts":
         lang = item["lang"] or settings.tts_lang
-        return media_url("/tts.mp3", text=item["source"], lang=lang, n=nonce), "audio/mp3"
+        return sign("/tts.mp3", text=item["source"], lang=lang, n=nonce), "audio/mp3"
     if item["kind"] == "file":
         row = db.get_file(int(item["source"])) if item["source"].isdigit() else None
         if row is None or not (MEDIA_DIR / row["stored_name"]).is_file():
             raise HTTPException(404, "The uploaded file is gone")
-        return media_url(f"/media/{row['stored_name']}", n=nonce), row["content_type"]
+        return sign(f"/media/{row['stored_name']}", n=nonce), row["content_type"]
     # url, radio and podcast items are fetched by the speaker straight from their source.
     return item["source"], item.get("content_type") or guess_audio_type(item["source"])
 
@@ -2385,6 +2391,51 @@ async def play_file(file_id: int, body: FilePlayBody, who: Who):
         raise HTTPException(410, "The file is missing from the server's disk")
     url = media_url(f"/media/{row['stored_name']}")
     return await play_source(url, row["content_type"], row["title"], body.volume, who, "file play")
+
+
+# --- This device: play in the browser instead of on the speaker ---
+
+async def local_item(body):
+    """A playlist-style item (kind, source, title, lang, thumbnail, duration, content_type) checked like
+    build_item, but without the metadata lookups a browser already has; YouTube words or URLs are looked up."""
+    title = body.title.strip()[:200] if body.title and body.title.strip() else None
+    item = {"kind": body.kind, "title": title, "duration": body.duration, "lang": None,
+            "thumbnail": optional_http_url(body.thumbnail), "content_type": audio_type(body.content_type)}
+    if body.kind == "youtube":
+        source = clean_text(body.source, "source", 500)
+        if not YT_ID_RE.fullmatch(source):
+            meta = await asyncio.to_thread(yt_info, source)
+            source, title = meta["video_id"], title or meta["title"]
+            item["duration"] = item["duration"] or meta["duration"]
+        return {**item, "source": source, "title": title, "thumbnail": yt_thumbnail(source)}
+    if body.kind == "tts":
+        text = clean_text(body.source, "source", TTS_TEXT_MAX)
+        return {**item, "source": text, "title": title or text[:60], "lang": (body.lang or settings.tts_lang)[:16]}
+    if body.kind == "file":
+        row = db.get_file(int(body.source)) if body.source.strip().isdigit() else None
+        if row is None:
+            raise HTTPException(404, "No such file")
+        return {**item, "source": str(row["id"]), "title": title or row["title"],
+                "duration": item["duration"] or row["duration"]}
+    if body.kind == "radio" and STATION_UUID_RE.fullmatch(body.source.strip()):
+        station = await radio_station(body.source.strip())
+        return {**item, "source": station["url"], "title": title or station["name"],
+                "thumbnail": item["thumbnail"] or station["favicon"], "content_type": station["content_type"]}
+    return {**item, "source": http_url(body.source, "source")}  # url, podcast, radio stream URL
+
+
+@operator_api.post("/local/resolve")
+async def local_resolve(body: ItemBody):
+    """A link this browser can play itself when "This device" is its output: the same signed media links the
+    speaker gets (relative to this server), or the item's own stream URL. The speaker is never contacted and
+    nothing is logged, since nobody else hears it."""
+    item = await local_item(body)
+    url, content_type = await queue_media(item, sign=media_path)
+    if item["kind"] == "youtube":
+        await asyncio.to_thread(prune_cache, {Path(urllib.parse.urlsplit(url).path).name})
+    return {"kind": item["kind"], "url": url, "content_type": content_type,
+            "title": item["title"], "duration": item["duration"], "thumbnail": item["thumbnail"],
+            "live": item["kind"] == "radio"}
 
 
 # --- Quick phrases ---

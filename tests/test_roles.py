@@ -74,6 +74,7 @@ ROLE_TABLE = {
     ("PATCH", "/files/{file_id}"): "operator",
     ("DELETE", "/files/{file_id}"): "operator",
     ("POST", "/files/{file_id}/play"): "operator",
+    ("POST", "/local/resolve"): "operator",
     ("GET", "/talk/status"): "operator",
     # Fetched by the speaker with signed URLs, or the public web UI.
     ("GET", "/tts.mp3"): "signed",

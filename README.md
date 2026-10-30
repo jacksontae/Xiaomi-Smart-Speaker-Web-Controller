@@ -204,6 +204,16 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 - `say` ระหว่างเล่นวิทยุ พอดแคสต์ หรือไฟล์ ประกาศจบแล้วเล่นต่อ (วิทยุกลับไปที่สัญญาณสด)
 - firmware relay ปัจจุบันเล่นทุกอย่างแบบ BUFFERED (ไม่รู้จักฟิลด์ `stream_type`) วิทยุส่วนใหญ่ยังเล่นได้
 
+### เล่นที่อุปกรณ์นี้ (This device)
+
+| Method | Path | Role | Body | ผล |
+|---|---|---|---|---|
+| POST | `/local/resolve` | operator | `{"kind", "source", "title", "lang", "thumbnail", "duration", "content_type"}` (เหมือน item ของเพลย์ลิสต์) | `{"kind", "url", "content_type", "title", "duration", "thumbnail", "live"}` |
+
+- ในเว็บ เลือก "This device" จากปุ่มชื่อลำโพง หน้าเล่นอยู่ เพลง และเพลย์ลิสต์ จะเล่นใน `<audio>` ของเบราว์เซอร์นั้นแทนลำโพง (คิว สุ่ม เล่นวน เลื่อนตำแหน่ง ระดับเสียง และปุ่มบนหน้าจอล็อกผ่าน Media Session ทำในเบราว์เซอร์) จำค่าไว้ต่อเครื่องใน `localStorage` (`spk.output`) ไม่เปลี่ยนสิ่งที่คนอื่นได้ยิน
+- `/local/resolve` ไม่ติดต่อลำโพงและไม่ลง activity: YouTube ดาวน์โหลดเข้า cache เดิมแล้วคืนลิงก์เซ็น `/yt/...` (path สัมพัทธ์กับ server นี้) ข้อความคืน `/tts.mp3?...` ไฟล์คืน `/media/...` ส่วนวิทยุ พอดแคสต์ และลิงก์คืน URL ต้นทาง
+- ประกาศ พูดสด และตารางเวลาออกที่ลำโพงเสมอ · สตรีม `http://` เล่นในหน้า `https://` ไม่ได้ (mixed content) และ HLS เล่นได้เฉพาะ Safari · iOS ต้องแตะก่อนจึงมีเสียง และเล่นเบื้องหลังได้เท่าที่หน้าเว็บยังเล่นอยู่
+
 ### พูดสด (live talk)
 
 หน้าเว็บอัดเสียงจากไมค์ด้วย MediaRecorder แล้วส่งเป็นชิ้นๆ ทาง `WebSocket /talk` server แปลงเป็น MP3 ด้วย ffmpeg
