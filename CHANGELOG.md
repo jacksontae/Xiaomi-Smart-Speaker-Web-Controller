@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- Music sources: internet radio (radio-browser.info search, favourites, played as a LIVE stream), podcasts
+  (iTunes Search API + RSS episodes) and "My files" (audio uploads with size/type/quota limits, served through
+  signed `/media/...` links). All three play directly, resume after an announcement, and can be playlist items
+  (`radio`, `podcast`, `file`). Database schema version 3.
+
 ## [0.2.0] - 2026-10-30
 
 ### Added

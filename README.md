@@ -125,7 +125,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 |---|---|---|---|---|
 | GET · POST | `/playlists` | viewer · operator | `{"name"}` | รายการเพลย์ลิสต์ · สร้างใหม่ |
 | GET · PATCH · DELETE | `/playlists/{id}` | viewer · operator | `{"name"}` | ดูพร้อมรายการ · เปลี่ยนชื่อ · ลบ |
-| POST | `/playlists/{id}/items` | operator | `{"kind": "youtube"\|"url"\|"tts", "source", "title", "lang"}` | เพิ่มรายการ |
+| POST | `/playlists/{id}/items` | operator | `{"kind": "youtube"\|"url"\|"tts"\|"radio"\|"podcast"\|"file", "source", "title", "lang", "thumbnail", "duration", "content_type"}` | เพิ่มรายการ |
 | DELETE | `/playlists/{id}/items/{item_id}` | operator | – | ลบรายการ |
 | PUT | `/playlists/{id}/order` | operator | `{"item_ids": [...]}` | เรียงใหม่ (ต้องครบทุก id พอดี ไม่งั้น `409`) |
 | POST | `/playlists/{id}/play` | operator | `{"start_index": 0, "shuffle": false, "repeat": "off"\|"all"\|"one"}` | เล่นทั้งเพลย์ลิสต์เป็นคิว |
@@ -136,6 +136,8 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 | DELETE | `/phrases/{id}` | operator | – | ลบข้อความด่วน |
 
 - รายการ `youtube` ใส่ได้ทั้ง URL, video id หรือคำค้น (เอาผลแรก) · `url` ต้องเป็นลิงก์ http(s) และต้องมี `title` · `tts` ยาวไม่เกิน 1000 ตัวอักษร
+- `radio` ใส่ uuid ของสถานีจาก radio-browser หรือลิงก์ stream (ต้องมี `title`) · `podcast` ใส่ลิงก์ไฟล์ตอน (ต้องมี `title`) · `file` ใส่ id ของไฟล์ที่อัปโหลด (ลบไฟล์แล้วรายการนั้นหายจากเพลย์ลิสต์ด้วย)
+- สถานีวิทยุในคิวเล่นแบบ LIVE ไม่มีวันจบ คิวจะค้างที่สถานีนั้นจนกด next
 - คิวเลื่อนไปเพลงถัดไปเองเมื่อเพลงจบ (ประกาศจบไม่นับ) โหลดเพลง YouTube ถัดไปไว้ล่วงหน้า รายการที่โหลดไม่ได้จะถูกข้ามและบันทึกไว้
 - `say` ระหว่างเล่นคิว: ประกาศจบแล้วเล่นเพลงเดิมต่อ แล้วคิวก็เดินต่อตามปกติ
 - คิวอยู่ในหน่วยความจำ รีสตาร์ท service แล้วหาย และแก้เพลย์ลิสต์ระหว่างเล่นจะไม่กระทบคิวที่เล่นอยู่
@@ -146,6 +148,28 @@ curl -X POST localhost:8090/say -H "Authorization: Bearer $TOKEN" -H 'Content-Ty
 curl -X POST localhost:8090/youtube -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"query":"เพลงบรรเลงเปียโน"}'
 curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"shuffle":true,"repeat":"all"}'
 ```
+
+### แหล่งเพลง: วิทยุ พอดแคสต์ ไฟล์ของฉัน
+
+| Method | Path | สิทธิ์ | Body / query | หน้าที่ |
+|---|---|---|---|---|
+| GET | `/radio/search?q=&country=TH&tag=&limit=20` | operator | – | ค้นสถานีจาก [radio-browser.info](https://www.radio-browser.info) (เรียงตามความนิยม) |
+| GET · POST | `/radio/favorites` | viewer · operator | `{"uuid"}` หรือ `{"url", "name"}` | สถานีโปรด · เพิ่ม (ซ้ำ `409`) |
+| DELETE | `/radio/favorites/{id}` | operator | – | ลบสถานีโปรด |
+| POST | `/radio/play` | operator | `{"favorite_id"}` หรือ `{"uuid"}` หรือ `{"url", "name"}` + `"volume"` | เล่นวิทยุแบบ LIVE (ล้างคิว) |
+| GET | `/podcasts/search?q=&country=TH&limit=20` | operator | – | ค้นรายการจาก iTunes Search API ได้ `feed_url` |
+| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | operator | – | อ่าน RSS ได้รายละเอียดรายการและตอนล่าสุด |
+| POST | `/podcasts/play` | operator | `{"url", "title", "thumbnail", "content_type", "volume"}` | เล่นตอนหนึ่ง (ล้างคิว) |
+| GET | `/files` | viewer | – | `{"items", "used", "quota", "max_size", "types"}` |
+| POST | `/files?name=<ชื่อไฟล์>&duration=<วินาที>` | operator | ตัวไฟล์เสียงเป็น body ตรงๆ (ไม่ใช่ form) | อัปโหลด |
+| PATCH · DELETE | `/files/{id}` | operator (เจ้าของ) · admin (ทุกไฟล์) | `{"title"}` | เปลี่ยนชื่อ · ลบ |
+| POST | `/files/{id}/play` | operator | `{"volume"}` | เล่นไฟล์ (ล้างคิว) |
+
+- ไฟล์อัปโหลดตรวจชนิดจากเนื้อไฟล์ (mp3, aac, m4a, ogg/opus, wav, flac, webm) ไม่ใช่จากชื่อ · ชนิดอื่นได้ `415` ใหญ่เกิน `413` พื้นที่เต็ม `507`
+- เก็บที่ `media/` ข้าง `data.db` (env `MEDIA_DIR`) จำกัดไฟล์ละ 50 MB (`UPLOAD_MAX_MB`) รวม 2000 MB (`UPLOAD_QUOTA_MB`) ลำโพงดึงผ่านลิงก์เซ็น `/media/...` แบบเดียวกับ `/yt/...`
+- วิทยุและพอดแคสต์ลำโพงดึงจากต้นทางเอง · feed พอดแคสต์ server เป็นคนดึง จึงรับเฉพาะโฮสต์บนอินเทอร์เน็ตสาธารณะ (ไม่รับ IP ใน LAN) และอ่านไม่เกิน 10 MB
+- `say` ระหว่างเล่นวิทยุ พอดแคสต์ หรือไฟล์ ประกาศจบแล้วเล่นต่อ (วิทยุกลับไปที่สัญญาณสด)
+- firmware relay ปัจจุบันเล่นทุกอย่างแบบ BUFFERED (ไม่รู้จักฟิลด์ `stream_type`) วิทยุส่วนใหญ่ยังเล่นได้
 
 ## Remote deployment (ESP32 relay + self-hosted MQTT + Cloudflare Tunnel)
 
@@ -211,7 +235,7 @@ How it behaves:
 app.py                 FastAPI service: TTS, YouTube cache, คิว, settings, API ทั้งหมด
 transport.py           ช่องทางสั่งลำโพง: Cast ตรง (pychromecast) หรือผ่าน ESP32 relay ทาง MQTT
 auth.py                รหัสผ่าน (scrypt), session token, จำกัดการล็อกอินผิด
-store.py               SQLite: ผู้ใช้ session เพลย์ลิสต์ ข้อความด่วน บันทึกกิจกรรม
+store.py               SQLite: ผู้ใช้ session เพลย์ลิสต์ ข้อความด่วน กำหนดการ สถานีโปรด ไฟล์อัปโหลด บันทึกกิจกรรม
 player.py              คิวเพลง (ลำดับเล่น shuffle repeat)
 static/                หน้าเว็บควบคุม
 speakerctl             จัดการ LaunchAgent บน macOS
