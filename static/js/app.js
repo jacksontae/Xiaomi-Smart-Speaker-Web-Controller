@@ -6,7 +6,7 @@ import { motionReduced, onChange as onPrefs } from './prefs.js';
 import { h, icon, toast } from './ui.js';
 import { openSheet, popover, closeAllSheets } from './sheet.js';
 import { buildShell } from './shell.js';
-import { RANK, parseHash } from './routes.js';
+import { RANK, ROUTES, parseHash } from './routes.js';
 
 const POLL_MS = 4000;
 const appEl = document.getElementById('app');
@@ -21,11 +21,13 @@ let renderSeq = 0;
 const can = (role) => !!state.user && RANK[state.user.role] >= RANK[role];
 
 /* ---------- css loader for view-specific stylesheets ---------- */
+// Relative to this module, so stylesheets come from the same versioned /static/<build>/ folder (see app.py).
+const cssUrl = (path) => new URL(`../css/${path}`, import.meta.url).href;
 const cssLoaded = new Map();
 export function loadCss(path) {
   if (!cssLoaded.has(path)) {
     cssLoaded.set(path, new Promise((resolve) => {
-      const l = h('link', { rel: 'stylesheet', href: `/static/css/${path}` });
+      const l = h('link', { rel: 'stylesheet', href: cssUrl(path) });
       l.addEventListener('load', resolve);
       l.addEventListener('error', resolve);
       document.head.append(l);
@@ -106,6 +108,7 @@ setUnauthorizedHandler(() => {
 
 async function boot() {
   stopPolling();
+  if (!state.auth) warmRoute(parseHash().route); // first load: fetch the page's files while /auth/state is asked
   try {
     state.auth = await api('/auth/state', { allow401: true });
   } catch (e) {
@@ -144,6 +147,7 @@ function startApp() {
   applySpeakers();
   render(false);
   startPolling();
+  prefetchRoutes();
   // passkey offer after a fresh sign-in / "passkey required" prompt (team C module; guards itself to once per load)
   import('./c-passkey-offer.js').then((m) => m.maybePrompt({ api, user: state.user, fresh: !(state.auth && state.auth.user) })).catch(() => {});
 }
@@ -169,23 +173,27 @@ async function render(animate = true) {
     return render(false);
   }
   shell.markRoute(route, animate && !motionReduced());
-  let mod;
+  (route.css || []).forEach(loadCss); // fetch the page's stylesheets alongside its module, not after it
+  const done = pending(route, seq);
+  let mod, ok;
   try {
     mod = await route.load();
+    if (seq !== renderSeq) return;
+    unmountView();
+    closeAllSheets();
+    ok = await mount(mod, shell.content, makeCtx(params, route), seq);
   } catch (e) {
     console.error(e);
-    // The module never reached the server (Brave Shields and ad blockers block some script names) or the
-    // network dropped: say so on the page, with a retry, instead of leaving it empty.
+    // The module never reached the server (Brave Shields and ad blockers block some script names), the network
+    // dropped, or this tab predates an update (its versioned files are gone): say so on the page, with a retry.
     if (seq !== renderSeq) return;
     unmountView();
     shell.content.replaceChildren(h('div', { class: 'page' }, h('p', { class: 'lead' }, t('err.module')),
-      h('button', { class: 'btn primary', type: 'button', onclick: () => render(false) }, icon('refresh', 'sm'), t('app.retry'))));
+      h('button', { class: 'btn primary', type: 'button', onclick: () => retryRoute() }, icon('refresh', 'sm'), t('app.retry'))));
     return;
+  } finally {
+    if (seq === renderSeq) done();
   }
-  if (seq !== renderSeq) return;
-  unmountView();
-  closeAllSheets();
-  const ok = await mount(mod, shell.content, makeCtx(params, route), seq);
   if (!ok) return;
   document.title = `${t(route.label)} · ${t('app.name')}`;
   window.scrollTo(0, 0);
@@ -194,6 +202,52 @@ async function render(animate = true) {
   if (animate && page && !motionReduced()) { page.classList.remove('enter'); void page.offsetWidth; page.classList.add('enter'); }
 }
 window.addEventListener('hashchange', () => { if (shell) render(); });
+
+/** A page not ready within ~120 ms gets a slim progress bar at the top, and its header with placeholder rows in
+ *  place of the old page, so a slow connection never looks frozen. Returns the function that clears the bar. */
+const PENDING_MS = 120;
+const progress = h('div', { class: 'navprog', 'aria-hidden': 'true' });
+document.body.append(progress);
+function pending(route, seq) {
+  const timer = setTimeout(() => {
+    if (seq !== renderSeq || !shell) return;
+    progress.classList.add('on');
+    unmountView();
+    closeAllSheets();
+    const rows = [0, 1, 2].map(() => h('div', { class: 'skel-row' }, h('span', { class: 'skel-dot' }), h('span', { class: 'skel-line' })));
+    shell.content.replaceChildren(h('div', { class: 'page page-loading', 'aria-busy': 'true' },
+      shell.header({ title: t(route.label) }), h('div', { class: 'skel', role: 'status', 'aria-label': t('app.loading') }, rows)));
+    window.scrollTo(0, 0);
+  }, PENDING_MS);
+  return () => { clearTimeout(timer); progress.classList.remove('on'); };
+}
+
+/** Retry after a failed page load: a fresh copy of the app when it was updated meanwhile, else the same page. */
+async function retryRoute() {
+  try {
+    const html = await (await fetch('/', { cache: 'no-store' })).text();
+    if (!html.includes(new URL('..', import.meta.url).pathname)) { location.reload(); return; }
+  } catch { /* offline: try the page again below */ }
+  render(false);
+}
+
+/** Once signed in, fetch the other pages' modules and stylesheets while the browser is idle, so the first visit
+ *  to each page needs no round trip (files under /static/<build>/ are cached for good). */
+function prefetchRoutes() {
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500));
+  const todo = parseHash().route;
+  const queue = ROUTES.filter((r) => r !== todo && can(r.min));
+  const next = () => {
+    const r = queue.shift();
+    if (r && state.user) warmRoute(r).finally(() => idle(next, { timeout: 2000 }));
+  };
+  idle(next, { timeout: 2000 });
+}
+/** Fetch (and cache) a route's module and stylesheets without showing it. */
+function warmRoute(r) {
+  (r.css || []).filter((p) => !cssLoaded.has(p)).forEach((p) => fetch(cssUrl(p), { priority: 'low' }).then((res) => res.blob()).catch(() => {}));
+  return r.load().catch(() => {});
+}
 
 /* ---------- status polling ---------- */
 async function refreshStatus() {

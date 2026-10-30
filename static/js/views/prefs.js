@@ -26,10 +26,11 @@ register({
 });
 
 export async function render(ctx) {
-  await ctx.css('views/c-common.css');
+  const fresh = isPhone() ? null : freshAuth(ctx); // ask the server while the stylesheet loads, not after
   ctx.css('views/prefs.css');
-  if (isPhone()) return phone(ctx);
-  return large(ctx, await freshAuth(ctx), t('nav.prefs'));
+  await ctx.css('views/c-common.css');
+  if (!fresh) return phone(ctx);
+  return large(ctx, await fresh, t('nav.prefs'));
 }
 
 function phone(ctx) {
