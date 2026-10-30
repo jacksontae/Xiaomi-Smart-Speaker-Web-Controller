@@ -3,12 +3,16 @@
 // last result (missed / failed shown in red); editor for name, message + voice or playlist + shuffle, time,
 // repeat days or a one-off date, own volume; test it now; delete. Phones and iPad edit in a sheet, desktop in a
 // side panel. Times are the speaker's (server's) time zone, which GET /schedules reports. Viewers read only.
+// Android look (A_Schedule / AT_Schedule): New schedule is an extended FAB on phones and the editor a full-screen
+// dialog (android-kit.js); tablets in landscape (>= 960px) put the list and the editor side by side.
 import { h, icon, field, busy, segmented, tip } from '../ui.js';
 import { register, t, locale } from '../i18n.js';
 import { errorText } from '../api.js';
 import { bicon } from '../teamb-icons.js';
 import { errBox, note, spinnerLine, playlistMeta, TTS_LANGS, langNative } from '../teamb-common.js';
 import { modeSwitch } from '../a-modeswitch.js';
+import { isAndroid } from '../prefs.js';
+import { kitCss, fab, fullDialog } from '../android-kit.js';
 
 register({
   en: {
@@ -90,7 +94,7 @@ register({
 const ALL = [0, 1, 2, 3, 4, 5, 6];
 const PRESETS = { every: ALL, wk: [0, 1, 2, 3, 4], we: [5, 6] };
 const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
-const isDesk = () => matchMedia('(min-width: 1280px)').matches;
+const isDesk = () => matchMedia(isAndroid() ? '(min-width: 960px)' : '(min-width: 1280px)').matches;
 
 /* ---------- time zone helpers: everything shown in the server's zone ---------- */
 function zoned(ms, tz) {
@@ -112,7 +116,7 @@ function zoneName(tz) {
 }
 
 export async function render(ctx) {
-  await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/schedule.css'), ctx.css('views/a-modeswitch.css')]);
+  await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/schedule.css'), ctx.css('views/a-modeswitch.css'), kitCss(ctx)]);
   const op = ctx.can('operator');
   const desk = isDesk();
   let data = null, playlists = [], offset = 0, selected = null; // selected: schedule id | 'new' (desktop)
@@ -123,11 +127,17 @@ export async function render(ctx) {
   const newBtn = op ? h('button', { type: 'button', class: 'btn primary', onclick: () => openEditor(null) }, icon('plus', 'sm'), t('sched.new')) : null;
   const listEl = h('div', { class: 'sc-list', 'aria-label': t('sched.list') });
   const pane = h('div', { class: 'sc-pane glass' });
-  const node = h('div', { class: `page sc${desk ? ' sc-desk' : ''}` },
-    ctx.header({ title: t('nav.announce'), actions: sw.headActs }),
-    sw.slot,
-    h('div', { class: 'sc-bar' }, clock, newBtn),
-    desk ? h('div', { class: 'sc-split' }, listEl, pane) : listEl);
+  if (newBtn) fab(ctx, { icon: 'plus', label: t('sched.new'), onclick: () => openEditor(null), replaces: newBtn });
+  const bar = h('div', { class: 'sc-bar' }, clock, newBtn);
+  // Android tablets (AT_Schedule): the mode switch and New schedule head the list column, the editor runs full height
+  const node = desk && isAndroid()
+    ? h('div', { class: 'page sc sc-desk' }, ctx.header({ title: t('nav.announce'), actions: sw.headActs }),
+      h('div', { class: 'sc-split' }, h('div', { class: 'sc-left' }, sw.slot, bar, listEl), pane))
+    : h('div', { class: `page sc${desk ? ' sc-desk' : ''}` },
+      ctx.header({ title: t('nav.announce'), actions: sw.headActs }),
+      sw.slot,
+      bar,
+      desk ? h('div', { class: 'sc-split' }, listEl, pane) : listEl);
 
   async function load() {
     try {
@@ -225,6 +235,16 @@ export async function render(ctx) {
   /* ----- editor placement: desktop panel or sheet ----- */
   function openEditor(s) {
     if (desk) { selected = s ? s.id : 'new'; paint(); paintPane(true); return; }
+    // Android phones: a full-screen dialog with Save in its top bar (null elsewhere: the sheet below)
+    const full = fullDialog(ctx, {
+      title: t(s ? 'sched.edit' : 'sched.new'), save: t('sched.save'),
+      build(body, dlg) {
+        const form = editor(s, { done: () => dlg.close(), saveBtn: op ? dlg.saveBtn : null });
+        dlg.bindForm(form);
+        body.append(form);
+      },
+    });
+    if (full) return;
     ctx.sheet({
       title: t(s ? 'sched.edit' : 'sched.new'),
       build(body, sheet) {
@@ -243,7 +263,7 @@ export async function render(ctx) {
   }
 
   /* ----- the editor form ----- */
-  function editor(s, { done }) {
+  function editor(s, { done, saveBtn: barSave = null }) {
     const today = zoned(now(), data.timezone).date;
     const f = s ? { ...s, days: [...s.days] } : {
       name: '', enabled: true, action: 'say', text: '', lang: (ctx.status && ctx.status.tts_lang) || 'th', playlist_id: playlists[0] ? playlists[0].id : null,
@@ -353,7 +373,7 @@ export async function render(ctx) {
       err.textContent = '';
       return true;
     }
-    const saveBtn = op ? h('button', { type: 'submit', class: `btn primary${desk ? '' : ' big wide'}` }, t('sched.save')) : null;
+    const saveBtn = op ? barSave || h('button', { type: 'submit', class: `btn primary${desk ? '' : ' big wide'}` }, t('sched.save')) : null;
     async function save(e) {
       e.preventDefault();
       if (!check()) return;
@@ -415,7 +435,7 @@ export async function render(ctx) {
       h('div', { class: 'field' }, h('span', {}, t('sched.time')), h('label', { class: 'sc-timerow' }, h('span', {}, t('sched.playsAt')), time)),
       h('div', { class: 'field' }, h('span', {}, t('sched.repeat')), presets, dayBox, dateRow, summary),
       h('div', { class: 'field' }, h('span', {}, t('sched.volume')), h('div', { class: 'sc-volbox' }, h('label', { class: 'sc-swrow' }, h('span', {}, t('sched.ownVol')), volOn), volRow, volHint)),
-      info, err, saveBtn, testBtn, delBox);
+      info, err, barSave ? null : saveBtn, testBtn, delBox);
     return form;
   }
 
