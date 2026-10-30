@@ -2,9 +2,10 @@
 # Build from the repository root: docker compose -f deploy/remote/docker-compose.yml build
 FROM python:3.13-slim
 
-# yt-dlp needs a JavaScript runtime for YouTube's challenges (app.py asks for node).
+# yt-dlp needs a JavaScript runtime for YouTube's challenges (app.py asks for node);
+# live talk transcodes the browser's microphone with ffmpeg.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends nodejs ca-certificates \
+    && apt-get install -y --no-install-recommends nodejs ffmpeg ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

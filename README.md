@@ -18,6 +18,7 @@ HTTP API และหน้าเว็บสำหรับสั่ง Google 
 ## ติดตั้ง (macOS)
 
 ต้องมี Python 3.11+ และ Node.js (yt-dlp ใช้แก้ JS challenge ของ YouTube) เช่น `brew install python node`
+ถ้าจะใช้ "พูดสด" (live talk) ต้องมี ffmpeg ด้วย: `brew install ffmpeg` (หรือชี้ path ด้วย env `FFMPEG`) ไม่มีก็ใช้ส่วนอื่นได้ตามปกติ
 
 ```bash
 git clone git@github.com:jacksontae/Xiaomi-Smart-Speaker-Web-Controller.git
@@ -57,6 +58,7 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 | `tts_lang` | `th` | ภาษาเริ่มต้นของ `/say` |
 | `cache_keep` | `20` | จำนวนเพลง YouTube ที่เก็บใน `cache/` |
 | `resume_after_say` | `true` | ประกาศเสร็จแล้วเล่นเพลง YouTube ที่ค้างอยู่ต่อจากจุดเดิม (ย้อน 1 วินาที) |
+| `talk_max_seconds` | `120` | พูดสดได้นานสุดกี่วินาทีต่อครั้ง (10–600) |
 | `transport` | `cast` | `cast` = สั่งลำโพงตรงในวง LAN · `mqtt` = สั่งผ่าน ESP32 relay (ดู Remote deployment) |
 | `mqtt` | ดู `config.example.json` | broker ของ relay: `host`, `port`, `tls`, `username`, `password`, `base_topic`, `client_id` |
 | `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.0.2.20:8090` · host ของ URL นี้คือ RP ID ของ passkey |
@@ -202,6 +204,26 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 - `say` ระหว่างเล่นวิทยุ พอดแคสต์ หรือไฟล์ ประกาศจบแล้วเล่นต่อ (วิทยุกลับไปที่สัญญาณสด)
 - firmware relay ปัจจุบันเล่นทุกอย่างแบบ BUFFERED (ไม่รู้จักฟิลด์ `stream_type`) วิทยุส่วนใหญ่ยังเล่นได้
 
+### พูดสด (live talk)
+
+หน้าเว็บอัดเสียงจากไมค์ด้วย MediaRecorder แล้วส่งเป็นชิ้นๆ ทาง `WebSocket /talk` server แปลงเป็น MP3 ด้วย ffmpeg
+แล้วให้ลำโพงเล่นลิงก์ `/talk/<id>/live` แบบ LIVE เสียงจะช้ากว่าจริงประมาณ 2–5 วินาที และลำโพงพูดกลับไม่ได้ (ไม่มีไมค์ให้ใช้)
+
+- ยืนยันตัวตนด้วย cookie `sid` (operator ขึ้นไป) และ `Origin` ต้องเป็นโดเมนเดียวกัน · script ใช้ header `Authorization: Bearer <token>` ได้
+- พูดได้ทีละคน คนที่สองได้ `{"type": "error", "code": "busy"}` · ระหว่างพูดเพลงหยุด พูดจบแล้วเล่นต่อเหมือนหลังประกาศ
+- `GET /talk/status` (operator) บอกว่า server มี ffmpeg ไหม (`available`) และใครกำลังพูด (`active`) · `/status` มี `talking`
+
+| ทิศทาง | ข้อความ | ความหมาย |
+|---|---|---|
+| → | `{"type": "start", "mime": "audio/webm;codecs=opus", "chime": true, "volume": 0.6}` | ข้อความแรก (ภายใน 10 วินาที) `mime` รับ `audio/webm`, `audio/ogg`, `audio/mp4` (Safari) |
+| ← | `{"type": "ready", "id", "max_seconds", "format"}` | เริ่มส่งเสียง (binary frame ของ MediaRecorder) ได้ |
+| ← | `{"type": "live"}` | ลำโพงเริ่มเล่นสตรีมแล้ว (หลังเสียง chime ถ้าเปิด) |
+| → | `{"type": "ping"}` · `{"type": "stop"}` | ได้ `{"type": "pong"}` · จบการพูด |
+| ← | `{"type": "ended", "reason", "seconds", "detail"?}` | จบแล้ว ปิดด้วย code 1000 · `reason`: `stopped`, `disconnected`, `max_length`, `idle` (ไม่มีเสียงมา 10 วินาที), `interrupted` (มีคนสั่งเล่นอย่างอื่น), `too_large`, `speaker_error`, `transcoder_error` |
+| ← | `{"type": "error", "code", "detail"}` | ไม่ได้เริ่ม ปิดด้วย code `4400` bad_request · `4401` unauthorized · `4403` forbidden · `4409` busy · `4503` unavailable (ไม่มี ffmpeg) |
+
+ทดสอบเองได้ด้วย `python tests/manual/talk_stream.py --url ws://127.0.0.1:8090/talk --token $TOKEN --file clip.webm`
+
 ## Remote deployment (ESP32 relay + self-hosted MQTT + Cloudflare Tunnel)
 
 Use this when the service runs somewhere other than the speaker's LAN (e.g. a VM without a fixed IP).
@@ -313,6 +335,7 @@ keep your own copy of them (they hold secrets, so not in git).
 
 ```
 app.py                 FastAPI service: TTS, YouTube cache, คิว, settings, API ทั้งหมด
+talk.py                พูดสด: ffmpeg แปลงเสียงไมค์เป็น MP3 สตรีม เสียง chime
 transport.py           ช่องทางสั่งลำโพง: Cast ตรง (pychromecast) หรือผ่าน ESP32 relay ทาง MQTT
 auth.py                รหัสผ่าน (scrypt), session token, จำกัดการล็อกอินผิด
 google_signin.py       ตรวจ ID token ของ "Sign in with Google" (ลายเซ็น, aud, iss, exp)
