@@ -1,0 +1,109 @@
+/* Shared by Music, Playlists and Schedule (page team B): media rows, kind thumbs, round play/add buttons,
+   search field, chips, inline errors, the Add item sheet. Tokens come from base.css; motion follows data-motion. */
+
+/* ---------- rows ---------- */
+.tb-list { display: flex; flex-direction: column; }
+.tb-row { position: relative; display: flex; align-items: center; gap: 12px; min-height: 68px; padding: 10px 12px; }
+.tb-row + .tb-row { border-top: 1px solid var(--line); }
+.tb-tx { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tb-t { font-size: 15px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.tb-s { font-size: 13px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
+.tb-row.on .tb-t, .tb-row.on > .tb-tx > .tb-s { color: var(--accent); }
+.tb-act { position: relative; z-index: 1; flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.tb-chev { color: var(--ink-3); }
+
+/* whole-row click target under the row's own buttons (a link or button stretched over the row) */
+.tb-stretch { position: absolute; inset: 0; z-index: 0; width: 100%; margin: 0; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; }
+.tb-stretch:focus-visible { outline-offset: -3px; }
+.tb-row:has(> .tb-stretch:hover) { background: var(--glass-soft); }
+.tb-row > .tb-th { pointer-events: none; } /* positioned, so it would sit above the stretched target */
+
+/* ---------- thumbs (tinted by kind; a picture covers the tint once it loads) ---------- */
+.tb-th { position: relative; flex: 0 0 auto; width: 48px; height: 48px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--fill); color: var(--ink-2); }
+.tb-th.wide { width: 80px; }
+.tb-th img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--t-mid) var(--ease); }
+.tb-th.has-img img { opacity: 1; }
+.tb-th.has-img > .icon { visibility: hidden; }
+.tb-th.k-youtube { background: rgba(232, 106, 146, .16); color: var(--lotus-ink); }
+.tb-th.k-tts, .tb-th.k-playlist, .tb-th.k-podcast { background: var(--accent-tint); color: var(--accent); }
+.tb-th.k-url, .tb-th.k-radio { background: rgba(240, 182, 74, .2); color: var(--warn); }
+.tb-th.k-file { background: var(--fill); color: var(--ink-2); }
+.tb-th.dim { background: var(--fill); color: var(--ink-3); }
+.tb-dur { position: absolute; z-index: 1; right: 4px; bottom: 4px; padding: 0 5px; border-radius: 6px; background: rgba(17, 34, 42, .78); color: #fff; font-size: 11px; line-height: 17px; font-variant-numeric: tabular-nums; }
+
+/* ---------- round buttons ---------- */
+.tb-rb { position: relative; flex: 0 0 auto; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; transition: background-color var(--t-mid) var(--ease), transform var(--t-fast) var(--ease); }
+.tb-rb:active { transform: scale(.94); }
+.tb-rb.primary { background: var(--accent); color: var(--on-accent); }
+.tb-rb.primary:hover { background: var(--accent-hover); }
+.tb-rb.soft { background: var(--fill); color: var(--ink); }
+.tb-rb.soft:hover { background: var(--line-2); }
+.tb-rb.tint { background: var(--accent-tint); color: var(--accent); }
+.tb-rb.tint:hover { background: var(--accent-line); }
+.tb-rb.soft.on, .tb-rb.soft[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.tb-rb[disabled] { cursor: progress; }
+.tb-rb.busy > .icon { visibility: hidden; }
+.tb-rb.busy::after { content: ""; position: absolute; width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; }
+
+/* ---------- search ---------- */
+.tb-search { display: flex; gap: 8px; }
+.tb-search .input { flex: 1 1 auto; min-width: 0; border-radius: var(--pill); padding-left: 18px; background: var(--glass-strong); }
+.tb-search .input:focus { padding-left: 17px; }
+.tb-search .btn { flex: 0 0 auto; min-height: 50px; padding: 0 20px; font-size: 17px; }
+.tb-search .input::-webkit-search-cancel-button { cursor: pointer; }
+
+/* ---------- text bits ---------- */
+.tb-note { font-size: 14px; line-height: 1.55; color: var(--ink-2); }
+.tb-cap { padding: 0 4px; font-size: 13px; }
+.tb-clip { margin-top: -8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-sec { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; margin: 2px 4px -4px; }
+.tb-sec h2 { font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--ink-2); }
+.tb-sec .btn.quiet { min-height: 36px; font-size: 15px; }
+.tb-loading { display: flex; align-items: center; gap: 10px; padding: 8px 4px; }
+.tb-spin { flex: 0 0 auto; width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; }
+:root[data-motion="reduce"] .tb-spin, :root[data-motion="reduce"] .tb-rb.busy::after { animation: none; border-right-color: currentColor; opacity: .5; }
+.tb-err { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px 10px; padding: 12px 14px; border-radius: var(--r-lg); background: var(--danger-tint); color: var(--danger-ink); font-size: 14px; line-height: 1.5; }
+.tb-err > .icon { margin-top: 2px; }
+.tb-err > span { flex: 1 1 200px; }
+.tb-err .linkbtn { min-height: 32px; color: var(--danger-ink); font-weight: 600; }
+
+/* ---------- chips (Add item types, schedule repeat presets) ---------- */
+.tb-chips { display: flex; gap: 8px; overflow-x: auto; margin: 0 -2px; padding: 2px; scroll-snap-type: x proximity; }
+.tb-chip { flex: 0 0 auto; min-height: 40px; padding: 0 16px; border: 1px solid var(--line-2); border-radius: var(--pill); background: var(--surface); color: var(--ink); font-size: 15px; font-weight: 500; white-space: nowrap; scroll-snap-align: start; transition: background-color var(--t-fast) var(--ease); }
+.tb-chip:hover { background: var(--surface-2); }
+.tb-chip[aria-checked="true"], .tb-chip[aria-pressed="true"] { border-color: var(--accent-line); background: var(--accent-tint); color: var(--accent); font-weight: 600; }
+
+/* ---------- forms in sheets ---------- */
+.tb-form { display: flex; flex-direction: column; gap: 14px; }
+.tb-ta { height: auto; min-height: 96px; padding: 12px 14px; line-height: 1.5; resize: vertical; }
+.tb-ta:focus, .tb-ta[aria-invalid="true"] { padding: 11px 13px; }
+.tb-newpl { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.tb-newpl .btn { align-self: flex-start; }
+.tb-pick { width: 100%; border: 0; background: transparent; color: var(--ink); text-align: left; }
+.tb-pick:hover { background: var(--fill); }
+.tb-pick-ic { color: var(--accent); }
+.tb-menu { padding: 0; }
+.tb-menu .mi { border-radius: 0; }
+.tb-menu .mi + .mi { margin: 0; border-top: 1px solid var(--line); }
+.tb-pop { width: 280px; }
+
+/* ---------- Add item sheet ---------- */
+.tb-addsheet .sheet { height: calc(100% - 40px - var(--safe-t)); }
+.tb-addsheet .sheet-body { flex: 1 1 auto; padding-bottom: 0; }
+.tb-addpanel { flex: 1 1 auto; }
+.tb-pane, .tb-results { display: flex; flex-direction: column; gap: 12px; }
+.tb-addfoot { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 -20px; padding: 12px 20px calc(12px + var(--safe-b)); border-top: 1px solid var(--line); background: var(--sheet); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+.tb-addfoot .btn { min-width: 96px; }
+.tb-count { font-size: 14px; color: var(--ink-2); }
+@media (min-width: 744px) {
+  .tb-addsheet .sheet { width: min(560px, calc(100% - 48px)); height: min(760px, calc(100% - 48px)); }
+  .tb-addfoot { padding-bottom: 14px; }
+}
+
+/* ---------- desktop: two-column result grids (board D_YouTube) ---------- */
+@media (min-width: 1280px) {
+  .tb-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .tb-grid > .tb-row + .tb-row { border-top: 0; }
+  .tb-grid > .tb-row:nth-child(n+3) { border-top: 1px solid var(--line); }
+  .tb-grid > .tb-row:nth-child(2n) { border-left: 1px solid var(--line); }
+}
