@@ -1,12 +1,16 @@
 // Members (boards Members / MemberEdit / T_Members / D_Members). Owner only.
 // Phone: list, "+" in the header, tap a member = edit sheet. iPad: list with chevrons, edit opens as a dialog.
 // Desktop: list on the left, the selected member's editor on the right.
+// Android (A_Members / A_MemberEdit / AT_Members): Add member is a FAB and the editor a full-screen dialog on phones;
+// tablets in landscape (>= 960 px) get the list | editor panes.
 // Server: GET/POST /users, PATCH/DELETE /users/{id}. Guards come back as 409 (yourself, last enabled owner).
 // Google accounts and passkeys are linked by each member in their own Account page, so here they are read-only.
 import { h, append, icon, iconBtn, field, passwordInput, busy, segmented, tip, toast } from '../ui.js';
 import { register, t, roleLabel } from '../i18n.js';
 import { errorText } from '../api.js';
-import { card, badge, linkRow, tile, switchInput, settingRow, phoneBack, fmtWhen, gMark, toneOf, initialOf } from '../c-kit.js';
+import { card, badge, linkRow, tile, switchInput, settingRow, phoneBack, fmtWhen, gMark, toneOf, initialOf, cIcon } from '../c-kit.js';
+import { isAndroid } from '../prefs.js';
+import { kitCss, fab, fullDialog } from '../android-kit.js';
 
 register({
   en: {
@@ -76,7 +80,8 @@ register({
 });
 
 const ROLES = ['viewer', 'operator', 'admin'];
-const desk = () => matchMedia('(min-width: 1280px)').matches;
+// list | editor panes: desktop, and Android tablets in landscape (the same 960 px team B's pages use)
+const desk = () => matchMedia(isAndroid() ? '(min-width: 960px)' : '(min-width: 1280px)').matches;
 
 /** Server guard messages -> plain language. */
 function memErr(e, user) {
@@ -93,6 +98,7 @@ function memErr(e, user) {
 export function render(ctx) {
   ctx.css('views/c-common.css');
   ctx.css('views/members.css');
+  kitCss(ctx);
   const me = ctx.user;
   let users = [];
   let selected = null; // desktop: id shown in the pane
@@ -110,6 +116,7 @@ export function render(ctx) {
   const node = h('div', { class: 'page m-page' },
     phoneBack(ctx.header({ title: t('nav.members'), back: { href: '#/account', label: t('nav.account') }, actions })),
     h('div', { class: 'm-grid' }, h('div', { class: 'm-left' }, list, methods), pane));
+  fab(ctx, { icon: cIcon('user-plus'), label: t('mem.add'), onclick: () => addMember(), replaces: plus });
 
   function load() {
     return ctx.api('/users', { signal: ctx.signal }).then((r) => {
@@ -154,7 +161,14 @@ export function render(ctx) {
     selected = id;
     if (desk()) { fill(); const f = pane.querySelector('input'); if (f) f.focus({ preventScroll: true }); return; }
     const u = users.find((x) => x.id === id);
-    ctx.sheet({ title: u.display_name, build: (body, s) => body.append(editor(u, { sheet: s })) });
+    // Android phones: full-screen dialog with Save in its top bar (the editor's own Save button is hidden there)
+    const dlg = fullDialog(ctx, { title: u.display_name, build: (body, d) => {
+      const ed = editor(u, { sheet: d });
+      d.saveBtn.type = 'button';
+      d.saveBtn.addEventListener('click', () => ed.querySelector('.m-save .btn').click());
+      body.append(ed);
+    } });
+    if (!dlg) ctx.sheet({ title: u.display_name, build: (body, s) => body.append(editor(u, { sheet: s })) });
   }
 
   function replaceUser(nu) {
@@ -195,7 +209,8 @@ export function render(ctx) {
 
     const head = sheet ? null : h('div', { class: 'm-ed-head' },
       h('span', { class: 'avatar lg', style: { background: toneOf(u.id) }, 'aria-hidden': 'true' }, initialOf(u.display_name)),
-      h('div', {}, h('p', { class: 'm-ed-name' }, u.display_name), h('p', { class: 'small' }, t('mem.usernameLine', u.username))));
+      h('div', { class: 'm-ed-ht' }, h('p', { class: 'm-ed-name' }, u.display_name), h('p', { class: 'small' }, t('mem.usernameLine', u.username))),
+      isAndroid() ? save : null);
 
     /* sign-in, read-only */
     const passkeyOn = (ctx.auth && ctx.auth.methods && ctx.auth.methods.passkey) || u.has_passkey;
@@ -271,15 +286,18 @@ export function render(ctx) {
       head,
       field(t('mem.displayName'), nameIn),
       h('div', { class: 'm-sec' }, h('p', { class: 'm-lab' }, t('mem.role')), roleCtl, self ? null : roleHelp),
-      h('div', { class: 'm-save' }, err, save),
+      // Android tablet pane: Save sits in the head, next to the name (AT_Members)
+      h('div', { class: 'm-save' }, err, head && isAndroid() ? null : save),
       signIn, disableRow, pwSec, delSec]);
     return wrap;
   }
 
   /* ---------- add member ---------- */
   function addMember() {
-    ctx.sheet({
+    // Android phones: a full-screen dialog whose top-bar button submits the form; elsewhere a sheet / dialog
+    const opts = {
       title: t('mem.add'),
+      save: t('mem.addShort'),
       build(body, s) {
         const name = h('input', { class: 'input', placeholder: t('mem.namePh'), maxLength: 64, autocomplete: 'off' });
         const user = h('input', { class: 'input', placeholder: t('mem.userPh'), autocapitalize: 'none', spellcheck: false, autocomplete: 'off', maxLength: 32 });
@@ -291,6 +309,7 @@ export function render(ctx) {
         const go = h('button', { type: 'submit', class: 'btn primary big wide' }, t('mem.add'));
         const form = h('form', { class: 'm-add', novalidate: true }, field(t('mem.displayName'), name), field(t('mem.username'), user),
           field(t('mem.startPw'), pw.wrap), h('div', { class: 'm-sec' }, h('p', { class: 'm-lab' }, t('mem.role')), seg, help), err, go);
+        if (s.bindForm) { s.bindForm(form); go.hidden = true; }
         form.addEventListener('submit', (e) => {
           e.preventDefault();
           const u = user.value.trim().toLowerCase();
@@ -298,7 +317,7 @@ export function render(ctx) {
           [name, user, pw.input].forEach((x) => x.removeAttribute('aria-invalid'));
           if (bad) { err.textContent = t(bad[1]); bad[0].setAttribute('aria-invalid', 'true'); bad[0].focus(); return; }
           err.textContent = '';
-          busy(go, async () => {
+          busy(s.saveBtn || go, async () => {
             try {
               const nu = await ctx.api('/users', { body: { display_name: name.value.trim(), username: u, password: pw.input.value, role } });
               s.close();
@@ -314,7 +333,8 @@ export function render(ctx) {
         });
         body.append(form);
       },
-    });
+    };
+    if (!fullDialog(ctx, opts)) ctx.sheet(opts);
   }
 
   load();

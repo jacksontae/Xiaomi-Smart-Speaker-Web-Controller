@@ -42,3 +42,63 @@
   .m-desk-only { display: inline-flex; }
   .m-methods { display: none; }
 }
+
+/* ======================= Android look (boards A_Members, A_MemberEdit, AT_Members) =======================
+   Phones: Add member is the FAB, the editor a full-screen dialog (android-kit.css). Tablets in landscape (>= 960px):
+   list | editor, the editor's sections as cards on the surface (no outer card). */
+:root[data-os="android"] .m-row { gap: 16px; padding: 12px 16px; }
+:root[data-os="android"] .m-row .avatar { width: 48px; height: 48px; font-size: 18px; }
+:root[data-os="android"] .m-list > .m-row + .m-row { border-top: 0; }
+:root[data-os="android"] .m-row:hover { background: color-mix(in srgb, var(--md-state) 5%, transparent); }
+:root[data-os="android"] .m-row[aria-current="true"] { background: var(--md-secondary-container); }
+:root[data-os="android"] .m-row[aria-current="true"] .m-name { color: var(--md-on-secondary-container); }
+:root[data-os="android"] .m-pk { color: var(--md-primary); }
+:root[data-os="android"] .m-chev { color: var(--md-on-surface-variant); }
+
+/* editor sections: cards with the section name as their title */
+:root[data-os="android"] .m-ed { gap: 12px; }
+:root[data-os="android"] .m-ed > .m-sec, :root[data-os="android"] .m-ed > .m-flat {
+  gap: 10px; padding: 16px; border-radius: var(--r-lg); background: var(--md-card);
+}
+:root[data-os="android"] .m-ed > .m-flat { min-height: 72px; }
+:root[data-os="android"] .m-lab { font-size: 16px; font-weight: 600; color: var(--md-on-surface); }
+:root[data-os="android"] .m-facts .icon { color: var(--md-primary); }
+:root[data-os="android"] .m-ed .small { color: var(--md-on-surface-variant); }
+:root[data-os="android"] .m-del { align-self: stretch; justify-content: flex-start; border: 0; padding: 0 8px; color: var(--md-error); }
+:root[data-os="android"] .m-del:hover { background: color-mix(in srgb, var(--md-error) 8%, transparent); color: var(--md-error); }
+:root[data-os="android"] .m-ed .c-confirm { padding: 0; background: transparent; }
+:root[data-os="android"] .m-add { gap: 16px; }
+:root[data-os="android"] .m-add > .m-sec { padding: 16px; border-radius: var(--r-lg); background: var(--md-card); }
+/* full-screen dialog: Save is in its top bar */
+:root[data-os="android"] .ak-full .m-save .btn { display: none; }
+:root[data-os="android"] .ak-full .m-save:not(:has(.form-error:not(:empty))) { display: none; }
+
+/* tablets in portrait (744-959): the editor opens as a dialog, rows show a chevron */
+@media (min-width: 744px) and (max-width: 959.98px) {
+  :root[data-os="android"] .m-chev { display: inline-flex; }
+}
+/* tablets in landscape: list | editor */
+@media (min-width: 960px) {
+  :root[data-os="android"] .m-page { max-width: 1200px; }
+  :root[data-os="android"] .m-grid { display: grid; grid-template-columns: minmax(320px, 420px) minmax(0, 1fr); gap: 24px; align-items: start; }
+  :root[data-os="android"] .m-pane {
+    display: block; position: sticky; top: 100px; max-height: calc(100vh - 124px); overflow-y: auto; scrollbar-width: none;
+    padding: 0; border-radius: 0; background: transparent;
+  }
+  :root[data-os="android"][data-nowbar] .m-pane { max-height: calc(100vh - 180px); }
+  :root[data-os="android"] .m-pane::-webkit-scrollbar { display: none; }
+  :root[data-os="android"] .m-chev { display: none; }
+  :root[data-os="android"] .m-ed-head { padding: 4px 4px 8px; border-bottom: 0; }
+  :root[data-os="android"] .m-ed-head .avatar { width: 72px; height: 72px; border-radius: 24px; font-size: 30px; }
+  :root[data-os="android"] .m-ed-name { font-size: 28px; line-height: 36px; }
+  :root[data-os="android"] .m-pane .c-empty { border-radius: var(--r-lg); background: var(--md-card); }
+  :root[data-os="android"] .m-methods { display: block; }
+}
+/* the header's Add member: primary container, like the FAB it stands in for on phones; Sign-in methods is a row */
+:root[data-os="android"] .m-page .phd .btn.primary { background: var(--md-primary-container); color: var(--md-on-primary-container); }
+:root[data-os="android"] .m-page .phd .btn.primary:hover { background: color-mix(in srgb, var(--md-on-primary-container) 8%, var(--md-primary-container)); color: var(--md-on-primary-container); }
+:root[data-os="android"] .m-desk-only { display: none; }
+:root[data-os="android"] .m-ed-ht { flex: 1 1 auto; min-width: 0; }
+:root[data-os="android"] .m-ed-head > .btn { flex: 0 0 auto; min-height: 48px; --btn-r: 24px; }
+:root[data-os="android"] .m-save:not(:has(.form-error:not(:empty))):not(:has(.btn)) { display: none; }
+:root[data-os="android"] .m-add > .form-error, :root[data-os="android"] .m-save > .form-error { padding: 0 16px; }
