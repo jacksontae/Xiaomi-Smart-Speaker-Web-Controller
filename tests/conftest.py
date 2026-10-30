@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 _TMP = Path(tempfile.mkdtemp(prefix="speaker-test-"))
@@ -107,13 +108,21 @@ def _no_network(*args, **kwargs):
     raise AssertionError("tests must not reach YouTube; monkeypatch yt_download / yt_extract")
 
 
+def _no_http(request):
+    raise AssertionError(f"tests must not reach {request.url.host}; mock app.http / app.feed_http")
+
+
 @pytest.fixture(autouse=True)
 def fresh_state(monkeypatch, tmp_path):
-    """Empty database, no queue, no throttling history; background tasks recorded instead of spawned."""
+    """Empty database and upload dir, no queue, no throttling history, no network; background tasks recorded
+    instead of spawned."""
     monkeypatch.setattr(app_module, "db", Store(tmp_path / "data.db"))
     monkeypatch.setattr(app_module, "login_throttle", Throttle(limit=5, window=300))
     monkeypatch.setattr(app_module, "yt_download", _no_network)
     monkeypatch.setattr(app_module, "yt_extract", _no_network)
+    monkeypatch.setattr(app_module, "http", httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
+    monkeypatch.setattr(app_module, "feed_http", httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
+    monkeypatch.setattr(app_module, "MEDIA_DIR", tmp_path / "media")
     app_module.clear_queue()
     app_module._downloads.clear()
     spawned = SimpleNamespace(watchers=0, prefetch=[])

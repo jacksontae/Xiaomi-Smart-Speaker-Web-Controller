@@ -11,6 +11,16 @@ ROLE_TABLE = {
     ("POST", "/auth/logout"): "viewer",
     ("POST", "/auth/logout-all"): "viewer",
     ("POST", "/auth/password"): "viewer",
+    ("POST", "/auth/google"): None,
+    ("POST", "/me/google"): "viewer",
+    ("DELETE", "/me/google"): "viewer",
+    ("POST", "/auth/passkey/options"): None,
+    ("POST", "/auth/passkey/verify"): None,
+    ("POST", "/me/passkeys/options"): "viewer",
+    ("POST", "/me/passkeys"): "viewer",
+    ("GET", "/me/passkeys"): "viewer",
+    ("PATCH", "/me/passkeys/{passkey_id}"): "viewer",
+    ("DELETE", "/me/passkeys/{passkey_id}"): "viewer",
     ("GET", "/users"): "admin",
     ("POST", "/users"): "admin",
     ("PATCH", "/users/{user_id}"): "admin",
@@ -51,9 +61,23 @@ ROLE_TABLE = {
     ("PATCH", "/schedules/{schedule_id}"): "operator",
     ("DELETE", "/schedules/{schedule_id}"): "operator",
     ("POST", "/schedules/{schedule_id}/run"): "operator",
+    ("GET", "/radio/search"): "operator",
+    ("GET", "/radio/favorites"): "viewer",
+    ("POST", "/radio/favorites"): "operator",
+    ("DELETE", "/radio/favorites/{favorite_id}"): "operator",
+    ("POST", "/radio/play"): "operator",
+    ("GET", "/podcasts/search"): "operator",
+    ("GET", "/podcasts/episodes"): "operator",
+    ("POST", "/podcasts/play"): "operator",
+    ("GET", "/files"): "viewer",
+    ("POST", "/files"): "operator",
+    ("PATCH", "/files/{file_id}"): "operator",
+    ("DELETE", "/files/{file_id}"): "operator",
+    ("POST", "/files/{file_id}/play"): "operator",
     # Fetched by the speaker with signed URLs, or the public web UI.
     ("GET", "/tts.mp3"): "signed",
     ("GET", "/yt/{filename}"): "signed",
+    ("GET", "/media/{filename}"): "signed",
     ("GET", "/"): None,
     ("GET", "/manifest.webmanifest"): None,
     ("GET", "/apple-touch-icon.png"): None,
@@ -98,13 +122,17 @@ def test_role_table_covers_every_route(app):
 
 def _url(path):
     return path.format(user_id=999, playlist_id=999, item_id=999, phrase_id=999, schedule_id=999,
-                       filename="x.m4a")
+                       passkey_id=999, favorite_id=999, file_id=999, filename="x.m4a")
 
 
 def _call(client, method, path):
     kwargs = {"json": {}} if method in ("POST", "PUT", "PATCH") else {}
-    if path == "/youtube/search":
+    if path in ("/youtube/search", "/podcasts/search"):
         kwargs["params"] = {"q": "x"}
+    if path == "/podcasts/episodes":
+        kwargs["params"] = {"feed": "x"}  # rejected (400) before any fetch
+    if path == "/files" and method == "POST":
+        kwargs = {"content": b"", "params": {"name": "x.mp3"}}
     return client.request(method, _url(path), **kwargs)
 
 
@@ -113,6 +141,12 @@ def test_role_enforced(method, path, role, anon, as_role, app, fake_speaker, mon
     import pychromecast.discovery
 
     monkeypatch.setattr(app, "yt_search", lambda q, limit: [])
+
+    async def no_stations(*args):
+        return []
+
+    monkeypatch.setattr(app, "radio_search", no_stations)
+    monkeypatch.setattr(app, "get_json", lambda *a: no_stations())
     monkeypatch.setattr(pychromecast.discovery, "discover_chromecasts", lambda timeout: ([], _Browser()))
 
     r = _call(anon, method, path)

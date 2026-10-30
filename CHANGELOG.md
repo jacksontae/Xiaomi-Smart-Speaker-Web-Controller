@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- Sign in with Google: members link their Google account (`POST/DELETE /me/google`) and then sign in with it
+  (`POST /auth/google`); no self-sign-up. ID tokens are checked against Google's keys (`aud`, `iss`, `exp`,
+  `email_verified`, single use). The owner switches it on with `google_client_id` + `google_signin`;
+  `GET /auth/state` reports `methods` and `google_client_id`.
+- Passkeys (WebAuthn): register, rename and remove passkeys under `/me/passkeys`, sign in with
+  `/auth/passkey/options` + `/auth/passkey/verify`. The RP ID is the host of `public_base_url` (HTTPS, or
+  localhost); single-use challenges, sign-counter checks. Owner settings `passkey_signin` and
+  `passkey_required_for_admins`; members carry `has_passkey`. Schema version 3 adds the `passkeys` table.
+- Music sources: internet radio (radio-browser.info search, favourites, played as a LIVE stream), podcasts
+  (iTunes Search API + RSS episodes) and "My files" (audio uploads with size/type/quota limits, served through
+  signed `/media/...` links). All three play directly, resume after an announcement, and can be playlist items
+  (`radio`, `podcast`, `file`). Database schema version 3.
+
 ## [0.2.0] - 2026-10-30
 
 ### Added

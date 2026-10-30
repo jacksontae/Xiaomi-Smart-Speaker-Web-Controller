@@ -14,9 +14,10 @@ def setup_body(**overrides):
 
 
 def test_state_needs_setup_until_first_user(anon, app):
-    assert anon.get("/auth/state").json() == {"needs_setup": True, "user": None}
+    methods = {"password": True, "google": False, "passkey": False}
+    assert anon.get("/auth/state").json() == {"needs_setup": True, "user": None, "methods": methods}
     make_user()
-    assert anon.get("/auth/state").json() == {"needs_setup": False, "user": None}
+    assert anon.get("/auth/state").json() == {"needs_setup": False, "user": None, "methods": methods}
 
 
 def test_setup_checks_api_token(app):
@@ -33,7 +34,10 @@ def test_setup_creates_admin_and_signs_in(app):
     user = r.json()["user"]
     assert user["username"] == "admin" and user["role"] == "admin" and user["display_name"] == "The Admin"
     assert user["last_login_at"] is not None and user["disabled"] is False
-    assert set(user) == {"id", "username", "display_name", "role", "disabled", "created_at", "last_login_at"}
+    assert set(user) == {
+        "id", "username", "display_name", "role", "disabled", "created_at", "last_login_at", "google_email",
+        "has_passkey",
+    }
     state = c.get("/auth/state").json()
     assert state["needs_setup"] is False and state["user"]["id"] == user["id"]
     assert c.get("/users").status_code == 200  # the cookie works as admin

@@ -59,7 +59,11 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 | `resume_after_say` | `true` | ประกาศเสร็จแล้วเล่นเพลง YouTube ที่ค้างอยู่ต่อจากจุดเดิม (ย้อน 1 วินาที) |
 | `transport` | `cast` | `cast` = สั่งลำโพงตรงในวง LAN · `mqtt` = สั่งผ่าน ESP32 relay (ดู Remote deployment) |
 | `mqtt` | ดู `config.example.json` | broker ของ relay: `host`, `port`, `tls`, `username`, `password`, `base_topic`, `client_id` |
-| `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.0.2.20:8090` |
+| `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.0.2.20:8090` · host ของ URL นี้คือ RP ID ของ passkey |
+| `google_client_id` | `null` | OAuth client ID สำหรับ "Sign in with Google" เช่น `1234-abc.apps.googleusercontent.com` (ไม่ใช่ความลับ) |
+| `google_signin` | `false` | เจ้าของ (admin) เปิด/ปิดการล็อกอินด้วย Google · เปิดได้เมื่อมี `google_client_id` แล้ว |
+| `passkey_signin` | `true` | เปิดการล็อกอินด้วย passkey (ใช้ได้จริงเมื่อ `public_base_url` เป็น `https://` หรือ `http://localhost`) |
+| `passkey_required_for_admins` | `false` | admin ที่มี passkey ต้องล็อกอินด้วย passkey เท่านั้น (เปิดได้เมื่อ admin ทุกคนมี passkey แล้ว) |
 
 ```bash
 TOKEN=$(./speakerctl token)
@@ -93,16 +97,43 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 
 | Method | Path | สิทธิ์ | Body | หน้าที่ |
 |---|---|---|---|---|
-| GET | `/auth/state` | ทุกคน | – | `{"needs_setup", "user"}` |
+| GET | `/auth/state` | ทุกคน | – | `{"needs_setup", "user", "methods": {"password", "google", "passkey"}}` + `google_client_id` เมื่อเปิด Google (+ `passkey_required` เมื่อ admin ต้องเพิ่ม passkey) |
 | POST | `/auth/setup` | ทุกคน (ตอนยังไม่มีผู้ใช้) | `{"api_token", "username", "display_name", "password"}` | สร้าง admin คนแรกแล้วล็อกอิน (token ผิด `401`, มีผู้ใช้แล้ว `409`) |
 | POST | `/auth/login` | ทุกคน | `{"username", "password"}` | ล็อกอิน ตั้ง cookie |
 | POST | `/auth/logout` · `/auth/logout-all` | ล็อกอินแล้ว | – | ออกจากระบบเครื่องนี้ · ทุกเครื่อง |
 | POST | `/auth/password` | ล็อกอินแล้ว | `{"current", "new"}` | เปลี่ยนรหัสผ่าน (เครื่องอื่นถูกออกจากระบบ) |
+| POST | `/auth/google` | ทุกคน | `{"credential"}` | ล็อกอินด้วย Google ID token (เฉพาะบัญชีที่ผูกไว้แล้ว `401` ถ้ายังไม่ผูก, ปิดอยู่ `409`) |
+| POST · DELETE | `/me/google` | ล็อกอินแล้ว | `{"credential"}` · – | ผูก · ยกเลิกการผูกบัญชี Google กับบัญชีตัวเอง (ผูกกับคนอื่นแล้ว `409`) |
+| POST | `/auth/passkey/options` | ทุกคน | – | `{"publicKey"}` สำหรับ `navigator.credentials.get()` |
+| POST | `/auth/passkey/verify` | ทุกคน | `{"credential"}` | ล็อกอินด้วย passkey ตั้ง cookie (ไม่ผ่าน `401`) |
+| POST | `/me/passkeys/options` | ล็อกอินแล้ว | – | `{"publicKey"}` สำหรับ `navigator.credentials.create()` |
+| GET · POST | `/me/passkeys` | ล็อกอินแล้ว | `{"credential", "name"}` | ดู · เพิ่ม passkey ของตัวเอง |
+| PATCH · DELETE | `/me/passkeys/{id}` | ล็อกอินแล้ว | `{"name"}` · – | เปลี่ยนชื่อ · ลบ passkey |
 | GET · POST | `/users` | admin | `{"username", "display_name", "password", "role"}` | ดู · เพิ่มสมาชิก |
 | PATCH · DELETE | `/users/{id}` | admin | `{"display_name", "role", "password", "disabled"}` (ใส่เฉพาะที่จะแก้) | แก้ · ลบสมาชิก |
 
 ชื่อผู้ใช้ 3–32 ตัว `a-z 0-9 . _ -` · ลบ ปิด หรือลดสิทธิ์ตัวเองไม่ได้ และต้องเหลือ admin ที่เปิดใช้อย่างน้อย 1 คน (`409`)
 ปิดบัญชีหรือเปลี่ยนรหัสผ่านจะออกจากระบบทุกเครื่องของคนนั้น
+
+#### Sign in with Google
+
+1. สร้าง OAuth client ID ชนิด "Web application" ใน Google Cloud console แล้วใส่ origin ของหน้าเว็บ
+   (เช่น `https://speaker.example.com`) ใน "Authorized JavaScript origins"
+2. ใส่ `google_client_id` แล้วเปิด `google_signin` ในหน้าตั้งค่า (หรือ `POST /settings`)
+3. สมาชิกล็อกอินด้วยรหัสผ่านก่อน แล้วกด "ผูกบัญชี Google" ในหน้าบัญชี จากนั้นจึงล็อกอินด้วย Google ได้ ไม่มีการสมัครเอง
+
+service ตรวจลายเซ็น ID token กับ key ของ Google (cache 1 ชั่วโมง) รวมถึง `aud`, `iss`, `exp` และ `email_verified`
+และเก็บ Google subject id (`sub`) ไม่ใช่แค่อีเมล token หนึ่งใช้ได้ครั้งเดียว · ผิด 5 ครั้งใน 5 นาที (ต่อ IP) ได้ `429`
+ยกเลิกการผูกไม่ได้ถ้าเป็นวิธีล็อกอินเดียวที่เหลือ (`409`)
+#### Passkeys
+
+ใช้ได้เมื่อเปิดหน้าเว็บผ่าน `public_base_url` ที่เป็น `https://` (หรือ `http://localhost` ตอนพัฒนา) เพราะเบราว์เซอร์ไม่ให้ใช้ passkey
+บน http หรือ IP · RP ID = host ของ `public_base_url` ถ้าเปลี่ยนโดเมน passkey เดิมจะใช้ไม่ได้
+`credential` คือ `PublicKeyCredential` ที่แปลงเป็น JSON (ฟิลด์ binary เป็น base64url เหมือน `credential.toJSON()`)
+challenge ใช้ได้ครั้งเดียวและหมดอายุใน 5 นาที · ตรวจ sign counter (ค่าไม่เพิ่ม = key ถูกคัดลอก ปฏิเสธ) · ผิด 5 ครั้งใน 5 นาที (ต่อ IP) ได้ `429`
+ลบ passkey สุดท้ายไม่ได้ถ้าเป็นวิธีล็อกอินเดียวที่เหลือ หรือเป็น admin ขณะเปิด `passkey_required_for_admins` (`409`)
+เมื่อเปิด `passkey_required_for_admins` admin ที่มี passkey ล็อกอินด้วยรหัสผ่านไม่ได้ (`403`) · admin ใหม่ที่ยังไม่มี passkey
+ยังล็อกอินด้วยรหัสผ่านได้ แต่ `/auth/state` จะมี `"passkey_required": true` ให้หน้าเว็บพาไปเพิ่ม · API token ใช้ได้เสมอ (ทางกู้คืน)
 
 ### ลำโพง
 
@@ -125,7 +156,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 |---|---|---|---|---|
 | GET · POST | `/playlists` | viewer · operator | `{"name"}` | รายการเพลย์ลิสต์ · สร้างใหม่ |
 | GET · PATCH · DELETE | `/playlists/{id}` | viewer · operator | `{"name"}` | ดูพร้อมรายการ · เปลี่ยนชื่อ · ลบ |
-| POST | `/playlists/{id}/items` | operator | `{"kind": "youtube"\|"url"\|"tts", "source", "title", "lang"}` | เพิ่มรายการ |
+| POST | `/playlists/{id}/items` | operator | `{"kind": "youtube"\|"url"\|"tts"\|"radio"\|"podcast"\|"file", "source", "title", "lang", "thumbnail", "duration", "content_type"}` | เพิ่มรายการ |
 | DELETE | `/playlists/{id}/items/{item_id}` | operator | – | ลบรายการ |
 | PUT | `/playlists/{id}/order` | operator | `{"item_ids": [...]}` | เรียงใหม่ (ต้องครบทุก id พอดี ไม่งั้น `409`) |
 | POST | `/playlists/{id}/play` | operator | `{"start_index": 0, "shuffle": false, "repeat": "off"\|"all"\|"one"}` | เล่นทั้งเพลย์ลิสต์เป็นคิว |
@@ -136,6 +167,8 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 | DELETE | `/phrases/{id}` | operator | – | ลบข้อความด่วน |
 
 - รายการ `youtube` ใส่ได้ทั้ง URL, video id หรือคำค้น (เอาผลแรก) · `url` ต้องเป็นลิงก์ http(s) และต้องมี `title` · `tts` ยาวไม่เกิน 1000 ตัวอักษร
+- `radio` ใส่ uuid ของสถานีจาก radio-browser หรือลิงก์ stream (ต้องมี `title`) · `podcast` ใส่ลิงก์ไฟล์ตอน (ต้องมี `title`) · `file` ใส่ id ของไฟล์ที่อัปโหลด (ลบไฟล์แล้วรายการนั้นหายจากเพลย์ลิสต์ด้วย)
+- สถานีวิทยุในคิวเล่นแบบ LIVE ไม่มีวันจบ คิวจะค้างที่สถานีนั้นจนกด next
 - คิวเลื่อนไปเพลงถัดไปเองเมื่อเพลงจบ (ประกาศจบไม่นับ) โหลดเพลง YouTube ถัดไปไว้ล่วงหน้า รายการที่โหลดไม่ได้จะถูกข้ามและบันทึกไว้
 - `say` ระหว่างเล่นคิว: ประกาศจบแล้วเล่นเพลงเดิมต่อ แล้วคิวก็เดินต่อตามปกติ
 - คิวอยู่ในหน่วยความจำ รีสตาร์ท service แล้วหาย และแก้เพลย์ลิสต์ระหว่างเล่นจะไม่กระทบคิวที่เล่นอยู่
@@ -146,6 +179,28 @@ curl -X POST localhost:8090/say -H "Authorization: Bearer $TOKEN" -H 'Content-Ty
 curl -X POST localhost:8090/youtube -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"query":"เพลงบรรเลงเปียโน"}'
 curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"shuffle":true,"repeat":"all"}'
 ```
+
+### แหล่งเพลง: วิทยุ พอดแคสต์ ไฟล์ของฉัน
+
+| Method | Path | สิทธิ์ | Body / query | หน้าที่ |
+|---|---|---|---|---|
+| GET | `/radio/search?q=&country=TH&tag=&limit=20` | operator | – | ค้นสถานีจาก [radio-browser.info](https://www.radio-browser.info) (เรียงตามความนิยม) |
+| GET · POST | `/radio/favorites` | viewer · operator | `{"uuid"}` หรือ `{"url", "name"}` | สถานีโปรด · เพิ่ม (ซ้ำ `409`) |
+| DELETE | `/radio/favorites/{id}` | operator | – | ลบสถานีโปรด |
+| POST | `/radio/play` | operator | `{"favorite_id"}` หรือ `{"uuid"}` หรือ `{"url", "name"}` + `"volume"` | เล่นวิทยุแบบ LIVE (ล้างคิว) |
+| GET | `/podcasts/search?q=&country=TH&limit=20` | operator | – | ค้นรายการจาก iTunes Search API ได้ `feed_url` |
+| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | operator | – | อ่าน RSS ได้รายละเอียดรายการและตอนล่าสุด |
+| POST | `/podcasts/play` | operator | `{"url", "title", "thumbnail", "content_type", "volume"}` | เล่นตอนหนึ่ง (ล้างคิว) |
+| GET | `/files` | viewer | – | `{"items", "used", "quota", "max_size", "types"}` |
+| POST | `/files?name=<ชื่อไฟล์>&duration=<วินาที>` | operator | ตัวไฟล์เสียงเป็น body ตรงๆ (ไม่ใช่ form) | อัปโหลด |
+| PATCH · DELETE | `/files/{id}` | operator (เจ้าของ) · admin (ทุกไฟล์) | `{"title"}` | เปลี่ยนชื่อ · ลบ |
+| POST | `/files/{id}/play` | operator | `{"volume"}` | เล่นไฟล์ (ล้างคิว) |
+
+- ไฟล์อัปโหลดตรวจชนิดจากเนื้อไฟล์ (mp3, aac, m4a, ogg/opus, wav, flac, webm) ไม่ใช่จากชื่อ · ชนิดอื่นได้ `415` ใหญ่เกิน `413` พื้นที่เต็ม `507`
+- เก็บที่ `media/` ข้าง `data.db` (env `MEDIA_DIR`) จำกัดไฟล์ละ 50 MB (`UPLOAD_MAX_MB`) รวม 2000 MB (`UPLOAD_QUOTA_MB`) ลำโพงดึงผ่านลิงก์เซ็น `/media/...` แบบเดียวกับ `/yt/...`
+- วิทยุและพอดแคสต์ลำโพงดึงจากต้นทางเอง · feed พอดแคสต์ server เป็นคนดึง จึงรับเฉพาะโฮสต์บนอินเทอร์เน็ตสาธารณะ (ไม่รับ IP ใน LAN) และอ่านไม่เกิน 10 MB
+- `say` ระหว่างเล่นวิทยุ พอดแคสต์ หรือไฟล์ ประกาศจบแล้วเล่นต่อ (วิทยุกลับไปที่สัญญาณสด)
+- firmware relay ปัจจุบันเล่นทุกอย่างแบบ BUFFERED (ไม่รู้จักฟิลด์ `stream_type`) วิทยุส่วนใหญ่ยังเล่นได้
 
 ## Remote deployment (ESP32 relay + self-hosted MQTT + Cloudflare Tunnel)
 
@@ -194,6 +249,55 @@ How it behaves:
 - The broker connection reconnects on its own with exponential backoff (`mqtt.reconnect_min`..`reconnect_max`).
 - Without `public_base_url` the service falls back to its LAN address, which a remote speaker can't reach.
 
+### Backups and restore
+
+The `backup` service in the same compose file saves the database and settings every night at
+`BACKUP_TIME` (default `03:30`, UTC) and keeps the newest `BACKUP_KEEP` (default 14). It also takes one at
+start-up when the newest is more than a day old (a VM that was off at night). Each backup is one file,
+`speaker-YYYYMMDD-HHMMSS.tar.gz`, with `data.db` and `config.json`. The database is copied with SQLite's
+online backup API while the service runs (it includes changes still in the WAL file; a plain file copy
+can miss them or come out torn), and the copy must pass `PRAGMA integrity_check`. Backups live in the
+`speaker-backups` volume, owner-only (files `0600`, folder `0700`): they hold password hashes, sessions
+and the API token. The YouTube cache isn't backed up; it fills again by itself.
+
+Why a compose service rather than a host cron job or systemd timer: it ships with the deployment, needs
+nothing installed or configured on the VM, runs as the same user as the service (so it can read the
+database and its WAL without root), and uses Python's `sqlite3` backup API from the same image. It
+sleeps between runs.
+
+```bash
+C="docker compose -f deploy/remote/docker-compose.yml"
+$C logs backup                                      # "[backup] wrote speaker-....tar.gz" each night
+$C exec backup python backup.py --list
+$C exec backup python backup.py --now               # e.g. before an upgrade (counts toward BACKUP_KEEP)
+
+# Copy them off the VM as well (a backup on the same disk doesn't survive losing the VM)
+$C cp backup:/backups ./speaker-backups && chmod -R go-rwx ./speaker-backups
+```
+
+**Restore** (the service must be stopped, so nothing writes while the files are swapped):
+
+```bash
+$C stop speaker-service backup
+$C run --rm --no-deps backup python backup.py --list
+$C run --rm --no-deps backup python backup.py --restore speaker-20261030-033000.tar.gz
+$C up -d speaker-service backup
+```
+
+`--restore` checks the backup's database first, then puts `data.db` and `config.json` back. The files it
+replaces (and a leftover `data.db-wal`/`-shm`, which must not be replayed onto the restored database) are
+kept next to them as `*.before-restore-<time>`; delete them once the service looks right. To restore from a
+copy kept elsewhere (e.g. on a new VM), first put it into the volume, then restore as above:
+
+```bash
+$C build
+$C run --rm --no-deps -T backup sh -c 'umask 077; cat > /backups/speaker-20261030-033000.tar.gz' \
+  < speaker-20261030-033000.tar.gz
+```
+
+`deploy/remote/.env` and the broker's `mosquitto/passwd` and `acl` are files on the VM, not in a volume;
+keep your own copy of them (they hold secrets, so not in git).
+
 ## หมายเหตุ
 
 - **service ยังเป็น HTTP ธรรมดา (ไม่มี TLS)** token จึงวิ่งแบบไม่เข้ารหัสในวง LAN ถ้าจะเรียกจากนอกบ้าน ให้ผ่าน Tailscale หรือ tunnel ที่เป็น HTTPS อย่าเปิดพอร์ต 8090 ออกอินเทอร์เน็ตตรงๆ
@@ -211,11 +315,13 @@ How it behaves:
 app.py                 FastAPI service: TTS, YouTube cache, คิว, settings, API ทั้งหมด
 transport.py           ช่องทางสั่งลำโพง: Cast ตรง (pychromecast) หรือผ่าน ESP32 relay ทาง MQTT
 auth.py                รหัสผ่าน (scrypt), session token, จำกัดการล็อกอินผิด
-store.py               SQLite: ผู้ใช้ session เพลย์ลิสต์ ข้อความด่วน บันทึกกิจกรรม
+google_signin.py       ตรวจ ID token ของ "Sign in with Google" (ลายเซ็น, aud, iss, exp)
+passkeys.py            passkey (WebAuthn): RP จาก public_base_url, challenge ใช้ครั้งเดียว, ตรวจ response
+store.py               SQLite: ผู้ใช้ session เพลย์ลิสต์ ข้อความด่วน กำหนดการ สถานีโปรด ไฟล์อัปโหลด บันทึกกิจกรรม
 player.py              คิวเพลง (ลำดับเล่น shuffle repeat)
 static/                หน้าเว็บควบคุม
 speakerctl             จัดการ LaunchAgent บน macOS
-deploy/                template ของ LaunchAgent · deploy/remote/ = Docker Compose สำหรับ VM (service + Mosquitto + cloudflared)
+deploy/                template ของ LaunchAgent · deploy/remote/ = Docker Compose สำหรับ VM (service + Mosquitto + cloudflared + backup รายคืน)
 tests/                 pytest + ลำโพงจำลอง (ไม่ต้องมีลำโพงจริง)
 firmware/              firmware ESP32 / ESP8266 (PlatformIO) ตัวกลางสั่งลำโพงในวง LAN
 config.example.json    ตัวอย่างไฟล์ตั้งค่า (คัดลอกเป็น config.json)
