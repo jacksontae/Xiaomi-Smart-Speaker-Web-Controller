@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- Live talk: operators speak through the speaker from the browser's microphone (`WebSocket /talk`).
+  MediaRecorder chunks (WebM/Opus, Ogg/Opus or Safari's MP4/AAC) are transcoded by ffmpeg into a live MP3
+  stream at a signed `/talk/<id>/live` URL; music pauses and resumes afterwards, with an optional chime,
+  a `talk_max_seconds` limit (default 120) and an activity entry "Talked live for m:ss". Needs ffmpeg
+  (added to the Docker image).
+
 ## [0.2.0] - 2026-10-30
 
 ### Added

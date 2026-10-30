@@ -51,9 +51,12 @@ ROLE_TABLE = {
     ("PATCH", "/schedules/{schedule_id}"): "operator",
     ("DELETE", "/schedules/{schedule_id}"): "operator",
     ("POST", "/schedules/{schedule_id}/run"): "operator",
+    ("GET", "/talk/status"): "operator",
     # Fetched by the speaker with signed URLs, or the public web UI.
     ("GET", "/tts.mp3"): "signed",
     ("GET", "/yt/{filename}"): "signed",
+    ("GET", "/talk/chime.wav"): "signed",
+    ("GET", "/talk/{talk_id}/live"): "signed",
     ("GET", "/"): None,
     ("GET", "/manifest.webmanifest"): None,
     ("GET", "/apple-touch-icon.png"): None,

@@ -115,6 +115,7 @@ def fresh_state(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module, "yt_download", _no_network)
     monkeypatch.setattr(app_module, "yt_extract", _no_network)
     app_module.clear_queue()
+    app_module._talk = app_module._talk_last = app_module._talk_on_speaker = None
     app_module._downloads.clear()
     spawned = SimpleNamespace(watchers=0, prefetch=[])
     monkeypatch.setattr(app_module, "ensure_queue_watcher", lambda: setattr(spawned, "watchers", spawned.watchers + 1))

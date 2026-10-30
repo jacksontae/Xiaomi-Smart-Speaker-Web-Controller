@@ -5,3 +5,4 @@ pydantic>=2.14
 PyChromecast>=14.0
 paho-mqtt==2.1.0
 yt-dlp[default]>=2026.10.26
+websockets==17.3  # WebSocket support in uvicorn (live talk)

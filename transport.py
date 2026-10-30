@@ -94,7 +94,7 @@ class CastTransport:
             self._cast.socket_client.disconnect()
             self._cast = None
 
-    def play(self, url, content_type, title=None, volume=None, position=None):
+    def play(self, url, content_type, title=None, volume=None, position=None, live=False):
         cast = self.get_cast()
         if volume is not None:
             cast.set_volume(volume)
@@ -103,8 +103,12 @@ class CastTransport:
             cast.start_app(DEFAULT_MEDIA_RECEIVER)
             cast.wait(timeout=10)
         mc = cast.media_controller
-        # BUFFERED (not the LIVE default) so the receiver honours current_time and allows seeking.
-        mc.play_media(url, content_type, title=title, current_time=position, stream_type="BUFFERED")
+        # BUFFERED (not the LIVE default) so the receiver honours current_time and allows seeking;
+        # LIVE only for endless streams (internet radio, live talk), which have no position to seek to.
+        if live:
+            mc.play_media(url, content_type, title=title, stream_type="LIVE")
+        else:
+            mc.play_media(url, content_type, title=title, current_time=position, stream_type="BUFFERED")
         mc.block_until_active(timeout=10)
 
     def set_volume(self, level):
@@ -322,11 +326,13 @@ class MqttRelayTransport:
             raise TransportError(f"Speaker relay: {result.get('error') or 'command failed'}")
         return result
 
-    def play(self, url, content_type, title=None, volume=None, position=None):
+    def play(self, url, content_type, title=None, volume=None, position=None, live=False):
         fields = {"url": url, "content_type": content_type, "title": title or ""}
         if volume is not None:
             fields["volume"] = volume
-        if position:
+        if live:
+            fields["stream_type"] = "LIVE"  # relays that don't know the field play it as BUFFERED
+        elif position:
             fields["position"] = position
         with self._cond:
             self._loaded[url] = content_type
