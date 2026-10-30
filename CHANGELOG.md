@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- Web app v3, rebuilt from the approved prototype for iPhone, iPad and desktop: English by default with Thai,
+  light/dark/system theme, app-wide reduce motion, self-hosted Anuphan font, 3D speaker art. Pages: sign-in and
+  first-account setup, Now playing (queue, volume, relay health), Announce (quick phrases, live talk), Music
+  (YouTube, radio, podcasts, my files), Playlists, Schedule, Members, Activity, Speaker settings, App settings,
+  Account (Google link, passkeys), Sign-in methods and searchable Help. Offers a passkey after sign-in.
+- Scheduled announcements and playlists (`/schedules`), now working with both transports.
+- Nightly SQLite + config backups for the remote deployment (`backup` service), with restore.
 - Sign in with Google: members link their Google account (`POST/DELETE /me/google`) and then sign in with it
   (`POST /auth/google`); no self-sign-up. ID tokens are checked against Google's keys (`aud`, `iss`, `exp`,
   `email_verified`, single use). The owner switches it on with `google_client_id` + `google_signin`;
