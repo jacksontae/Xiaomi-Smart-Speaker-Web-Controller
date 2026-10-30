@@ -1,0 +1,7 @@
+/* Speaker settings: volume header, LAN scan results. Cards/rows: c-common.css. */
+.s-volhead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.s-pct { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.s-found { display: flex; flex-direction: column; gap: 4px; }
+.s-found:empty { display: none; }
+.s-dev { padding: 8px 0; min-height: 0; }
+.s-dev + .s-dev { border-top: 1px solid var(--line); }

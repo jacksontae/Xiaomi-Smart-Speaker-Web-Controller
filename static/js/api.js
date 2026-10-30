@@ -1,4 +1,5 @@
-// Thin fetch wrapper for the web-v2 contract: cookie session, JSON, X-Requested-With on writes.
+// Thin fetch wrapper for the server contract: cookie session, JSON, X-Requested-With on writes.
+import { t, roleLabel } from './i18n.js';
 
 export class ApiError extends Error {
   constructor(status, detail, retryAfter = null) {
@@ -10,8 +11,13 @@ export class ApiError extends Error {
 }
 
 let onUnauthorized = null;
+/** app.js registers this: a 401 on any call (unless allow401) means the session ended. */
 export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
 
+/**
+ * api('/status') GETs; api('/say', { body }) POSTs JSON; pass { method } for PUT/PATCH/DELETE.
+ * Throws ApiError (status 0 = network). 204 resolves to null.
+ */
 export async function api(path, { method, body, signal, allow401 = false } = {}) {
   const m = method || (body !== undefined ? 'POST' : 'GET');
   const headers = { Accept: 'application/json' };
@@ -31,36 +37,35 @@ export async function api(path, { method, body, signal, allow401 = false } = {})
   const data = await r.json().catch(() => null);
   if (!r.ok) {
     const retry = parseInt(r.headers.get('Retry-After') || '', 10);
-    const err = new ApiError(r.status, data && data.detail, Number.isFinite(retry) ? retry : null);
+    const detail = data && (typeof data.detail === 'string' ? data.detail : '');
+    const err = new ApiError(r.status, detail, Number.isFinite(retry) ? retry : null);
     if (r.status === 401 && !allow401 && onUnauthorized) onUnauthorized(err);
     throw err;
   }
   return data;
 }
 
-export const ROLE_TH = { admin: 'ผู้ดูแล', operator: 'ผู้ควบคุม', viewer: 'ผู้ชม' };
-
 export function waitText(sec) {
-  if (!sec || sec < 60) return `${Math.max(1, sec || 30)} วินาที`;
-  return `${Math.ceil(sec / 60)} นาที`;
+  if (!sec || sec < 60) return t('wait.sec', Math.max(1, sec || 30));
+  return t('wait.min', Math.ceil(sec / 60));
 }
 
-/** Plain-Thai explanation for an ApiError. `ctx` lets callers override per status. */
-export function thaiError(e, user, ctx = {}) {
-  if (!(e instanceof ApiError)) return 'เกิดข้อผิดพลาดที่ไม่คาดคิด ลองโหลดหน้าใหม่';
-  if (ctx[e.status]) return ctx[e.status];
+/** Plain-language explanation of an error in the app language. `overrides` maps status -> text. */
+export function errorText(e, user, overrides = {}) {
+  if (!(e instanceof ApiError)) return t('err.unexpected');
+  if (overrides[e.status]) return overrides[e.status];
   switch (e.status) {
-    case 0: return 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจว่าเครื่องนี้ยังต่อ Wi‑Fi วงเดียวกับลำโพง';
-    case 401: return 'หมดเวลาการเข้าสู่ระบบ เข้าสู่ระบบอีกครั้ง';
+    case 0: return t('err.network');
+    case 401: return t('err.session');
     case 403:
-      if (/header/i.test(e.detail)) return 'เบราว์เซอร์ส่งคำขอไม่ครบ ลองโหลดหน้าใหม่';
-      return `บัญชีนี้เป็น${ROLE_TH[user?.role] || 'ผู้ใช้'} จึงทำรายการนี้ไม่ได้ ขอให้ผู้ดูแลปรับสิทธิ์ให้`;
-    case 404: return 'ไม่พบรายการนี้ อาจถูกลบไปแล้ว';
-    case 409: return `ทำรายการนี้ไม่ได้ในตอนนี้${e.detail ? ` (${e.detail})` : ''}`;
-    case 400: case 422: return `ข้อมูลไม่ถูกต้อง${e.detail ? `: ${e.detail}` : ''}`;
-    case 429: return `ลองหลายครั้งเกินไป รอ ${waitText(e.retryAfter)} แล้วลองใหม่`;
-    case 502: return 'ดึงเสียงจาก YouTube ไม่สำเร็จ ลองอีกครั้งหรือเลือกรายการอื่น';
-    case 503: return 'ติดต่อลำโพงไม่ได้ ตรวจว่าลำโพงเปิดอยู่และต่อเครือข่ายเดียวกัน';
-    default: return 'เซิร์ฟเวอร์ขัดข้อง ลองใหม่อีกครั้ง';
+      if (/header/i.test(e.detail)) return t('err.header');
+      return t('err.forbidden', user ? roleLabel(user.role) : '');
+    case 404: return t('err.notFound');
+    case 409: return t('err.conflict', e.detail);
+    case 400: case 422: return t('err.invalid', e.detail);
+    case 429: return t('err.tooMany', waitText(e.retryAfter));
+    case 502: return t('err.youtube');
+    case 503: return t('err.speaker');
+    default: return t('err.server');
   }
 }

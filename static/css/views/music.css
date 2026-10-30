@@ -1,0 +1,45 @@
+/* Music page (boards YouTube / T_YouTube / D_YouTube). Shared rows and buttons: teamb.css. */
+.mu-pane, .mu-out, .mu-block { display: flex; flex-direction: column; gap: 12px; }
+.mu-panel.enter { animation: page-in var(--t-mid) var(--ease) both; }
+
+/* source switcher: full width on phones, compact with icons on large screens */
+.mu-src > button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 6px; font-size: 14px; }
+.mu-src-ic { display: none; }
+.mu-why-lg { display: none; }
+.mu-why-ph { margin-top: 4px; }
+
+.mu-hint { margin-top: -4px; padding: 0 4px; font-size: 13px; }
+.mu-heart { color: var(--ink-2); }
+.mu-heart[aria-pressed="true"] { color: var(--lotus-ink); }
+.mu-rowbtn { position: absolute; inset: 0; z-index: 0; width: 100%; border: 0; padding: 0; background: transparent; border-radius: inherit; cursor: pointer; }
+.mu-rowbtn:focus-visible { outline-offset: -3px; }
+.tb-row:has(> .mu-rowbtn:hover) { background: var(--glass-soft); }
+
+/* podcast show header */
+.mu-show { display: flex; align-items: center; gap: 14px; padding: 4px 4px 0; }
+.mu-show .tb-th { width: 64px; height: 64px; border-radius: 16px; }
+.mu-show-t { font-size: 20px; font-weight: 700; line-height: 1.3; }
+
+/* my files */
+.mu-fhead { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.mu-fhead .btn { flex: 0 0 auto; min-height: 50px; padding: 0 22px; font-size: 17px; }
+.mu-fnote { font-size: 13px; }
+.mu-used { margin-top: 2px; }
+.mu-bar-wrap { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.mu-bar { display: block; height: 6px; border-radius: var(--pill); background: var(--fill); overflow: hidden; }
+.mu-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--t-mid) linear; }
+.mu-del { color: var(--danger); }
+.mu-del:hover { color: var(--danger); background: var(--danger-tint); }
+
+@media (min-width: 744px) {
+  .mu-why-lg { display: block; }
+  .mu-why-ph { display: none; }
+  .mu-src { justify-self: start; align-self: flex-start; grid-auto-columns: max-content; }
+  .mu-src > button { padding: 0 16px; font-size: 15px; }
+}
+@media (min-width: 1280px) {
+  .mu-src-ic { display: block; }
+  .mu-src > button { padding: 0 20px; }
+  .mu .tb-search { max-width: 760px; }
+  .mu-fhead { max-width: 760px; }
+}
