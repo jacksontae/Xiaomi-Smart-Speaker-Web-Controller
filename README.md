@@ -60,6 +60,8 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 | `transport` | `cast` | `cast` = สั่งลำโพงตรงในวง LAN · `mqtt` = สั่งผ่าน ESP32 relay (ดู Remote deployment) |
 | `mqtt` | ดู `config.example.json` | broker ของ relay: `host`, `port`, `tls`, `username`, `password`, `base_topic`, `client_id` |
 | `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.0.2.20:8090` |
+| `google_client_id` | `null` | OAuth client ID สำหรับ "Sign in with Google" เช่น `1234-abc.apps.googleusercontent.com` (ไม่ใช่ความลับ) |
+| `google_signin` | `false` | เจ้าของ (admin) เปิด/ปิดการล็อกอินด้วย Google · เปิดได้เมื่อมี `google_client_id` แล้ว |
 
 ```bash
 TOKEN=$(./speakerctl token)
@@ -93,16 +95,29 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 
 | Method | Path | สิทธิ์ | Body | หน้าที่ |
 |---|---|---|---|---|
-| GET | `/auth/state` | ทุกคน | – | `{"needs_setup", "user"}` |
+| GET | `/auth/state` | ทุกคน | – | `{"needs_setup", "user", "methods": {"password", "google"}}` + `google_client_id` เมื่อเปิด Google |
 | POST | `/auth/setup` | ทุกคน (ตอนยังไม่มีผู้ใช้) | `{"api_token", "username", "display_name", "password"}` | สร้าง admin คนแรกแล้วล็อกอิน (token ผิด `401`, มีผู้ใช้แล้ว `409`) |
 | POST | `/auth/login` | ทุกคน | `{"username", "password"}` | ล็อกอิน ตั้ง cookie |
 | POST | `/auth/logout` · `/auth/logout-all` | ล็อกอินแล้ว | – | ออกจากระบบเครื่องนี้ · ทุกเครื่อง |
 | POST | `/auth/password` | ล็อกอินแล้ว | `{"current", "new"}` | เปลี่ยนรหัสผ่าน (เครื่องอื่นถูกออกจากระบบ) |
+| POST | `/auth/google` | ทุกคน | `{"credential"}` | ล็อกอินด้วย Google ID token (เฉพาะบัญชีที่ผูกไว้แล้ว `401` ถ้ายังไม่ผูก, ปิดอยู่ `409`) |
+| POST · DELETE | `/me/google` | ล็อกอินแล้ว | `{"credential"}` · – | ผูก · ยกเลิกการผูกบัญชี Google กับบัญชีตัวเอง (ผูกกับคนอื่นแล้ว `409`) |
 | GET · POST | `/users` | admin | `{"username", "display_name", "password", "role"}` | ดู · เพิ่มสมาชิก |
 | PATCH · DELETE | `/users/{id}` | admin | `{"display_name", "role", "password", "disabled"}` (ใส่เฉพาะที่จะแก้) | แก้ · ลบสมาชิก |
 
 ชื่อผู้ใช้ 3–32 ตัว `a-z 0-9 . _ -` · ลบ ปิด หรือลดสิทธิ์ตัวเองไม่ได้ และต้องเหลือ admin ที่เปิดใช้อย่างน้อย 1 คน (`409`)
 ปิดบัญชีหรือเปลี่ยนรหัสผ่านจะออกจากระบบทุกเครื่องของคนนั้น
+
+#### Sign in with Google
+
+1. สร้าง OAuth client ID ชนิด "Web application" ใน Google Cloud console แล้วใส่ origin ของหน้าเว็บ
+   (เช่น `https://speaker.example.com`) ใน "Authorized JavaScript origins"
+2. ใส่ `google_client_id` แล้วเปิด `google_signin` ในหน้าตั้งค่า (หรือ `POST /settings`)
+3. สมาชิกล็อกอินด้วยรหัสผ่านก่อน แล้วกด "ผูกบัญชี Google" ในหน้าบัญชี จากนั้นจึงล็อกอินด้วย Google ได้ ไม่มีการสมัครเอง
+
+service ตรวจลายเซ็น ID token กับ key ของ Google (cache 1 ชั่วโมง) รวมถึง `aud`, `iss`, `exp` และ `email_verified`
+และเก็บ Google subject id (`sub`) ไม่ใช่แค่อีเมล token หนึ่งใช้ได้ครั้งเดียว · ผิด 5 ครั้งใน 5 นาที (ต่อ IP) ได้ `429`
+ยกเลิกการผูกไม่ได้ถ้าเป็นวิธีล็อกอินเดียวที่เหลือ (`409`)
 
 ### ลำโพง
 
@@ -260,6 +275,7 @@ keep your own copy of them (they hold secrets, so not in git).
 app.py                 FastAPI service: TTS, YouTube cache, คิว, settings, API ทั้งหมด
 transport.py           ช่องทางสั่งลำโพง: Cast ตรง (pychromecast) หรือผ่าน ESP32 relay ทาง MQTT
 auth.py                รหัสผ่าน (scrypt), session token, จำกัดการล็อกอินผิด
+google_signin.py       ตรวจ ID token ของ "Sign in with Google" (ลายเซ็น, aud, iss, exp)
 store.py               SQLite: ผู้ใช้ session เพลย์ลิสต์ ข้อความด่วน บันทึกกิจกรรม
 player.py              คิวเพลง (ลำดับเล่น shuffle repeat)
 static/                หน้าเว็บควบคุม
