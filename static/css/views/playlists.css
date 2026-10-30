@@ -1,0 +1,62 @@
+/* Playlists list + detail (boards Playlists / PlaylistDetail and T_/D_ variants). Shared rows: teamb.css. */
+.pl-new-l { display: none; }
+.pl-row.sel { background: var(--accent-tint); }
+.pl-row.sel .tb-t { color: var(--accent); }
+.pl-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 20px 16px; }
+
+/* detail */
+.pl-dv { display: flex; flex-direction: column; gap: 16px; }
+.pl-hd .pt { display: none; } /* the hero below carries the name as the page's h1 */
+.pl-hero { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.pl-hero-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.pl-hero-tx { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pl-cover { flex: 0 0 auto; width: 88px; height: 88px; border-radius: 22px; display: flex; align-items: center; justify-content: center; background: var(--accent-tint); color: var(--accent); }
+.pl-cover.dim { background: var(--fill); color: var(--ink-3); }
+.pl-name { font-size: 26px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.pl-meta { font-size: 14px; color: var(--ink-2); }
+.pl-ctl { display: flex; flex-direction: column; gap: 6px; }
+.pl-btns { display: flex; align-items: center; gap: 10px; }
+.pl-play, .pl-shuf { flex: 1 1 0; min-width: 0; }
+.pl-shuf[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.pl-rep { width: 52px; height: 52px; }
+.pl-links { display: flex; flex-wrap: wrap; align-items: center; gap: 0 20px; }
+.pl-links .linkbtn { font-size: 16px; font-weight: 600; }
+.pl-links > :first-child { margin-right: auto; }
+
+/* items */
+.pl-it { min-height: 64px; }
+.pl-idx { display: none; flex: 0 0 auto; width: 22px; text-align: right; font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.pl-dur { flex: 0 0 auto; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.pl-grip { position: relative; z-index: 1; display: none; align-items: center; justify-content: center; flex: 0 0 auto; width: 32px; height: 44px; margin-left: -6px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--ink-3); cursor: grab; touch-action: none; }
+.pl-grip:hover { color: var(--ink); background: var(--fill); }
+.pl-items.reorder .pl-grip { display: inline-flex; }
+.pl-items.reorder .tb-act .iconbtn[disabled] { opacity: .35; cursor: default; }
+.pl-items.reorder .pl-dur { display: none; }
+.pl-items.reorder .tb-act { gap: 0; }
+@media (max-width: 743px) { .pl-items.reorder .tb-th { display: none; } }
+@media (hover: hover) and (pointer: fine) {
+  .pl-grip { display: inline-flex; opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+  .pl-it:hover .pl-grip, .pl-grip:focus-visible, .pl-items.reorder .pl-grip { opacity: 1; }
+}
+.pl-items.sorting { overflow: visible; -webkit-user-select: none; user-select: none; }
+.pl-items.sorting .pl-it:not(.dragging) { transition: transform var(--t-mid) var(--ease); }
+.pl-it.dragging { z-index: 5; border-radius: var(--r-row); background: var(--surface); box-shadow: var(--pop-shadow); cursor: grabbing; }
+.pl-it.dragging .pl-grip { cursor: grabbing; }
+
+@media (min-width: 744px) {
+  .pl-new-l { display: inline; }
+  .pl-new-s { display: none; }
+}
+@media (min-width: 1280px) {
+  .pl-split { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 20px; align-items: start; }
+  .pl-listcol { position: sticky; top: 100px; }
+  .pl-pane { min-height: calc(100vh - 140px); padding: 24px; border-radius: var(--r-xl); }
+  .pl-pane > .pl-hint { padding: 24px 4px; }
+  .pl-cover { width: 96px; height: 96px; border-radius: 24px; }
+  .pl-name { font-size: 30px; }
+  .pl-ctl { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
+  .pl-btns .btn { flex: 0 0 auto; }
+  .pl-links .linkbtn:first-child { margin-right: 0; }
+  .pl-idx { display: block; }
+  .pl-pane .pl-items { background: transparent; border-radius: 0; border-top: 1px solid var(--line); }
+}
