@@ -194,6 +194,55 @@ How it behaves:
 - The broker connection reconnects on its own with exponential backoff (`mqtt.reconnect_min`..`reconnect_max`).
 - Without `public_base_url` the service falls back to its LAN address, which a remote speaker can't reach.
 
+### Backups and restore
+
+The `backup` service in the same compose file saves the database and settings every night at
+`BACKUP_TIME` (default `03:30`, UTC) and keeps the newest `BACKUP_KEEP` (default 14). It also takes one at
+start-up when the newest is more than a day old (a VM that was off at night). Each backup is one file,
+`speaker-YYYYMMDD-HHMMSS.tar.gz`, with `data.db` and `config.json`. The database is copied with SQLite's
+online backup API while the service runs (it includes changes still in the WAL file; a plain file copy
+can miss them or come out torn), and the copy must pass `PRAGMA integrity_check`. Backups live in the
+`speaker-backups` volume, owner-only (files `0600`, folder `0700`): they hold password hashes, sessions
+and the API token. The YouTube cache isn't backed up; it fills again by itself.
+
+Why a compose service rather than a host cron job or systemd timer: it ships with the deployment, needs
+nothing installed or configured on the VM, runs as the same user as the service (so it can read the
+database and its WAL without root), and uses Python's `sqlite3` backup API from the same image. It
+sleeps between runs.
+
+```bash
+C="docker compose -f deploy/remote/docker-compose.yml"
+$C logs backup                                      # "[backup] wrote speaker-....tar.gz" each night
+$C exec backup python backup.py --list
+$C exec backup python backup.py --now               # e.g. before an upgrade (counts toward BACKUP_KEEP)
+
+# Copy them off the VM as well (a backup on the same disk doesn't survive losing the VM)
+$C cp backup:/backups ./speaker-backups && chmod -R go-rwx ./speaker-backups
+```
+
+**Restore** (the service must be stopped, so nothing writes while the files are swapped):
+
+```bash
+$C stop speaker-service backup
+$C run --rm --no-deps backup python backup.py --list
+$C run --rm --no-deps backup python backup.py --restore speaker-20261030-033000.tar.gz
+$C up -d speaker-service backup
+```
+
+`--restore` checks the backup's database first, then puts `data.db` and `config.json` back. The files it
+replaces (and a leftover `data.db-wal`/`-shm`, which must not be replayed onto the restored database) are
+kept next to them as `*.before-restore-<time>`; delete them once the service looks right. To restore from a
+copy kept elsewhere (e.g. on a new VM), first put it into the volume, then restore as above:
+
+```bash
+$C build
+$C run --rm --no-deps -T backup sh -c 'umask 077; cat > /backups/speaker-20261030-033000.tar.gz' \
+  < speaker-20261030-033000.tar.gz
+```
+
+`deploy/remote/.env` and the broker's `mosquitto/passwd` and `acl` are files on the VM, not in a volume;
+keep your own copy of them (they hold secrets, so not in git).
+
 ## หมายเหตุ
 
 - **service ยังเป็น HTTP ธรรมดา (ไม่มี TLS)** token จึงวิ่งแบบไม่เข้ารหัสในวง LAN ถ้าจะเรียกจากนอกบ้าน ให้ผ่าน Tailscale หรือ tunnel ที่เป็น HTTPS อย่าเปิดพอร์ต 8090 ออกอินเทอร์เน็ตตรงๆ
@@ -215,7 +264,7 @@ store.py               SQLite: ผู้ใช้ session เพลย์ลิ�
 player.py              คิวเพลง (ลำดับเล่น shuffle repeat)
 static/                หน้าเว็บควบคุม
 speakerctl             จัดการ LaunchAgent บน macOS
-deploy/                template ของ LaunchAgent · deploy/remote/ = Docker Compose สำหรับ VM (service + Mosquitto + cloudflared)
+deploy/                template ของ LaunchAgent · deploy/remote/ = Docker Compose สำหรับ VM (service + Mosquitto + cloudflared + backup รายคืน)
 tests/                 pytest + ลำโพงจำลอง (ไม่ต้องมีลำโพงจริง)
 firmware/              firmware ESP32 / ESP8266 (PlatformIO) ตัวกลางสั่งลำโพงในวง LAN
 config.example.json    ตัวอย่างไฟล์ตั้งค่า (คัดลอกเป็น config.json)
