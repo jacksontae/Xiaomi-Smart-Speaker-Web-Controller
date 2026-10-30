@@ -324,7 +324,9 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker, onCommand }) {
     barRight.replaceChildren();
     barTitle.textContent = '';
     if (route.chip) {
-      barLeft.append(chip());
+      // Android: Now shows the chip under its big title (now.css), so the bar keeps just the title. The top bar
+      // only shows on phones, so no width check is needed.
+      if (!android) barLeft.append(chip());
       const hb = h('a', { class: 'iconbtn glassy', href: href('help'), 'aria-label': t('nav.help') }, icon('help'));
       barRight.append(tip(hb, t('nav.help')));
     }

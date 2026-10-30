@@ -129,8 +129,8 @@
 }
 :root[data-os="android"] .tb-cap { padding: 0 12px; color: var(--md-primary); font-weight: 600; }
 
-/* round buttons: a chosen toggle (added, repeat on) is a filled rounded square */
-:root[data-os="android"] .tb-rb.soft.on, :root[data-os="android"] .tb-rb.soft[aria-pressed="true"] { border-radius: 14px; background: var(--md-primary); color: var(--md-on-primary); }
+/* round buttons: a chosen toggle (added, repeat on) is a filled rounded square (the fill is .tb-rb.soft.on above) */
+:root[data-os="android"] .tb-rb.soft.on, :root[data-os="android"] .tb-rb.soft[aria-pressed="true"] { border-radius: 14px; }
 :root[data-os="android"] .tb-th.wide { width: 96px; height: 56px; border-radius: 12px; }
 
 /* Add item sheet: the count and Done float as a dark capsule at the bottom (A_AddItem) */

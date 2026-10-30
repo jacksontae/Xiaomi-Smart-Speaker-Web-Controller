@@ -77,7 +77,6 @@
 :root[data-os="android"] .sc-volbox .small, :root[data-os="android"] .sc-info { padding: 0 12px; }
 :root[data-os="android"] .sc-info { gap: 4px; }
 :root[data-os="android"] .sc-test { min-height: 52px; }
-:root[data-os="android"] .sc-delbtn, :root[data-os="android"] .sc-delbtn:hover { color: var(--md-error); }
 :root[data-os="android"] .ak-full .sc-form { gap: 20px; }
 
 /* tablets in landscape: list column | editor panel (surface container, full height, sticky) */

@@ -125,12 +125,10 @@ button.np-row:hover { background: var(--fill); }
 :root[data-os="android"] .now-page[data-np="off"] { --np-tint: color-mix(in srgb, var(--md-error-container) 75%, var(--md-card)); }
 :root[data-os="android"][data-theme="dark"] .now-page[data-np="off"] { --np-tint: color-mix(in srgb, var(--md-error-container) 40%, var(--md-card)); }
 
-/* header: title, then the speaker chip; the top bar keeps only its title, Help and the avatar on this page */
+/* header: title, then the speaker chip; the top bar keeps only its title, Help and the avatar on this page (shell.js) */
 :root[data-os="android"] .now-page > .phd { display: flex; flex-direction: column; align-items: flex-start; flex-wrap: nowrap; gap: 10px; }
 :root[data-os="android"] .now-page > .phd .phd-r .spchip { display: inline-flex; }
 :root[data-os="android"] .now-page > .phd .phd-r .help-btn { display: none; }
-:root[data-os="android"] body:has(.now-page) .topbar:has(.topbar-l .spchip) .topbar-l .spchip { display: none; }
-:root[data-os="android"] body:has(.now-page) .topbar:has(.topbar-l .spchip) .topbar-t { display: block; padding-left: 12px; }
 
 /* the player card */
 :root[data-os="android"] .now-page .np-col { gap: 0; padding-bottom: 20px; border-radius: var(--r-lg); background: var(--md-card); overflow: hidden; }

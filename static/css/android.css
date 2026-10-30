@@ -126,7 +126,6 @@
 :root[data-os="android"] .topbar-l { padding-left: 4px; }
 :root[data-os="android"] .topbar-t { justify-self: start; padding-left: 12px; font-size: 20px; font-weight: 700; transform: translateY(4px); }
 :root[data-os="android"] .topbar:has(.topbar-l > *) .topbar-t { padding-left: 4px; }
-:root[data-os="android"] .topbar:has(.topbar-l .spchip) .topbar-t { display: none; } /* Now: the chip is the bar's content */
 :root[data-os="android"] .topbar-r { padding-right: 8px; align-items: center; }
 :root[data-os="android"] .topbar .iconbtn.glassy { background: transparent; border: 0; box-shadow: none; color: var(--md-on-surface-variant); }
 :root[data-os="android"] .iconbtn.bar-back { width: 48px; height: 48px; color: var(--md-on-surface); }
@@ -257,7 +256,8 @@
 :root[data-os="android"] .iconbtn:hover { background: color-mix(in srgb, var(--md-state) 8%, transparent); color: var(--md-on-surface); }
 :root[data-os="android"] .iconbtn:active { border-radius: 14px; background: color-mix(in srgb, var(--md-state) 12%, transparent); }
 :root[data-os="android"] .iconbtn.glassy { border: 0; box-shadow: none; background: var(--md-surface-high); color: var(--md-on-surface); }
-:root[data-os="android"] .linkbtn { color: var(--md-primary); font-weight: 600; }
+/* colour comes from --accent (= primary); zero-specificity root so page rules (danger links, .tb-err) win */
+:where(:root[data-os="android"]) .linkbtn { font-weight: 600; }
 
 /* button group (M3 Expressive): the segmented control as connected buttons, 2 px apart, outer corners round,
    inner corners 8 px; the chosen one is filled, fully round and a little wider */
@@ -344,7 +344,8 @@
 :root[data-os="android"] .c-badge.plain { background: transparent; color: var(--md-on-surface-variant); }
 :root[data-os="android"] .tb-rb { transition: border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease); }
 :root[data-os="android"] .tb-rb:active { transform: none; border-radius: 14px; }
-:root[data-os="android"] .tb-rb.soft, :root[data-os="android"] .tb-rb.tint { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+/* a chosen soft toggle (.on / aria-pressed) keeps teamb.css's filled state */
+:root[data-os="android"] .tb-rb.soft:not(.on):not([aria-pressed="true"]), :root[data-os="android"] .tb-rb.tint { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
 
 /* bottom sheets (phone) and dialogs (tablet): 30 px top corners, drag handle 36x4, springy entrance */
 :root[data-os="android"] .sheet { background: var(--md-surface-low); border-radius: 30px 30px 0 0; animation-timing-function: cubic-bezier(.3, 1.25, .5, 1); }
