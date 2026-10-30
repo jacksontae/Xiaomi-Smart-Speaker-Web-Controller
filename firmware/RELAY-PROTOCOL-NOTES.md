@@ -52,5 +52,12 @@ to 1/s), `media` carries `content_type` and `duration`, status has `proto` (1), 
 every result has `version`. The server reads `proto` and drops its 2 s polling to a 25 s safety poll for
 such relays (one poll in a minute of YouTube + announcement on hardware, down from ~30).
 
-Still open: gap 4 (a cold `play` blocks the loop; its reply still says `IDLE` before buffering, and the
-pushed status follows within a second).
+Gap 4 is done differently from the proposal: a `play` no longer blocks the loop (a small state machine,
+`include/play_job.h`, launches, waits for the app, connects and loads from `loop()`), but there is still a
+single result per command, published when the LOAD is answered, with the same `id`, `ok`, `error` and
+`speaker` as before, so the server needs no change. There is no `accepted` acknowledgement. While a play
+is starting, `status` is answered from the cached state, `stop` cancels the play, and another `play`,
+`pause` or `resume` fails with `a play is still starting; try again` (the server never sends these
+concurrently). The per-step limits add up to about 40 s, under the server's 45 s. The result still says
+`IDLE` before buffering; the pushed status follows within a second. Resolving and connecting to the
+speaker (mDNS, TLS handshake, first GET_STATUS) still blocks for up to ~15 s on the first command.

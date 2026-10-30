@@ -157,6 +157,10 @@ void CastClient::handle(const castmsg::Message& m) {
     if (id) {
         replyId_ = id;
         replyType_ = type;
+        if (id == jobRequestId_) {  // kept apart so a status request during a play can't swallow it
+            jobReplied_ = true;
+            jobReplyType_ = type;
+        }
     }
 }
 
@@ -183,8 +187,7 @@ bool CastClient::request(const char* dest, const char* ns, JsonDocument& doc, ui
         err = String("speaker did not answer ") + (doc["type"] | "request");
         return false;
     }
-    if (replyType_ == "LOAD_FAILED" || replyType_ == "LOAD_CANCELLED" || replyType_ == "INVALID_REQUEST" ||
-        replyType_ == "LAUNCH_ERROR") {
+    if (playjob::isErrorReply(replyType_.c_str())) {
         err = "speaker replied " + replyType_;
         return false;
     }
@@ -245,22 +248,131 @@ bool CastClient::ensureMediaSession(String& err) {
     return true;
 }
 
-bool CastClient::play(const String& url, const String& contentType, const String& title, float position,
-                      String& err) {
-    if (!ensureMediaApp(err)) return false;
+bool CastClient::startPlay(const String& url, const String& contentType, const String& title, float position,
+                           float volume, String& err) {
+    if (job_.active()) {
+        err = "another play is still starting";
+        return false;
+    }
+    playUrl_ = url;
+    playType_ = contentType;
+    playTitle_ = title;
+    playPosition_ = position;
+    playVolume_ = volume;
+    resultReady_ = false;
+    job_.start(volume >= 0, millis());
+    drivePlay();  // a warm play sends its LOAD right away
+    return true;
+}
+
+bool CastClient::takePlayResult(bool& ok, String& err) {
+    if (!resultReady_) return false;
+    resultReady_ = false;
+    ok = resultOk_;
+    err = resultErr_;
+    resultErr_ = String();
+    return true;
+}
+
+void CastClient::cancelPlay(const char* why) {
+    if (!job_.active()) return;
+    cancelWhy_ = why;
+    job_.cancel();
+}
+
+bool CastClient::sendJobRequest(const char* dest, const char* ns, JsonDocument& doc) {
+    jobRequestId_ = nextId_++;
+    jobReplied_ = false;
+    jobReplyType_ = "";
+    doc["requestId"] = jobRequestId_;
+    if (send(dest, ns, doc)) return true;
+    end();  // the job sees the dropped link on its next step
+    return false;
+}
+
+bool CastClient::sendLoad() {
     JsonDocument doc;
     doc["type"] = "LOAD";
     doc["sessionId"] = sessionId_;
     doc["autoplay"] = true;
-    if (position > 0) doc["currentTime"] = position;
+    if (playPosition_ > 0) doc["currentTime"] = playPosition_;
     JsonObject media = doc["media"].to<JsonObject>();
-    media["contentId"] = url;
-    media["contentType"] = contentType;
+    media["contentId"] = playUrl_;
+    media["contentType"] = playType_;
     media["streamType"] = "BUFFERED";  // not LIVE, so currentTime and seeking work
     JsonObject meta = media["metadata"].to<JsonObject>();
     meta["metadataType"] = 0;
-    meta["title"] = title;
-    return request(transportId_.c_str(), NS_MEDIA, doc, 15000, err);
+    meta["title"] = playTitle_;
+    return sendJobRequest(transportId_.c_str(), NS_MEDIA, doc);
+}
+
+static const char* requestName(playjob::Phase p) {
+    switch (p) {
+        case playjob::Phase::Volume: return "SET_VOLUME";
+        case playjob::Phase::Launch: return "LAUNCH";
+        default: return "LOAD";
+    }
+}
+
+// One loop's worth of the pending play: at most a few quick steps (e.g. CONNECT then LOAD), never a wait.
+void CastClient::drivePlay() {
+    using playjob::Action;
+    for (int i = 0; i < 4 && job_.active(); i++) {
+        playjob::View v;
+        v.linkUp = tls_.connected();
+        v.appReady = appId_ == DEFAULT_MEDIA_RECEIVER && transportId_.length();
+        v.transportConnected = v.appReady && connectedTransport_ == transportId_;
+        v.replied = jobReplied_;
+        v.replyRejected = jobReplied_ && playjob::isErrorReply(jobReplyType_.c_str());
+        Action a = job_.step(v, millis());
+        if (a == Action::None) return;
+        if (a == Action::SendVolume) {
+            JsonDocument doc;
+            doc["type"] = "SET_VOLUME";
+            doc["volume"]["level"] = constrain(playVolume_, 0.0f, 1.0f);
+            sendJobRequest(RECEIVER_ID, NS_RECEIVER, doc);
+        } else if (a == Action::SendLaunch) {
+            JsonDocument doc;
+            doc["type"] = "LAUNCH";
+            doc["appId"] = DEFAULT_MEDIA_RECEIVER;
+            sendJobRequest(RECEIVER_ID, NS_RECEIVER, doc);
+        } else if (a == Action::SendConnect) {
+            JsonDocument doc;
+            doc["type"] = "CONNECT";
+            if (send(transportId_.c_str(), NS_CONNECTION, doc))
+                connectedTransport_ = transportId_;
+            else
+                end();
+        } else if (a == Action::SendLoad) {
+            sendLoad();
+        } else if (a == Action::Succeed) {
+            finishPlay(true, "");
+        } else {
+            switch (job_.failure()) {
+                case playjob::Failure::Rejected: finishPlay(false, "speaker replied " + jobReplyType_); break;
+                case playjob::Failure::NoAnswer:
+                    finishPlay(false, String("speaker did not answer ") + requestName(job_.failedIn()));
+                    break;
+                case playjob::Failure::AppDidNotStart: finishPlay(false, "Default Media Receiver did not start"); break;
+                case playjob::Failure::Cancelled: finishPlay(false, cancelWhy_); break;
+                default: finishPlay(false, "lost connection to speaker"); break;
+            }
+        }
+    }
+}
+
+void CastClient::finishPlay(bool ok, const String& err) {
+    resultReady_ = true;
+    resultOk_ = ok;
+    resultErr_ = err;
+    jobRequestId_ = 0;
+    jobReplied_ = false;
+    // give the heap back (String = "" would keep the buffers)
+    playUrl_ = String();
+    playType_ = String();
+    playTitle_ = String();
+    cancelWhy_ = String();
+    jobReplyType_ = String();
 }
 
 bool CastClient::setVolume(float level, String& err) {
@@ -295,23 +407,23 @@ bool CastClient::resume(String& err) {
 }
 
 void CastClient::loop() {
-    if (!tls_.connected()) return;
-    castmsg::Message m;
-    while (tls_.available() > 0) {
-        if (!readFrame(m, 1000)) break;
-        handle(m);
+    if (tls_.connected()) {
+        castmsg::Message m;
+        while (tls_.available() > 0) {
+            if (!readFrame(m, 1000)) break;
+            handle(m);
+        }
+        uint32_t now = millis();
+        if (now - lastRx_ > kDeadAfterMs) {
+            end();
+        } else if (now - lastPing_ > kHeartbeatMs) {
+            lastPing_ = now;
+            JsonDocument doc;
+            doc["type"] = "PING";
+            send(RECEIVER_ID, NS_HEARTBEAT, doc);
+        }
     }
-    uint32_t now = millis();
-    if (now - lastRx_ > kDeadAfterMs) {
-        end();
-        return;
-    }
-    if (now - lastPing_ > kHeartbeatMs) {
-        lastPing_ = now;
-        JsonDocument doc;
-        doc["type"] = "PING";
-        send(RECEIVER_ID, NS_HEARTBEAT, doc);
-    }
+    drivePlay();  // also when the link dropped, so a pending play fails instead of hanging
 }
 
 void CastClient::status(JsonObject out) const {

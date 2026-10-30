@@ -9,6 +9,7 @@
 
 #include "cast_message.h"
 #include "platform.h"
+#include "play_job.h"
 
 class CastClient {
    public:
@@ -18,11 +19,19 @@ class CastClient {
     bool connected();
     IPAddress ip() const { return ip_; }
 
-    // Call from loop(): answers PINGs, sends heartbeats, absorbs status updates.
+    // Call from loop(): answers PINGs, sends heartbeats, absorbs status updates, drives a pending play.
     void loop();
 
-    // position < 0 starts from the beginning.
-    bool play(const String& url, const String& contentType, const String& title, float position, String& err);
+    // Starts a play without blocking; loop() drives it (launch the Default Media Receiver if needed, wait for
+    // its transport, connect, LOAD) and takePlayResult() reports the outcome. position < 0 starts from the
+    // beginning, volume < 0 leaves the volume alone. False (with err) when a play is already pending.
+    bool startPlay(const String& url, const String& contentType, const String& title, float position, float volume,
+                   String& err);
+    bool playPending() const { return job_.active(); }
+    // True once, when the started play has finished; ok and err tell how.
+    bool takePlayResult(bool& ok, String& err);
+    // A pending play ends with err = why at the next loop().
+    void cancelPlay(const char* why);
     bool setVolume(float level, String& err);
     bool stop(String& err);
     bool pause(String& err);
@@ -41,6 +50,10 @@ class CastClient {
     bool request(const char* dest, const char* ns, JsonDocument& doc, uint32_t timeoutMs, String& err);
     bool ensureMediaApp(String& err);
     bool ensureMediaSession(String& err);
+    void drivePlay();
+    bool sendJobRequest(const char* dest, const char* ns, JsonDocument& doc);
+    bool sendLoad();
+    void finishPlay(bool ok, const String& err);
 
     SecureClient tls_;
     IPAddress ip_;
@@ -73,4 +86,16 @@ class CastClient {
     float position_ = 0;
     uint32_t positionAt_ = 0;
     uint32_t changes_ = 0;
+
+    // Pending play; its strings are released when it finishes.
+    playjob::Job job_;
+    String playUrl_, playType_, playTitle_, cancelWhy_;
+    float playPosition_ = -1;
+    float playVolume_ = -1;
+    uint32_t jobRequestId_ = 0;  // the request the job waits on; its reply is kept apart from request()'s
+    bool jobReplied_ = false;
+    String jobReplyType_;
+    bool resultReady_ = false;
+    bool resultOk_ = false;
+    String resultErr_;
 };
