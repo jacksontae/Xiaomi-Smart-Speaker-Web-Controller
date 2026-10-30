@@ -2,7 +2,7 @@
 // language/theme re-render. Views follow the contract documented in routes.js.
 import { api, errorText, setUnauthorizedHandler } from './api.js';
 import { t, roleLabel, onLang } from './i18n.js';
-import { motionReduced, onChange as onPrefs } from './prefs.js';
+import { motionReduced, isAndroid, onChange as onPrefs } from './prefs.js';
 import { h, icon, toast } from './ui.js';
 import { openSheet, popover, closeAllSheets } from './sheet.js';
 import { buildShell } from './shell.js';
@@ -157,9 +157,10 @@ async function showScreen(load) {
 function startApp() {
   screenLoad = null;
   if (shell) shell.destroy();
-  shell = buildShell({ user: state.user, api, onSignOut: signOut, onPickSpeaker: (s) => toast(t('spk.switched', s.name), 'ok') });
+  shell = buildShell({ user: state.user, api, onSignOut: signOut, onPickSpeaker: (s) => toast(t('spk.switched', s.name), 'ok'), onCommand: command });
   appEl.replaceChildren(shell.el);
   applySpeakers();
+  shell.setStatus(state.status, state.statusErr);
   render(false);
   startPolling();
   prefetchRoutes();
@@ -283,7 +284,13 @@ async function refreshStatus() {
   }
   applyMood();
   applySpeakers();
+  if (shell) shell.setStatus(state.status, state.statusErr);
   if (view && view.onStatus) callStatus(view);
+}
+/** A speaker command from the shell (the Android Now Bar's play/pause): errors as toasts, then poll right away. */
+async function command(path) {
+  try { await api(path, { method: 'POST' }); } catch (e) { fail(e); }
+  await refreshStatus();
 }
 function startPolling() {
   stopPolling();
@@ -323,6 +330,14 @@ onLang(() => {
   if (shell) startApp();
   else if (screenLoad) showScreen(screenLoad); // login/setup keep their typed values (module-level drafts)
 });
-onPrefs(() => { if (shell) shell.onScroll(); });
+// the look (Android / glass) changes chrome markup (nav pill, rail, Now Bar): rebuild the shell like a language change
+let wasAndroid = isAndroid();
+onPrefs((p) => {
+  if (p.android !== wasAndroid) {
+    wasAndroid = p.android;
+    if (shell) { startApp(); return; }
+  }
+  if (shell) shell.onScroll();
+});
 
 boot();

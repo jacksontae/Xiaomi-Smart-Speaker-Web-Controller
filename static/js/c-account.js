@@ -40,6 +40,8 @@ register({
     'ca.motion': 'Reduce motion', 'ca.m.system': 'Follow system', 'ca.m.on': 'On', 'ca.m.off': 'Off',
     'ca.mHelpSys': (on) => (on ? 'Your device asks for less motion, so animations are off.' : 'Your device allows motion, so animations are on.'),
     'ca.mHelpOn': 'Animations are off in this app.', 'ca.mHelpOff': 'Animations are on in this app.',
+    'ca.look': 'Look', 'ca.os.auto': 'Automatic', 'ca.os.android': 'Android', 'ca.os.ios': 'iOS',
+    'ca.lookHelp': 'Automatic matches this device: Android phones and tablets get the Android look.',
     'ca.tour': 'Show quick tour again', 'ca.tourSub': 'A short walk through Now playing and the main pages.',
     'ca.deviceOnly': 'Saved on this device only.',
   },
@@ -72,6 +74,8 @@ register({
     'ca.motion': 'ลดการเคลื่อนไหว', 'ca.m.system': 'ตามระบบ', 'ca.m.on': 'เปิด', 'ca.m.off': 'ปิด',
     'ca.mHelpSys': (on) => (on ? 'เครื่องนี้ตั้งให้ลดการเคลื่อนไหว ภาพเคลื่อนไหวจึงปิดอยู่' : 'เครื่องนี้ไม่ได้ลดการเคลื่อนไหว ภาพเคลื่อนไหวจึงเปิดอยู่'),
     'ca.mHelpOn': 'ภาพเคลื่อนไหวในแอปปิดอยู่', 'ca.mHelpOff': 'ภาพเคลื่อนไหวในแอปเปิดอยู่',
+    'ca.look': 'หน้าตาแอป', 'ca.os.auto': 'อัตโนมัติ', 'ca.os.android': 'Android', 'ca.os.ios': 'iOS',
+    'ca.lookHelp': 'อัตโนมัติจะเลือกตามเครื่อง โทรศัพท์และแท็บเล็ต Android ได้หน้าตาแบบ Android',
     'ca.tour': 'ดูทัวร์แนะนำอีกครั้ง', 'ca.tourSub': 'พาดูหน้าเล่นอยู่และหน้าหลักต่าง ๆ แบบสั้น ๆ',
     'ca.deviceOnly': 'บันทึกไว้เฉพาะในอุปกรณ์นี้',
   },
@@ -278,10 +282,17 @@ export function appPrefsCard(ctx, { split = false } = {}) {
   });
   paintM();
   ctx.onCleanup(onPrefs(paintM));
+  // the look: Android (Material) or iOS (glass); app.js rebuilds the shell when it changes
+  const lookSeg = segmented({
+    label: t('ca.look'), value: getPref('os'),
+    options: ['auto', 'android', 'ios'].map((v) => ({ value: v, label: t(`ca.os.${v}`) })),
+    onChange: (v) => setPref('os', v),
+  });
   const blocks = [
     block(t('ca.lang'), langSeg, h('span', { class: 'c-sub' }, t('ca.langHelp'))),
     block(t('ca.theme'), themeSeg, h('span', { class: 'c-sub' }, t('ca.themeHelp'))),
     block(t('ca.motion'), motionSeg, mHelp),
+    block(t('ca.look'), lookSeg, h('span', { class: 'c-sub' }, t('ca.lookHelp'))),
   ];
   // replay the first-run quick tour on the Now page (js/tour.js)
   const tourRow = linkRow({ title: t('ca.tour'), sub: t('ca.tourSub'), onclick: () => import('./tour.js').then((m) => m.replay({ user: ctx.user })) });
