@@ -9,6 +9,8 @@
   "resume_after_say": true,
   "public_base_url": null,
   "api_token": null,
+  "passkey_signin": true,
+  "passkey_required_for_admins": false,
   "mqtt": {
     "host": "broker.example.com",
     "port": 8883,

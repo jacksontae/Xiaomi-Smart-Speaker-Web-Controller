@@ -59,7 +59,9 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 | `resume_after_say` | `true` | ประกาศเสร็จแล้วเล่นเพลง YouTube ที่ค้างอยู่ต่อจากจุดเดิม (ย้อน 1 วินาที) |
 | `transport` | `cast` | `cast` = สั่งลำโพงตรงในวง LAN · `mqtt` = สั่งผ่าน ESP32 relay (ดู Remote deployment) |
 | `mqtt` | ดู `config.example.json` | broker ของ relay: `host`, `port`, `tls`, `username`, `password`, `base_topic`, `client_id` |
-| `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.0.2.20:8090` |
+| `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.0.2.20:8090` · host ของ URL นี้คือ RP ID ของ passkey |
+| `passkey_signin` | `true` | เปิดการล็อกอินด้วย passkey (ใช้ได้จริงเมื่อ `public_base_url` เป็น `https://` หรือ `http://localhost`) |
+| `passkey_required_for_admins` | `false` | admin ที่มี passkey ต้องล็อกอินด้วย passkey เท่านั้น (เปิดได้เมื่อ admin ทุกคนมี passkey แล้ว) |
 
 ```bash
 TOKEN=$(./speakerctl token)
@@ -93,16 +95,31 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 
 | Method | Path | สิทธิ์ | Body | หน้าที่ |
 |---|---|---|---|---|
-| GET | `/auth/state` | ทุกคน | – | `{"needs_setup", "user"}` |
+| GET | `/auth/state` | ทุกคน | – | `{"needs_setup", "user", "methods": {"password", "passkey"}}` (+ `passkey_required` เมื่อ admin ต้องเพิ่ม passkey) |
 | POST | `/auth/setup` | ทุกคน (ตอนยังไม่มีผู้ใช้) | `{"api_token", "username", "display_name", "password"}` | สร้าง admin คนแรกแล้วล็อกอิน (token ผิด `401`, มีผู้ใช้แล้ว `409`) |
 | POST | `/auth/login` | ทุกคน | `{"username", "password"}` | ล็อกอิน ตั้ง cookie |
 | POST | `/auth/logout` · `/auth/logout-all` | ล็อกอินแล้ว | – | ออกจากระบบเครื่องนี้ · ทุกเครื่อง |
 | POST | `/auth/password` | ล็อกอินแล้ว | `{"current", "new"}` | เปลี่ยนรหัสผ่าน (เครื่องอื่นถูกออกจากระบบ) |
+| POST | `/auth/passkey/options` | ทุกคน | – | `{"publicKey"}` สำหรับ `navigator.credentials.get()` |
+| POST | `/auth/passkey/verify` | ทุกคน | `{"credential"}` | ล็อกอินด้วย passkey ตั้ง cookie (ไม่ผ่าน `401`) |
+| POST | `/me/passkeys/options` | ล็อกอินแล้ว | – | `{"publicKey"}` สำหรับ `navigator.credentials.create()` |
+| GET · POST | `/me/passkeys` | ล็อกอินแล้ว | `{"credential", "name"}` | ดู · เพิ่ม passkey ของตัวเอง |
+| PATCH · DELETE | `/me/passkeys/{id}` | ล็อกอินแล้ว | `{"name"}` · – | เปลี่ยนชื่อ · ลบ passkey |
 | GET · POST | `/users` | admin | `{"username", "display_name", "password", "role"}` | ดู · เพิ่มสมาชิก |
 | PATCH · DELETE | `/users/{id}` | admin | `{"display_name", "role", "password", "disabled"}` (ใส่เฉพาะที่จะแก้) | แก้ · ลบสมาชิก |
 
 ชื่อผู้ใช้ 3–32 ตัว `a-z 0-9 . _ -` · ลบ ปิด หรือลดสิทธิ์ตัวเองไม่ได้ และต้องเหลือ admin ที่เปิดใช้อย่างน้อย 1 คน (`409`)
 ปิดบัญชีหรือเปลี่ยนรหัสผ่านจะออกจากระบบทุกเครื่องของคนนั้น
+
+#### Passkeys
+
+ใช้ได้เมื่อเปิดหน้าเว็บผ่าน `public_base_url` ที่เป็น `https://` (หรือ `http://localhost` ตอนพัฒนา) เพราะเบราว์เซอร์ไม่ให้ใช้ passkey
+บน http หรือ IP · RP ID = host ของ `public_base_url` ถ้าเปลี่ยนโดเมน passkey เดิมจะใช้ไม่ได้
+`credential` คือ `PublicKeyCredential` ที่แปลงเป็น JSON (ฟิลด์ binary เป็น base64url เหมือน `credential.toJSON()`)
+challenge ใช้ได้ครั้งเดียวและหมดอายุใน 5 นาที · ตรวจ sign counter (ค่าไม่เพิ่ม = key ถูกคัดลอก ปฏิเสธ) · ผิด 5 ครั้งใน 5 นาที (ต่อ IP) ได้ `429`
+ลบ passkey สุดท้ายไม่ได้ถ้าเป็นวิธีล็อกอินเดียวที่เหลือ หรือเป็น admin ขณะเปิด `passkey_required_for_admins` (`409`)
+เมื่อเปิด `passkey_required_for_admins` admin ที่มี passkey ล็อกอินด้วยรหัสผ่านไม่ได้ (`403`) · admin ใหม่ที่ยังไม่มี passkey
+ยังล็อกอินด้วยรหัสผ่านได้ แต่ `/auth/state` จะมี `"passkey_required": true` ให้หน้าเว็บพาไปเพิ่ม · API token ใช้ได้เสมอ (ทางกู้คืน)
 
 ### ลำโพง
 
@@ -211,6 +228,7 @@ How it behaves:
 app.py                 FastAPI service: TTS, YouTube cache, คิว, settings, API ทั้งหมด
 transport.py           ช่องทางสั่งลำโพง: Cast ตรง (pychromecast) หรือผ่าน ESP32 relay ทาง MQTT
 auth.py                รหัสผ่าน (scrypt), session token, จำกัดการล็อกอินผิด
+passkeys.py            passkey (WebAuthn): RP จาก public_base_url, challenge ใช้ครั้งเดียว, ตรวจ response
 store.py               SQLite: ผู้ใช้ session เพลย์ลิสต์ ข้อความด่วน บันทึกกิจกรรม
 player.py              คิวเพลง (ลำดับเล่น shuffle repeat)
 static/                หน้าเว็บควบคุม

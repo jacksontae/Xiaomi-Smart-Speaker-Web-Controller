@@ -11,6 +11,13 @@ ROLE_TABLE = {
     ("POST", "/auth/logout"): "viewer",
     ("POST", "/auth/logout-all"): "viewer",
     ("POST", "/auth/password"): "viewer",
+    ("POST", "/auth/passkey/options"): None,
+    ("POST", "/auth/passkey/verify"): None,
+    ("POST", "/me/passkeys/options"): "viewer",
+    ("POST", "/me/passkeys"): "viewer",
+    ("GET", "/me/passkeys"): "viewer",
+    ("PATCH", "/me/passkeys/{passkey_id}"): "viewer",
+    ("DELETE", "/me/passkeys/{passkey_id}"): "viewer",
     ("GET", "/users"): "admin",
     ("POST", "/users"): "admin",
     ("PATCH", "/users/{user_id}"): "admin",
@@ -98,7 +105,7 @@ def test_role_table_covers_every_route(app):
 
 def _url(path):
     return path.format(user_id=999, playlist_id=999, item_id=999, phrase_id=999, schedule_id=999,
-                       filename="x.m4a")
+                       passkey_id=999, filename="x.m4a")
 
 
 def _call(client, method, path):

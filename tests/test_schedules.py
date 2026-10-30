@@ -423,19 +423,19 @@ def test_migrates_version_1_database_in_place(tmp_path):
     db.close()
 
     upgraded = store.Store(path)
-    assert upgraded.schema_version() == store.SCHEMA_VERSION == 2
+    assert upgraded.schema_version() == store.SCHEMA_VERSION
     assert [p["name"] for p in upgraded.list_playlists()] == ["Kept"]
     fields = {"name": "n", "enabled": True, "action": "say", "text": "t", "lang": "th", "playlist_id": None,
               "shuffle": False, "volume": None, "time": "07:00", "days": [0], "date": None, "next_run": None}
     created = upgraded.create_schedule(fields, None)
     assert created["days"] == [0] and created["enabled"] is True
     reopened = store.Store(path)  # already current: nothing to do, nothing lost
-    assert reopened.schema_version() == 2 and len(reopened.list_schedules()) == 1
+    assert reopened.schema_version() == store.SCHEMA_VERSION and len(reopened.list_schedules()) == 1
 
 
 def test_fresh_database_is_current(tmp_path):
     fresh = store.Store(tmp_path / "new.db")
-    assert fresh.schema_version() == 2 and fresh.list_schedules() == []
+    assert fresh.schema_version() == store.SCHEMA_VERSION and fresh.list_schedules() == []
 
 
 def test_runner_starts_and_stops_with_the_app(app, monkeypatch):
