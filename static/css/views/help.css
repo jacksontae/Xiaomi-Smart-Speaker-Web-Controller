@@ -29,6 +29,11 @@
 .hp-steps li::before { content: counter(s); position: absolute; left: 0; top: 1px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-tint); color: var(--accent); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .hp-try { min-height: 44px; gap: 4px; }
 
+/* "Take the quick tour" row above the topics (prototype board Help) */
+.hp-tourbox[hidden] { display: none; }
+.hp-tic { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: var(--accent-tint); color: var(--accent); }
+.hp-tour .hp-chev { color: var(--ink-3); }
+
 .hp-none { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 8px; }
 .hp-none-t { font-size: 17px; font-weight: 600; }
 

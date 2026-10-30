@@ -16,6 +16,7 @@ register({
     'help.showAll': 'Show all topics',
     'help.found': (n) => (n === 1 ? '1 topic found' : `${n} topics found`),
     'help.g.daily': 'Everyday use', 'help.g.admin': 'For admins', 'help.g.fix': 'Troubleshooting',
+    'help.tour': 'Take the quick tour',
   },
   th: {
     'help.sub': 'เลือกสิ่งที่อยากทำ แล้วทำตามขั้นตอน',
@@ -25,6 +26,7 @@ register({
     'help.showAll': 'ดูทุกหัวข้อ',
     'help.found': (n) => `พบ ${n} หัวข้อ`,
     'help.g.daily': 'ใช้งานประจำวัน', 'help.g.admin': 'สำหรับผู้ดูแล', 'help.g.fix': 'แก้ปัญหา',
+    'help.tour': 'ดูทัวร์แนะนำ',
   },
 });
 
@@ -249,9 +251,13 @@ export async function render(ctx) {
   const groupsBox = h('div', { class: 'hp-groups' });
 
   const sub = h('p', { class: 'hp-sub' }, t('help.sub'));
+  // replays the first-run quick tour on the Now page (js/tour.js); hidden while searching
+  const tour = h('div', { class: 'hp-list hp-tourbox', hidden: !!query },
+    h('button', { type: 'button', class: 'hp-q hp-tour', onclick: () => import('../tour.js').then((m) => m.replay({ user: ctx.user })) },
+      h('span', { class: 'hp-tic', 'aria-hidden': 'true' }, aicon('play', 'sm')), h('span', { class: 'hp-qt' }, t('help.tour')), icon('chev-right', 'sm hp-chev')));
   const node = h('div', { class: 'page narrow help-page' },
     ctx.header({ title: t('nav.help'), back: isPhone() ? { href: '#/account', label: t('nav.account') } : null }),
-    sub, search, count, groupsBox);
+    sub, search, count, tour, groupsBox);
 
   function topicEl(tp, matchAll) {
     const c = tp[L] || tp.en;
@@ -297,6 +303,7 @@ export async function render(ctx) {
   function onSearch() {
     query = input.value;
     clear.hidden = !query;
+    tour.hidden = !!query;
     draw();
   }
   input.addEventListener('input', onSearch);

@@ -8,7 +8,7 @@ import { errorText } from './api.js';
 import { get as getPref, set as setPref, motionReduced, onChange as onPrefs } from './prefs.js';
 import { googleCredential } from './signin.js';
 import { createPasskey, createError, passkeyCapable, deviceName } from './c-passkey-offer.js';
-import { card, badge, tile, gMark, fmtDay, fmtWhen, toneOf, initialOf, settingRow } from './c-kit.js';
+import { card, badge, tile, gMark, fmtDay, fmtWhen, toneOf, initialOf, settingRow, linkRow } from './c-kit.js';
 
 register({
   en: {
@@ -40,6 +40,7 @@ register({
     'ca.motion': 'Reduce motion', 'ca.m.system': 'Follow system', 'ca.m.on': 'On', 'ca.m.off': 'Off',
     'ca.mHelpSys': (on) => (on ? 'Your device asks for less motion, so animations are off.' : 'Your device allows motion, so animations are on.'),
     'ca.mHelpOn': 'Animations are off in this app.', 'ca.mHelpOff': 'Animations are on in this app.',
+    'ca.tour': 'Show quick tour again', 'ca.tourSub': 'A short walk through Now playing and the main pages.',
     'ca.deviceOnly': 'Saved on this device only.',
   },
   th: {
@@ -71,6 +72,7 @@ register({
     'ca.motion': 'ลดการเคลื่อนไหว', 'ca.m.system': 'ตามระบบ', 'ca.m.on': 'เปิด', 'ca.m.off': 'ปิด',
     'ca.mHelpSys': (on) => (on ? 'เครื่องนี้ตั้งให้ลดการเคลื่อนไหว ภาพเคลื่อนไหวจึงปิดอยู่' : 'เครื่องนี้ไม่ได้ลดการเคลื่อนไหว ภาพเคลื่อนไหวจึงเปิดอยู่'),
     'ca.mHelpOn': 'ภาพเคลื่อนไหวในแอปปิดอยู่', 'ca.mHelpOff': 'ภาพเคลื่อนไหวในแอปเปิดอยู่',
+    'ca.tour': 'ดูทัวร์แนะนำอีกครั้ง', 'ca.tourSub': 'พาดูหน้าเล่นอยู่และหน้าหลักต่าง ๆ แบบสั้น ๆ',
     'ca.deviceOnly': 'บันทึกไว้เฉพาะในอุปกรณ์นี้',
   },
 });
@@ -281,5 +283,8 @@ export function appPrefsCard(ctx, { split = false } = {}) {
     block(t('ca.theme'), themeSeg, h('span', { class: 'c-sub' }, t('ca.themeHelp'))),
     block(t('ca.motion'), motionSeg, mHelp),
   ];
-  return split ? blocks.map((b) => card(b)) : [card(...blocks)];
+  // replay the first-run quick tour on the Now page (js/tour.js)
+  const tourRow = linkRow({ title: t('ca.tour'), sub: t('ca.tourSub'), onclick: () => import('./tour.js').then((m) => m.replay({ user: ctx.user })) });
+  tourRow.classList.add('c-tour');
+  return split ? [...blocks.map((b) => card(b)), card(tourRow)] : [card(...blocks, tourRow)];
 }
