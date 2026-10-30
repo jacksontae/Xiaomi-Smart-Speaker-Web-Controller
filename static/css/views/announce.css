@@ -144,3 +144,99 @@ label.tk-line { cursor: pointer; }
 }
 :root[data-motion="reduce"] .tk-wave span, :root[data-motion="reduce"] .tk-meter span { transition: none; }
 :root[data-motion="reduce"] .tk-ptt[aria-pressed="true"] .tk-ring { animation: none; opacity: .5; }
+
+/* ================= Android look (boards A_Announce / AT_Announce; tokens in css/android.css) =================
+   Speaker chip under the title, the composer as one card (filled message box, language button group, 56 px
+   Announce button), quick phrases as rows in a card with a play disc; the mode switch is styled in android.css. */
+:root[data-os="android"] .ann-page > .phd { flex-direction: column; align-items: flex-start; flex-wrap: nowrap; gap: 10px; }
+:root[data-os="android"] .ann-page > .phd .phd-r .spchip { display: inline-flex; }
+:root[data-os="android"] .ann-page > .phd .phd-r .help-btn, :root[data-os="android"] .ann-page > .phd .ann-headacts:empty { display: none; }
+:root[data-os="android"] .ann-page .ann-segslot { margin-bottom: 4px; }
+:root[data-os="android"] .ann-grid { gap: 24px; }
+
+/* composer */
+:root[data-os="android"] .ann-card { gap: 12px; padding: 16px; border: 0; border-radius: var(--r-lg); background: var(--md-card); box-shadow: none; }
+:root[data-os="android"] .ann-text { min-height: 136px; padding: 30px 16px 12px; border: 0; border-radius: 16px; background: var(--md-surface-container); resize: none; font-size: 16px; }
+:root[data-os="android"][data-theme="dark"] .ann-text { background: var(--md-surface-high); }
+:root[data-os="android"] .ann-text:focus, :root[data-os="android"] .ann-text[aria-invalid="true"] { padding: 30px 16px 12px; border: 0; background: var(--md-surface-container); box-shadow: inset 0 0 0 2px var(--md-primary); }
+:root[data-os="android"][data-theme="dark"] .ann-text:focus { background: var(--md-surface-high); }
+:root[data-os="android"] .ann-text[aria-invalid="true"] { box-shadow: inset 0 0 0 2px var(--md-error); }
+:root[data-os="android"] .ann-card .field > label:first-child { top: 10px; }
+:root[data-os="android"] .ann-foot { gap: 12px; }
+:root[data-os="android"] .ann-count { order: -1; flex: 1 0 100%; margin: -6px 4px 0 0; text-align: right; font-size: 12px; color: var(--md-on-surface-variant); }
+:root[data-os="android"] .ann-lang { flex: 1 1 100%; }
+:root[data-os="android"] .ann-lang > button { padding: 0 8px; }
+:root[data-os="android"] .ann-cta { gap: 10px; }
+
+/* one-off volume: the M3 Expressive slider of the Now page (thick track, bar handle) */
+:root[data-os="android"] .ann-vol { padding-top: 8px; border-top: 0; background-image: linear-gradient(var(--line), var(--line)); background-size: 100% 1px; background-repeat: no-repeat; }
+:root[data-os="android"] .ann-vollbl { color: var(--md-on-surface-variant); }
+:root[data-os="android"] .ann-range { height: 44px; }
+:root[data-os="android"] .ann-range::-webkit-slider-runnable-track { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--md-primary) 0 var(--p, 0%), var(--md-secondary-container) var(--p, 0%)); }
+:root[data-os="android"] .ann-range::-moz-range-track { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--md-primary) 0 var(--p, 0%), var(--md-secondary-container) var(--p, 0%)); }
+:root[data-os="android"] .ann-range::-webkit-slider-thumb { width: 4px; height: 32px; margin-top: -10px; border: 0; border-radius: 2px; background: var(--md-primary); box-shadow: 0 0 0 3px var(--md-card); }
+:root[data-os="android"] .ann-range::-moz-range-thumb { width: 4px; height: 32px; border: 0; border-radius: 2px; background: var(--md-primary); }
+:root[data-os="android"] .ann-range.unset::-webkit-slider-runnable-track { background: var(--md-secondary-container); }
+:root[data-os="android"] .ann-range.unset::-moz-range-track { background: var(--md-secondary-container); }
+:root[data-os="android"] .ann-range.unset::-webkit-slider-thumb { border: 0; background: var(--md-outline); }
+:root[data-os="android"] .ann-volout { font-size: 14px; font-weight: 700; }
+
+/* quick phrases: section label, then rows in one card; a tap announces the phrase */
+:root[data-os="android"] .ann-phrases { display: flex; flex-direction: column; gap: 8px; }
+:root[data-os="android"] .ann-phead { padding: 0 4px 0 8px; min-height: 40px; }
+:root[data-os="android"] .ann-phead h2 { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--md-primary); }
+:root[data-os="android"] .ann-edit { min-height: 40px; padding: 0 12px; border-radius: 20px; color: var(--md-primary); font-size: 14px; font-weight: 700; }
+:root[data-os="android"] .ann-edit[aria-pressed="true"] { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+:root[data-os="android"] .ann-hint { order: 1; margin-top: -2px; padding: 0 8px; font-size: 13px; color: var(--md-on-surface-variant); }
+@media (max-width: 743.98px) {
+  :root[data-os="android"] .ann-hint { order: 0; margin: -10px 0 2px; }
+  :root[data-os="android"] .ann-chips { order: 1; }
+}
+:root[data-os="android"] .ann-chips { flex-direction: column; flex-wrap: nowrap; gap: 0; border-radius: var(--r-lg); background: var(--md-card); overflow: hidden; }
+:root[data-os="android"] .ann-chips > :only-child:is(p) { padding: 16px; }
+:root[data-os="android"] .ann-chipw { display: flex; width: 100%; max-width: none; }
+:root[data-os="android"] .ann-chips > * + * { background-image: linear-gradient(var(--line), var(--line)); background-size: calc(100% - 80px) 1px; background-position: 64px 0; background-repeat: no-repeat; }
+:root[data-os="android"] .ann-chip {
+  position: relative; width: 100%; min-height: 56px; padding: 8px 16px 8px 64px; gap: 12px; border: 0; border-radius: 0; background: transparent;
+  color: var(--md-on-surface); font-size: 16px; font-weight: 500; line-height: 1.45; transition: background-color var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .ann-chip.static { padding-left: 16px; }
+:root[data-os="android"] .ann-chip::before, :root[data-os="android"] .ann-chip::after { content: none; }
+:root[data-os="android"] button.ann-chip::before {
+  content: ""; position: absolute; left: 14px; top: 50%; width: 36px; height: 36px; margin-top: -18px; border-radius: 18px; background: var(--md-tonal);
+  transition: border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease);
+}
+:root[data-os="android"] button.ann-chip:not(.add)::after { content: ""; position: absolute; left: 28px; top: 50%; width: 10px; height: 12px; margin-top: -6px; background: var(--md-primary); clip-path: polygon(0 0, 100% 50%, 0 100%); }
+:root[data-os="android"] button.ann-chip:hover { background: color-mix(in srgb, var(--md-state) 5%, transparent); }
+:root[data-os="android"] button.ann-chip:active { transform: none; background: color-mix(in srgb, var(--md-state) 10%, transparent); }
+:root[data-os="android"] button.ann-chip:active::before { border-radius: 12px; }
+:root[data-os="android"] .ann-chip.busy::before { background: var(--md-primary-container); }
+:root[data-os="android"] .ann-chip.add { border: 0; color: var(--md-primary); font-weight: 600; }
+:root[data-os="android"] .ann-chip.add::before { background: var(--md-primary); }
+:root[data-os="android"] .ann-chip.add .icon { position: absolute; z-index: 1; left: 23px; top: 50%; width: 18px; height: 18px; margin-top: -9px; color: var(--md-on-primary); }
+:root[data-os="android"] .ann-tag { margin-left: auto; padding-left: 8px; color: var(--md-on-surface-variant); }
+:root[data-os="android"] .ann-chipw.editing .ann-chip { padding-right: 60px; }
+:root[data-os="android"] .ann-del { right: 8px; width: 44px; height: 44px; color: var(--md-error); transition: border-radius var(--t-slow) var(--md-spring); }
+:root[data-os="android"] .ann-del:active { border-radius: 14px; }
+:root[data-os="android"] .ann-addform { padding: 10px 12px; }
+:root[data-os="android"] .ann-newin { flex: 1 1 100%; height: 52px; border: 0; border-radius: 16px; background: var(--md-surface-container); }
+:root[data-os="android"] .ann-newin:focus { padding-left: 16px; border: 0; background: var(--md-surface-container); box-shadow: inset 0 0 0 2px var(--md-primary); }
+:root[data-os="android"] .ann-addform .btn { flex: 1 1 0; }
+
+/* talk live card: the same card, the push-to-talk button morphs to a rounded square while held */
+:root[data-os="android"] .tk-ptt { transition: transform var(--t-fast) var(--ease), border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease); }
+:root[data-os="android"] .tk-ptt[aria-pressed="true"] { transform: none; border-radius: 36px; }
+:root[data-os="android"] .tk-group { border: 0; border-radius: var(--r-lg); background: var(--md-card); }
+
+/* tablet (AT_Announce): composer | phrases from 1024 px; the language group and the button share a row */
+@media (min-width: 744px) {
+  :root[data-os="android"] .ann-page > .phd .phd-r { align-self: stretch; justify-content: space-between; }
+  :root[data-os="android"] .ann-page > .phd .phd-r .spchip { order: -1; }
+  :root[data-os="android"] .ann-card { padding: 16px; }
+  :root[data-os="android"] .ann-lang { flex: 1 1 260px; }
+  :root[data-os="android"] .ann-cta { flex: 0 0 auto; min-width: 200px; }
+  :root[data-os="android"] .ann-text { min-height: 200px; }
+}
+@media (min-width: 1024px) {
+  :root[data-os="android"] .ann-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+}
