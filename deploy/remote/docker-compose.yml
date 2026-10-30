@@ -1,6 +1,10 @@
-# Remote deployment: speaker service + Cloudflare Tunnel on a VM, speaker reached through the ESP32 relay.
+# Remote deployment: speaker service + self-hosted MQTT broker + Cloudflare Tunnel on a VM; the speaker is
+# reached through the ESP32 relay, which connects to the broker over wss:// through the tunnel.
 #
-#   cp deploy/remote/.env.example deploy/remote/.env   # fill in, chmod 600
+#   cp deploy/remote/.env.example deploy/remote/.env                 # fill in, chmod 600
+#   cp deploy/remote/mosquitto/acl.example deploy/remote/mosquitto/acl
+#   sh deploy/remote/mosquitto/add-user.sh speaker-service           # same password as MQTT_PASSWORD in .env
+#   sh deploy/remote/mosquitto/add-user.sh relay-1                   # the relay's own login
 #   docker compose -f deploy/remote/docker-compose.yml up -d --build
 #
 # Every value below is a placeholder. Real hostnames, broker credentials and tunnel tokens go in .env
@@ -14,9 +18,9 @@ services:
     environment:
       SPEAKER_TRANSPORT: mqtt
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}        # e.g. https://speaker-media.example.com (the tunnel hostname)
-      MQTT_HOST: ${MQTT_HOST}                    # e.g. broker.example.com
-      MQTT_PORT: ${MQTT_PORT:-8883}
-      MQTT_TLS: "true"
+      MQTT_HOST: mosquitto                       # the broker below, over the compose network
+      MQTT_PORT: "1883"
+      MQTT_TLS: "false"
       MQTT_USERNAME: ${MQTT_USERNAME}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
       MQTT_BASE_TOPIC: ${MQTT_BASE_TOPIC:-speaker-relay/speaker-relay}
@@ -27,6 +31,17 @@ services:
     # use an SSH tunnel (ssh -L 8090:127.0.0.1:8090 vm) or put it behind Cloudflare Access.
     ports:
       - "127.0.0.1:8090:8090"
+    depends_on:
+      - mosquitto
+
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    restart: unless-stopped
+    # No published ports: the service uses 1883 inside this network, and cloudflared forwards the
+    # relay's wss:// hostname to 9001.
+    volumes:
+      - ./mosquitto:/mosquitto/config   # mosquitto.conf (in git), acl and passwd (local only, see add-user.sh)
+      - mosquitto-data:/mosquitto/data
 
   cloudflared:
     image: cloudflare/cloudflared:2025.10.0   # pin to a current release
@@ -36,6 +51,8 @@ services:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       - speaker-service
+      - mosquitto
 
 volumes:
   speaker-data:
+  mosquitto-data:

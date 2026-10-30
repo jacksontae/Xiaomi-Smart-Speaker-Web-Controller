@@ -147,29 +147,33 @@ curl -X POST localhost:8090/youtube -H "Authorization: Bearer $TOKEN" -H 'Conten
 curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"shuffle":true,"repeat":"all"}'
 ```
 
-## Remote deployment (ESP32 relay + cloud MQTT + Cloudflare Tunnel)
+## Remote deployment (ESP32 relay + self-hosted MQTT + Cloudflare Tunnel)
 
 Use this when the service runs somewhere other than the speaker's LAN (e.g. a VM without a fixed IP).
+Everything runs on the VM: the service, a Mosquitto broker and `cloudflared`. Nothing is published on
+the VM's own ports; the relay reaches the broker over `wss://` through the tunnel.
 
 ```
-[VM: speaker-service] --MQTT/TLS--> [cloud broker] <--MQTT/TLS-- [ESP32 relay] --Cast--> [speaker]
-         ^                                                                                  |
-         +------------- HTTPS (Cloudflare Tunnel, signed media URLs) <----------------------+
+[ESP32 relay] --wss://mqtt.example.com--> [Cloudflare Tunnel] --> [mosquitto :9001 (WebSocket)]
+      |                                                                   ^ :1883 (compose network)
+      +--Cast--> [speaker] --HTTPS (signed media URLs)--> [tunnel] --> [speaker-service]
 ```
 
-1. **Broker.** Create a managed MQTT broker with TLS (HiveMQ Cloud, EMQX Cloud, ...). Make two
-   credentials, one for the relay and one for the service, and if the broker supports ACLs limit
-   both to `<base_topic>/#`.
-2. **Relay.** Flash `firmware/` to an ESP32 next to the speaker (see `firmware/README.md`), enter the
-   broker host, port 8883, TLS and the relay's credentials, and upload the broker's CA with
-   `POST /api/mqtt-ca`. Its base topic defaults to `speaker-relay/<device-name>`.
-3. **Tunnel.** Create a Cloudflare Tunnel with a public hostname (e.g. `speaker-media.example.com`)
-   pointing at `http://speaker-service:8090`. The speaker only needs the signed media paths, so
-   restrict the hostname to the path `^/(tts\.mp3|yt/[^/]+)$`; reach the web UI over SSH or behind
-   Cloudflare Access instead of publishing it.
-4. **Service.** `cp deploy/remote/.env.example deploy/remote/.env`, fill it in (`PUBLIC_BASE_URL` =
-   the tunnel hostname, `MQTT_*` = the service's credentials and the relay's base topic), then
+1. **Broker logins.** `cp deploy/remote/mosquitto/acl.example deploy/remote/mosquitto/acl`, then
+   `sh deploy/remote/mosquitto/add-user.sh speaker-service` and `sh deploy/remote/mosquitto/add-user.sh relay-1`
+   (one login per relay; the ACL limits each relay to its own base topic). Anonymous clients are refused.
+2. **Tunnel.** Create a Cloudflare Tunnel with two public hostnames:
+   `speaker.example.com` → `http://speaker-service:8090` (web UI and the signed media paths) and
+   `mqtt.example.com` → `http://mosquitto:9001` (Cloudflare carries WebSockets; it terminates TLS).
+3. **Service.** `cp deploy/remote/.env.example deploy/remote/.env`, fill it in (`PUBLIC_BASE_URL` =
+   `https://speaker.example.com`, `MQTT_PASSWORD` = the `speaker-service` password), then
    `docker compose -f deploy/remote/docker-compose.yml up -d --build`.
+4. **Relay.** Flash `firmware/` to an ESP32 next to the speaker (see `firmware/README.md`) and set the
+   broker to `wss://mqtt.example.com` with the `relay-1` login. The firmware trusts the public root CAs
+   Cloudflare uses; no CA upload is needed. ESP8266 can't do MQTT over WebSocket.
+
+A managed broker (HiveMQ Cloud, EMQX Cloud, ...) still works: point `MQTT_HOST`/`MQTT_PORT`/`MQTT_TLS` at it
+instead of the `mosquitto` service, and give the relay its host, port 8883 and TLS.
 
 Settings can also live in `config.json` (`"transport": "mqtt"`, an `mqtt` block, `public_base_url`).
 The environment variables `SPEAKER_TRANSPORT`, `PUBLIC_BASE_URL`, `MQTT_HOST`, `MQTT_PORT`, `MQTT_TLS`,
@@ -211,7 +215,7 @@ store.py               SQLite: ผู้ใช้ session เพลย์ลิ�
 player.py              คิวเพลง (ลำดับเล่น shuffle repeat)
 static/                หน้าเว็บควบคุม
 speakerctl             จัดการ LaunchAgent บน macOS
-deploy/                template ของ LaunchAgent · deploy/remote/ = Docker Compose สำหรับ VM (service + cloudflared)
+deploy/                template ของ LaunchAgent · deploy/remote/ = Docker Compose สำหรับ VM (service + Mosquitto + cloudflared)
 tests/                 pytest + ลำโพงจำลอง (ไม่ต้องมีลำโพงจริง)
 firmware/              firmware ESP32 / ESP8266 (PlatformIO) ตัวกลางสั่งลำโพงในวง LAN
 config.example.json    ตัวอย่างไฟล์ตั้งค่า (คัดลอกเป็น config.json)
