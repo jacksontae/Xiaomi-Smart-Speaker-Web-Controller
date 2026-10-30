@@ -11,6 +11,7 @@
 
 #include "cast_client.h"
 #include "config.h"
+#include "mqtt_ws.h"
 #include "platform.h"
 
 #if defined(ESP8266)
@@ -36,6 +37,11 @@ SecureClient mqttSecure;
 #endif
 PubSubClient mqtt;
 String mqttCa;  // PEM kept alive for WiFiClientSecure, which stores only the pointer
+#if RELAY_HAS_MQTT_TLS
+WsMqtt mqttWs;  // used instead of PubSubClient when the broker is a ws:// or wss:// URL
+extern const char mqtt_roots_pem_start[] asm("_binary_certs_mqtt_roots_pem_start");  // public root CAs
+#endif
+bool mqttOverWs = false;
 bool setupMode = false;
 uint32_t lastMqttTry = 0;
 uint32_t lastStatus = 0;
@@ -336,7 +342,8 @@ static void handleSetupPage() {
     page += field("device_name", "Device name", config.deviceName);
     page += field("speaker_host", "Speaker IP (blank = find automatically)", config.speakerHost);
     page += field("speaker_name", "Speaker name to pick (blank = first found)", config.speakerName);
-    page += field("mqtt_host", "MQTT broker host (blank = off)", config.mqttHost);
+    page += field("mqtt_host", "MQTT broker host, or wss://host/path for MQTT over WebSocket (blank = off)",
+                  config.mqttHost);
     page += field("mqtt_port", "MQTT port", String(config.mqttPort));
     page += field("mqtt_user", "MQTT user", config.mqttUser);
     page += field("mqtt_pass", "MQTT password", "", "password");
@@ -387,15 +394,29 @@ static void startSetupMode() {
 
 // ---------- MQTT ----------
 
+static bool mqttConnected() {
+#if RELAY_HAS_MQTT_TLS
+    if (mqttOverWs) return mqttWs.connected();
+#endif
+    return mqtt.connected();
+}
+
 static void publishJson(const String& topic, JsonDocument& doc, bool retained = false) {
     String body;
     serializeJson(doc, body);
-    if (!mqtt.publish(topic.c_str(), body.c_str(), retained))
+    bool ok;
+#if RELAY_HAS_MQTT_TLS
+    if (mqttOverWs)
+        ok = mqttWs.publish(topic, body, retained);
+    else
+#endif
+        ok = mqtt.publish(topic.c_str(), body.c_str(), retained);
+    if (!ok)
         Serial.printf("[mqtt] publish to %s failed (%u bytes, connected=%d)\n", topic.c_str(), body.length(),
-                      mqtt.connected());
+                      mqttConnected());
 }
 
-static void onMqtt(char* topic, byte* payload, unsigned int len) {
+static void onMqtt(char*, byte* payload, unsigned int len) {
     JsonDocument in;
     JsonDocument out;
     String err;
@@ -414,6 +435,29 @@ static void onMqtt(char* topic, byte* payload, unsigned int len) {
 
 static void setupMqtt() {
     if (!config.mqttHost.length()) return;
+    if (config.mqttHost.startsWith("ws://") || config.mqttHost.startsWith("wss://")) {
+#if RELAY_HAS_MQTT_TLS
+        mqttOverWs = true;
+        // A CA uploaded with /api/mqtt-ca wins; otherwise the built-in public roots (Let's Encrypt, Google
+        // Trust Services, SSL.com, DigiCert) cover a Cloudflare Tunnel hostname.
+        File f = LittleFS.open("/mqtt_ca.pem", "r");
+        if (f) {
+            mqttCa = f.readString();
+            f.close();
+        }
+        String base = config.baseTopic();
+        bool ok = mqttWs.begin(config.mqttHost, config.mqttUser, config.mqttPass, config.deviceName, base + "/online",
+                               base + "/cmd", mqttCa.length() ? mqttCa.c_str() : mqtt_roots_pem_start,
+                               [](const String&, const String& payload) {
+                                   onMqtt(nullptr, (byte*)payload.c_str(), payload.length());
+                               });
+        Serial.printf("[mqtt] %s %s\n", ok ? "connecting to" : "can't start client for", config.mqttHost.c_str());
+#else
+        Serial.println("[mqtt] MQTT over WebSocket needs an ESP32; MQTT disabled");
+        config.mqttHost = "";
+#endif
+        return;
+    }
     if (config.mqttTls) {
 #if RELAY_HAS_MQTT_TLS
         File f = LittleFS.open("/mqtt_ca.pem", "r");
@@ -443,6 +487,16 @@ static void setupMqtt() {
 
 static void loopMqtt() {
     if (!config.mqttHost.length() || WiFi.status() != WL_CONNECTED) return;
+#if RELAY_HAS_MQTT_TLS
+    if (mqttOverWs) {
+        mqttWs.loop();
+        if (mqttWs.takeJustConnected()) {
+            Serial.printf("[mqtt] connected; listening on %s/cmd\n", config.baseTopic().c_str());
+            lastStatus = millis() - kStatusEveryMs;  // publish status right away
+        }
+        return;
+    }
+#endif
     if (mqtt.connected()) {
         mqtt.loop();
         return;
@@ -462,11 +516,11 @@ static void loopMqtt() {
     mqtt.publish(willTopic.c_str(), "true", true);
     mqtt.subscribe((base + "/cmd").c_str(), 1);
     Serial.printf("[mqtt] connected; listening on %s/cmd\n", base.c_str());
-    lastStatus = 0;  // publish status right away
+    lastStatus = millis() - kStatusEveryMs;  // publish status right away
 }
 
 static void publishStatus() {
-    if (!mqtt.connected()) return;
+    if (!mqttConnected()) return;
     uint32_t since = millis() - lastStatus;
     bool changed = cast.changes() != publishedChanges;
     if (since < kStatusEveryMs && !(changed && since >= kStatusMinGapMs)) return;

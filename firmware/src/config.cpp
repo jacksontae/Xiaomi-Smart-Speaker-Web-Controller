@@ -103,6 +103,10 @@ bool applyConfig(Config& c, JsonVariantConst in, String& err) {
     }
     if (!in["mqtt_tls"].isNull()) next.mqttTls = in["mqtt_tls"].as<bool>();
 #if defined(ESP8266)
+    if (next.mqttHost.startsWith("ws://") || next.mqttHost.startsWith("wss://")) {
+        err = "MQTT over WebSocket needs an ESP32";
+        return false;
+    }
     if (next.mqttTls) {
         err = "MQTT over TLS needs an ESP32 (ESP8266 has RAM for only the speaker's TLS session)";
         return false;
