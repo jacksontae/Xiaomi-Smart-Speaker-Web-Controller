@@ -82,15 +82,30 @@ function unmountView() {
   view = null;
 }
 
-/** Mount a view result into `host`. `mod.render(ctx)` may return a node, a view object, or a Promise of either. */
-async function mount(mod, host, made, seq) {
+/** Mount a view result into `host`. `mod.render(ctx)` may return a node, a view object, or a Promise of either.
+ *  Resolves 'vt' when the swap ran as a view transition (a crossfade: no blank frame, the header stays put),
+ *  true for a plain swap, false when a newer navigation won. */
+async function mount(mod, host, made, seq, animate) {
   let v = await mod.render(made.ctx);
   if (seq !== renderSeq) { made.abort.abort(); if (v && v.destroy) v.destroy(); return false; }
   if (v instanceof Node) v = { node: v };
   view = { ...v, abort: made.abort, cleanups: made.cleanups };
-  host.replaceChildren(v.node);
+  const swap = () => { host.replaceChildren(v.node); window.scrollTo(0, 0); };
+  let how = true;
+  if (animate && document.startViewTransition && !motionReduced() && host.firstElementChild) {
+    // the old and new page headers share a name, so a header of the same shape stays still and only its text fades
+    const name = (root) => { const hd = root && root.querySelector('.phd'); if (hd) hd.style.viewTransitionName = 'page-head'; return hd; };
+    const oldHead = name(host.firstElementChild);
+    try {
+      const vt = document.startViewTransition(() => { if (oldHead) oldHead.style.viewTransitionName = ''; swap(); name(v.node); });
+      vt.finished.finally(() => { const hd = v.node.querySelector('.phd'); if (hd) hd.style.viewTransitionName = ''; });
+      vt.ready.catch(() => {}); // skipped (e.g. hidden tab): the DOM update still runs
+      await vt.updateCallbackDone;
+      how = 'vt';
+    } catch { if (v.node.parentNode !== host) swap(); }
+  } else swap();
   if (v.onStatus && (state.status || state.statusErr)) callStatus(v);
-  return true;
+  return how;
 }
 function callStatus(v) {
   try { v.onStatus({ status: state.status, error: state.statusErr }); } catch (e) { console.error(e); }
@@ -181,7 +196,7 @@ async function render(animate = true) {
     if (seq !== renderSeq) return;
     unmountView();
     closeAllSheets();
-    ok = await mount(mod, shell.content, makeCtx(params, route), seq);
+    ok = await mount(mod, shell.content, makeCtx(params, route), seq, animate);
   } catch (e) {
     console.error(e);
     // The module never reached the server (Brave Shields and ad blockers block some script names), the network
@@ -196,10 +211,10 @@ async function render(animate = true) {
   }
   if (!ok) return;
   document.title = `${t(route.label)} · ${t('app.name')}`;
-  window.scrollTo(0, 0);
   shell.onScroll();
   const page = shell.content.firstElementChild;
-  if (animate && page && !motionReduced()) { page.classList.remove('enter'); void page.offsetWidth; page.classList.add('enter'); }
+  // browsers without view transitions: a short fade that never starts from blank
+  if (animate && page && ok !== 'vt' && !motionReduced()) { page.classList.remove('enter'); void page.offsetWidth; page.classList.add('enter'); }
 }
 window.addEventListener('hashchange', () => { if (shell) render(); });
 

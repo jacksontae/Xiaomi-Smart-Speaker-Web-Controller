@@ -8,3 +8,8 @@
   d.dataset.theme = theme === 'light' || theme === 'dark' ? theme : (mq('(prefers-color-scheme: dark)') ? 'dark' : 'light');
   d.dataset.motion = motion === 'on' ? 'reduce' : motion === 'off' ? 'full' : (mq('(prefers-reduced-motion: reduce)') ? 'reduce' : 'full');
 })();
+// Behave like an app on phones: iOS Safari ignores maximum-scale for pinch, so cancel its pinch gestures here
+// (scrolling and text selection are untouched; html/body set touch-action: manipulation against double-tap zoom).
+['gesturestart', 'gesturechange', 'gestureend'].forEach(function (t) {
+  document.addEventListener(t, function (e) { e.preventDefault(); }, { passive: false });
+});

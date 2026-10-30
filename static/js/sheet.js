@@ -2,7 +2,7 @@
 //   openSheet(): phone = bottom sheet you can drag down to dismiss; iPad/desktop = centred dialog (same content).
 //   popover():   anchored menu/list for large screens (speaker picker, account menu). On phones use openSheet.
 // Both: Esc closes, focus moves in and returns to the opener, background is inert (<dialog>.showModal for sheets).
-import { h, iconBtn } from './ui.js';
+import { h, iconBtn, rehomeToasts } from './ui.js';
 import { t } from './i18n.js';
 import { motionReduced } from './prefs.js';
 
@@ -39,7 +39,9 @@ export function openSheet({ title, build, onClose, label }) {
     closed = true;
     open.splice(open.indexOf(api), 1);
     dlg.classList.add('closing');
+    rehomeToasts(dlg);
     setTimeout(() => {
+      rehomeToasts(dlg); // a toast shown during the closing animation may have moved in again
       dlg.close();
       dlg.remove();
       if (opener && opener.isConnected) opener.focus({ preventScroll: true });
@@ -112,9 +114,12 @@ export function popover({ anchor, build, place = 'below', label, className = '' 
   anchor.setAttribute('aria-expanded', 'true');
   const onDown = (e) => { if (!el.contains(e.target) && !anchor.contains(e.target)) closePopover(); };
   const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); closePopover(true); } };
-  setTimeout(() => document.addEventListener('pointerdown', onDown, true));
+  const me = { el, anchor, onDown, onKey };
+  // armed a tick later so the opening click doesn't close it; skip if it was closed in between (else the listener
+  // leaks and the next pointerdown anywhere, even inside the next popover, closes that one)
+  setTimeout(() => { if (pop === me) document.addEventListener('pointerdown', onDown, true); });
   document.addEventListener('keydown', onKey, true);
-  pop = { el, anchor, onDown, onKey };
+  pop = me;
   const first = el.querySelector('[aria-selected="true"], a[href], button:not([disabled])');
   if (first) first.focus({ preventScroll: true });
   return el;

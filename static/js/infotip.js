@@ -123,7 +123,8 @@ function open(btn, title, build, pinned) {
   panel.addEventListener('pointerleave', onLeave);
   // a click inside a hover-opened panel (e.g. Copy) keeps it open after the pointer leaves
   panel.addEventListener('pointerdown', () => { if (cur && !cur.pinned) { cur.pinned = true; panel.classList.add('pinned'); } });
-  setTimeout(() => document.addEventListener('pointerdown', onDown, true));
+  // armed a tick later (not by the opening tap); skipped if closed in between, else the listener would leak
+  setTimeout(() => { if (cur && cur.panel === panel) document.addEventListener('pointerdown', onDown, true); });
   document.addEventListener('keydown', onKey, true);
   addEventListener('scroll', reflow, true);
   addEventListener('resize', reflow);

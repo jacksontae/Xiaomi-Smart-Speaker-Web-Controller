@@ -484,5 +484,7 @@ function send(file, duration, progress) {
 }
 
 function autofocus(input) {
-  if (!matchMedia('(pointer: coarse)').matches && !input.value) setTimeout(() => input.isConnected && input.focus({ preventScroll: true }), 60);
+  // focus the search once the page is shown (the router may swap it in a frame or two later, in a view transition)
+  const focusIn = (n = 0) => { if (input.isConnected) input.focus({ preventScroll: true }); else if (n < 30) requestAnimationFrame(() => focusIn(n + 1)); };
+  if (!matchMedia('(pointer: coarse)').matches && !input.value) setTimeout(focusIn, 60);
 }

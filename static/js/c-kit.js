@@ -68,14 +68,18 @@ export const badge = (text, tone = '') => h('span', { class: `c-badge ${tone}`.t
 let seq = 0;
 /**
  * A row with a title, an optional line under it and a control on the right.
- * settingRow({ title, sub, control, lead }) -> element; `control` gets aria-labelledby/-describedby.
+ * settingRow({ title, sub, control, lead }) -> element; an input/select `control` gets aria-labelledby/-describedby,
+ * a button only aria-describedby (it keeps its own name).
  */
 export function settingRow({ title, sub, control, lead, cls = '' }) {
   const id = `cr${++seq}`;
   const subEl = sub != null ? h('span', { class: 'c-sub', id: `${id}-s` }, sub) : null;
-  if (control && control.matches && control.matches('input,button,select')) {
+  if (control && control.matches && control.matches('input,select')) {
     control.setAttribute('aria-labelledby', `${id}-t`);
     if (subEl) control.setAttribute('aria-describedby', subEl.id);
+  } else if (control && control.matches && control.matches('button')) {
+    // a button keeps its own name ("Edit", "Use"); the row only describes what it acts on
+    control.setAttribute('aria-describedby', [`${id}-t`, subEl && subEl.id].filter(Boolean).join(' '));
   }
   return h('div', { class: `c-row ${cls}`.trim() }, lead || null,
     h('div', { class: 'c-row-tx' }, h('span', { class: 'c-title', id: `${id}-t` }, title), subEl),

@@ -305,7 +305,10 @@ export async function render(ctx) {
 
   if (wanted) {
     if (query && !groupsBox.querySelector(`#topic-${wanted.id}`)) { input.value = ''; onSearch(); }
-    requestAnimationFrame(() => {
+    // the router may swap pages inside a view transition (a frame or two later): wait until the page is shown
+    let tries = 0;
+    requestAnimationFrame(function open() {
+      if (!node.isConnected) { if (++tries < 30) requestAnimationFrame(open); return; }
       const el = node.querySelector(`#topic-${wanted.id}`);
       if (!el) return;
       el.scrollIntoView({ block: 'start', behavior: ctx.motionReduced() ? 'auto' : 'smooth' });

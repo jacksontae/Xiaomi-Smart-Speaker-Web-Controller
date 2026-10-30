@@ -35,6 +35,7 @@ register({
     'set.token': 'API token', 'set.tokenHelp': 'For the ESP32 or scripts. View or change it with ./speakerctl token on the computer running the service.',
     'set.port': 'Port', 'set.portHelp': 'The service restarts by itself after a change.',
     'set.badPort': 'The port must be a number from 1024 to 65535.', 'set.badCache': 'Keep at least 1 track.',
+    'set.badName': 'Give the speaker a name.', 'set.badIp': 'Enter an IP address like 192.0.2.10 or a hostname like speaker.example.com.',
     'set.device': 'On this device', 'set.app': 'App settings', 'set.appHelp': 'Language and appearance are set per device, not on the speaker.',
     'set.saved': 'Speaker settings saved', 'set.restarting': (p) => `Saved. The service is restarting on port ${p}; open the app at the new port.`,
     'set.lang.th': 'ไทย', 'set.lang.en': 'English', 'set.lang.ja': '日本語',
@@ -65,6 +66,7 @@ register({
     'set.token': 'API token', 'set.tokenHelp': 'สำหรับ ESP32 หรือสคริปต์ ดูหรือเปลี่ยนด้วย ./speakerctl token บนเครื่องที่รัน service',
     'set.port': 'พอร์ต', 'set.portHelp': 'เปลี่ยนแล้ว service จะเริ่มใหม่เอง',
     'set.badPort': 'พอร์ตต้องเป็นตัวเลข 1024 ถึง 65535', 'set.badCache': 'ต้องเก็บอย่างน้อย 1 เพลง',
+    'set.badName': 'ตั้งชื่อลำโพงก่อน', 'set.badIp': 'ใส่ IP เช่น 192.0.2.10 หรือชื่อโฮสต์ เช่น speaker.example.com',
     'set.device': 'บนอุปกรณ์นี้', 'set.app': 'ตั้งค่าแอป', 'set.appHelp': 'ภาษาและลักษณะของแอปตั้งแยกในแต่ละเครื่อง ไม่ได้ตั้งที่ลำโพง',
     'set.saved': 'บันทึกการตั้งค่าลำโพงแล้ว', 'set.restarting': (p) => `บันทึกแล้ว service กำลังเริ่มใหม่ที่พอร์ต ${p} เปิดแอปที่พอร์ตใหม่`,
     'set.lang.th': 'ไทย', 'set.lang.en': 'English', 'set.lang.ja': '日本語',
@@ -72,6 +74,10 @@ register({
 });
 
 const TTS = ['th', 'en', 'ja'];
+const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const HOST = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+/** IPv4 or a DNS hostname; an all-digits-and-dots value must be a real IPv4 address. */
+const validAddress = (v) => (/^[\d.]+$/.test(v) ? IPV4.test(v) : HOST.test(v));
 
 export function render(ctx) {
   ctx.css('views/c-common.css');
@@ -89,10 +95,27 @@ export function render(ctx) {
     err, h('div', { class: 'c-cols c-reorder' }, left, right), bottomSave);
   let statusLine = null;
   let relayLine = null;
+  // inline field errors (built with the speaker card); server 422s naming a field land here too
+  const fieldErr = {
+    speaker_name: h('p', { class: 'small form-error', id: 's-name-err' }),
+    speaker_ip: h('p', { class: 'small form-error', id: 's-ip-err' }),
+  };
+  const fieldInput = {};
+  function showFieldErr(k, msg) {
+    fieldErr[k].textContent = msg || '';
+    const input = fieldInput[k];
+    if (!input) return;
+    if (msg) { input.setAttribute('aria-invalid', 'true'); input.setAttribute('aria-describedby', fieldErr[k].id); }
+    else { input.removeAttribute('aria-invalid'); input.removeAttribute('aria-describedby'); }
+  }
 
   const val = (k) => (k in draft ? draft[k] : saved[k]);
   function set(k, v) {
     if (JSON.stringify(v) === JSON.stringify(saved[k])) delete draft[k]; else draft[k] = v;
+    paintDirty();
+  }
+  // the draft is the source of truth for Save (busy() re-enables buttons when it finishes, so repaint after it)
+  function paintDirty() {
     const dirty = Object.keys(draft).length > 0;
     saveBtn.disabled = !dirty; bottomSave.disabled = !dirty; dirtyNote.hidden = !dirty;
   }
@@ -100,11 +123,15 @@ export function render(ctx) {
   function build() {
     const isCast = saved.transport === 'cast';
     /* speaker */
-    const name = h('input', { class: 'input', value: val('speaker_name'), maxLength: 64, oninput: () => set('speaker_name', name.value.trim()) });
+    const name = h('input', { class: 'input', value: val('speaker_name'), maxLength: 64, oninput: () => { showFieldErr('speaker_name', ''); set('speaker_name', name.value.trim()); } });
+    fieldInput.speaker_name = name;
+    showFieldErr('speaker_name', '');
     statusLine = h('p', { class: 'small', role: 'status' }, t('set.checking'));
-    const speakerKids = [h('div', { class: 'c-stack' }, h('label', { class: 'c-title', for: 's-name' }, t('set.name')), Object.assign(name, { id: 's-name' }), statusLine)];
+    const speakerKids = [h('div', { class: 'c-stack' }, h('label', { class: 'c-title', for: 's-name' }, t('set.name')), Object.assign(name, { id: 's-name' }), statusLine, fieldErr.speaker_name)];
     if (isCast) {
-      const ip = h('input', { class: 'input', id: 's-ip', value: val('speaker_ip'), inputMode: 'decimal', autocomplete: 'off', spellcheck: false, oninput: () => set('speaker_ip', ip.value.trim()) });
+      const ip = h('input', { class: 'input', id: 's-ip', value: val('speaker_ip'), inputMode: 'decimal', autocomplete: 'off', spellcheck: false, oninput: () => { showFieldErr('speaker_ip', ''); set('speaker_ip', ip.value.trim()); } });
+      fieldInput.speaker_ip = ip;
+      showFieldErr('speaker_ip', '');
       const found = h('div', { class: 's-found', 'aria-live': 'polite' });
       const scan = h('button', { type: 'button', class: 'btn tonal wide' }, cIcon('scan', 'sm'), t('set.scan'));
       scan.addEventListener('click', () => busy(scan, async () => {
@@ -117,6 +144,7 @@ export function render(ctx) {
               const use = h('button', { type: 'button', class: 'btn', disabled: cur }, t(cur ? 'set.inUse' : 'set.use'));
               use.addEventListener('click', () => {
                 name.value = s.name; ip.value = s.ip;
+                showFieldErr('speaker_name', ''); showFieldErr('speaker_ip', '');
                 set('speaker_name', s.name); set('speaker_ip', s.ip);
                 found.replaceChildren(h('p', { class: 'small' }, t('set.willConnect', s.ip)));
               });
@@ -125,7 +153,7 @@ export function render(ctx) {
           scan.lastChild.textContent = t('set.scanAgain');
         } catch (e) { found.replaceChildren(h('p', { class: 'small form-error' }, errorText(e, ctx.user))); }
       }));
-      speakerKids.push(h('div', { class: 'c-stack' }, h('label', { class: 'c-title', for: 's-ip' }, t('set.ip')), ip, h('p', { class: 'small' }, t('set.ipHelp')), scan, found));
+      speakerKids.push(h('div', { class: 'c-stack' }, h('label', { class: 'c-title', for: 's-ip' }, t('set.ip')), ip, fieldErr.speaker_ip, h('p', { class: 'small' }, t('set.ipHelp')), scan, found));
     }
     const speakerCard = card(...speakerKids);
 
@@ -190,6 +218,16 @@ export function render(ctx) {
 
   async function save() {
     err.textContent = '';
+    const bad = [];
+    if ('speaker_name' in draft && !draft.speaker_name) bad.push(['speaker_name', t('set.badName')]);
+    if ('speaker_ip' in draft && !validAddress(draft.speaker_ip)) bad.push(['speaker_ip', t('set.badIp')]);
+    Object.keys(fieldErr).forEach((k) => showFieldErr(k, ''));
+    if (bad.length) {
+      bad.forEach(([k, msg]) => showFieldErr(k, msg));
+      err.textContent = bad[0][1];
+      fieldInput[bad[0][0]]?.focus();
+      return;
+    }
     if ('port' in draft && !(draft.port >= 1024 && draft.port <= 65535)) { err.textContent = t('set.badPort'); return; }
     if ('cache_keep' in draft && !(draft.cache_keep >= 1)) { err.textContent = t('set.badCache'); return; }
     const body = { ...draft };
@@ -198,12 +236,18 @@ export function render(ctx) {
         const r = await ctx.api('/settings', { body });
         saved = r.settings;
         draft = {};
-        set('port', saved.port); // refresh the dirty state
         toast(r.restart ? t('set.restarting', saved.port) : t('set.saved'), 'ok', { ms: r.restart ? 9000 : 3800 });
         build();
         ctx.refreshStatus();
-      } catch (e) { err.textContent = errorText(e, ctx.user); }
+      } catch (e) {
+        err.textContent = errorText(e, ctx.user);
+        // the server validates too (422): put its detail under the field it names
+        const d = e.status === 422 ? e.detail || '' : '';
+        const k = /speaker_ip|\bip\b|address|host/i.test(d) ? 'speaker_ip' : /speaker_name|name/i.test(d) ? 'speaker_name' : null;
+        if (k) showFieldErr(k, e.detail);
+      }
     }));
+    paintDirty();
   }
 
   ctx.api('/settings', { signal: ctx.signal }).then((s) => { saved = s; build(); }).catch((e) => { err.textContent = ctx.fail(e); });
