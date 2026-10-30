@@ -15,6 +15,7 @@ register({
     'login.forgotHelp': 'Ask the owner to set a new password for you on the Members page, then sign in with it.',
     'login.empty': 'Enter your username and password first.',
     'login.bad': 'Wrong username or password.',
+    'login.pkNeeded': 'Owners sign in with a passkey here. Use your passkey to sign in.',
     'login.disabled': 'This account is turned off. Ask the owner to turn it back on.',
     'login.lock': (w) => `Too many wrong tries. You can try again in ${w}.`,
     'login.google': 'Continue with Google', 'login.gNotMember': 'This Google account isn\'t a member here. Ask the owner to invite you.',
@@ -30,6 +31,7 @@ register({
     'login.forgotHelp': 'ให้เจ้าของตั้งรหัสใหม่ให้ในหน้าสมาชิก แล้วเข้าสู่ระบบด้วยรหัสนั้น',
     'login.empty': 'ใส่ชื่อผู้ใช้และรหัสผ่านก่อน',
     'login.bad': 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',
+    'login.pkNeeded': 'เจ้าของต้องเข้าสู่ระบบด้วยพาสคีย์ ใช้พาสคีย์ของคุณเพื่อเข้าสู่ระบบ',
     'login.disabled': 'บัญชีนี้ถูกปิดใช้งาน ขอให้เจ้าของเปิดให้อีกครั้ง',
     'login.lock': (w) => `ลองผิดหลายครั้งเกินไป ลองใหม่ได้ในอีก ${w}`,
     'login.google': 'ดำเนินการต่อด้วย Google', 'login.gNotMember': 'บัญชี Google นี้ยังไม่ได้เป็นสมาชิกที่นี่ ขอให้เจ้าของเชิญคุณก่อน',
@@ -157,7 +159,7 @@ export async function render(ctx) {
       setBusy(false);
       if (e.status === 429) { lock(e.retryAfter); return; }
       const disabled = e.status === 401 && /disabled/i.test(e.detail);
-      showError(errorText(e, null, { 401: t(disabled ? 'login.disabled' : 'login.bad') }), e.status === 401 && !disabled ? [pw.input] : []);
+      showError(errorText(e, null, { 401: t(disabled ? 'login.disabled' : 'login.bad'), 403: t('login.pkNeeded') }), e.status === 401 && !disabled ? [pw.input] : []);
       pw.input.select();
     }
   }
@@ -183,7 +185,7 @@ export async function render(ctx) {
       if (sheet) sheet.close();
       if (e.message === 'cancelled') return;
       if (e.message && e.message.startsWith('gsi-')) { showError(t('login.gUnavailable')); return; }
-      showError(errorText(e, null, { 401: t('login.gNotMember'), 403: t('login.gNotMember') }));
+      showError(errorText(e, null, { 401: t('login.gNotMember'), 403: t('login.pkNeeded') }));
     }
   }
   async function passkey(btn) {

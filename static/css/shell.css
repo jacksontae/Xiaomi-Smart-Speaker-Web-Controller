@@ -11,8 +11,8 @@
 .page.wide { max-width: 528px; }
 
 /* page header: big title + actions. Sticky on large screens; on phones the top bar takes over when scrolled. */
-.phd { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; }
-.phd .pt { min-width: 0; font-size: 32px; line-height: 1.25; font-weight: 700; overflow-wrap: anywhere; }
+.phd { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; min-height: 44px; }
+.phd .pt { min-width: 0; font-size: 32px; line-height: 1.25; font-weight: 700; overflow-wrap: break-word; }
 .phd-back { display: inline-flex; align-items: center; gap: 2px; min-height: 44px; margin: -8px 0 -4px -6px; font-size: 15px; font-weight: 600; text-decoration: none; }
 .phd-r { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 0 1 auto; }
 .phd-r .spchip, .phd-r .help-btn { display: none; }

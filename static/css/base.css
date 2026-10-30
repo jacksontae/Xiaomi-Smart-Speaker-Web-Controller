@@ -297,3 +297,6 @@ dialog.ov::backdrop { background: transparent; }
 /* avatar */
 .avatar.lg { width: 56px; height: 56px; font-size: 22px; }
 .avatar { width: 44px; height: 44px; flex: 0 0 auto; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--avatar); color: var(--on-avatar); font-weight: 600; font-size: 17px; }
+
+/* While a sheet or dialog is open, toasts move to the top so they never cover its buttons. */
+body:has(dialog.ov[open]) .toasts { bottom: auto; top: calc(16px + var(--safe-t)); }
