@@ -174,7 +174,12 @@ async function render(animate = true) {
     mod = await route.load();
   } catch (e) {
     console.error(e);
-    if (seq === renderSeq) toast(t('err.network'), 'err');
+    // The module never reached the server (Brave Shields and ad blockers block some script names) or the
+    // network dropped: say so on the page, with a retry, instead of leaving it empty.
+    if (seq !== renderSeq) return;
+    unmountView();
+    shell.content.replaceChildren(h('div', { class: 'page' }, h('p', { class: 'lead' }, t('err.module')),
+      h('button', { class: 'btn primary', type: 'button', onclick: () => render(false) }, icon('refresh', 'sm'), t('app.retry'))));
     return;
   }
   if (seq !== renderSeq) return;
