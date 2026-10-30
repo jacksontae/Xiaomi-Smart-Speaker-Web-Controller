@@ -275,6 +275,15 @@
   flex-grow: 1.2; border-radius: 22px; background: var(--md-primary); color: var(--md-on-primary); font-weight: 700;
 }
 :root[data-os="android"] .seg > button:focus-visible { outline-offset: 2px; }
+/* the chosen radio shows a check before its label (boards A_Prefs, A_MemberEdit); the shape is the sprite's i-check.
+   Not on tabs (the Announce mode switch) nor on segments that carry their own icon (Music sources).
+   The chosen one never truncates ("Follow system" + check); the others give way */
+:root[data-os="android"] .seg > button[role="radio"][aria-checked="true"]:not(:has(svg)) { min-width: max-content; }
+:root[data-os="android"] .seg > button[role="radio"][aria-checked="true"]:not(:has(svg))::before {
+  --ck: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  content: ""; display: inline-block; width: 18px; height: 18px; margin-right: 6px; vertical-align: -4px; background: currentColor;
+  -webkit-mask: var(--ck) center / 18px no-repeat; mask: var(--ck) center / 18px no-repeat;
+}
 /* the shared Announce mode switch (css/views/a-modeswitch.css) gives the track glass: not on Android */
 :root[data-os="android"] .seg.ann-seg { background: transparent; border: 0; }
 :root[data-os="android"] .seg.ann-seg > button[aria-selected="true"] { color: var(--md-on-primary); }
