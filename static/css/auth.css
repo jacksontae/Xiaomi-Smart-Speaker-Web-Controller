@@ -3,7 +3,7 @@
 
 .screen { min-height: 100dvh; }
 .auth { position: relative; min-height: 100dvh; overflow: hidden; isolation: isolate; }
-.auth-bloom { position: absolute; z-index: -1; inset: 0; pointer-events: none; animation: auth-bloom .6s var(--ease-out) both, auth-breath 7s ease-in-out .6s infinite; }
+.auth-bloom { position: absolute; z-index: -1; inset: 0; pointer-events: none; animation: auth-bloom .6s var(--ease-out) both, auth-breath 7s ease-in-out .6s 3; /* not infinite: keeps phones cool on an idle sign-in screen */ }
 .auth-bloom::before, .auth-bloom::after { content: ""; position: absolute; inset: 0; }
 .auth-bloom::before { background: radial-gradient(120% 60% at 0% 0%, var(--amb-a) 0%, transparent 60%); }
 .auth-bloom::after { background: radial-gradient(90% 50% at 100% 100%, var(--amb-b) 0%, transparent 65%); }
