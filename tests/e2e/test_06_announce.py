@@ -58,7 +58,7 @@ def test_announce_say_offline_speaker(make_app, seeded, drained):
     assert req and req[0].post_data_json == {"text": "Meeting in five minutes", "lang": "en", "volume": 0.4}
     expect(text).to_have_value("Meeting in five minutes")  # kept so it can be sent again
     # Schedule link
-    p.locator("a.ann-seglink", has_text="Schedule").click()
+    p.get_by_role("tablist", name="Announce mode").get_by_role("tab", name="Schedule").click()
     app.header("Announce")
     assert app.hash() == "#/schedule"
     app.clean("announce say")

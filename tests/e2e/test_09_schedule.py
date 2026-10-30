@@ -69,7 +69,8 @@ def test_schedule_say_crud_ipad(make_app, seeded, drained):
              "switching a repeating schedule to Once uses the date the field shows")
     f.locator("button[type=submit]").click()
     app.page.wait_for_timeout(500)
-    app.soft(lambda: expect(f.locator(".form-error")).to_have_text(""),
+    # a successful save closes the sheet (so the editor's error line is gone, not empty)
+    app.soft(lambda: expect(p.locator("dialog.ov[open] .sc-form")).to_have_count(0),
              "saving 'Once' without touching the (pre-filled) date works")
     if p.locator("dialog.ov[open]").count():
         f.locator("input.sc-datein").fill(shown)  # workaround: touch the date field
@@ -92,7 +93,7 @@ def test_schedule_say_crud_ipad(make_app, seeded, drained):
     expect(p.locator(".sc-row", has_text=name)).to_have_count(0)
     assert not any(x["name"] == name for x in seeded.get("/schedules")["items"])
     # "Announce now" in the mode switch goes back
-    p.locator(".sc-mode-ph, .sc-mode-lg").locator("visible=true").get_by_role("radio", name="Announce now").click()
+    p.get_by_role("tablist", name="Announce mode").get_by_role("tab", name="Announce now").click()
     app.header("Announce")
     assert app.hash() == "#/announce"
     app.clean("schedule ipad")
