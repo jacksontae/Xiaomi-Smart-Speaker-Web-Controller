@@ -51,6 +51,18 @@ from auth import (
     verify_password,
 )
 from google_signin import GoogleVerifier, InvalidToken, KeysUnavailable
+from passkeys import (
+    Challenges,
+    PasskeyError,
+    authentication_options,
+    b64url_decode,
+    challenge_of,
+    new_user_handle,
+    registration_options,
+    relying_party,
+    verify_authentication,
+    verify_registration,
+)
 from player import Queue
 from store import SESSION_TTL, Conflict, Store
 from transport import SPEAKER_ERRORS, TransportError, make_transport
@@ -143,6 +155,9 @@ class Settings(BaseModel):
     # OAuth client id (Google Cloud console, type "Web application") for Sign in with Google. Not a secret.
     google_client_id: str | None = None
     google_signin: bool = False  # the owner's switch; members still have to link their Google account first
+    # Passkeys work only when public_base_url is https:// (or http://localhost); its host is the RP ID.
+    passkey_signin: bool = True
+    passkey_required_for_admins: bool = False  # admins who have a passkey can't sign in any other way
 
     @field_validator("public_base_url")
     @classmethod
@@ -283,6 +298,7 @@ transport = make_transport(settings)
 db = Store(DATA_PATH)
 login_throttle = Throttle(limit=5, window=300)
 google_verifier = GoogleVerifier()
+passkey_challenges = Challenges()
 ZONE = local_zone()
 
 
@@ -848,6 +864,15 @@ class GoogleBody(BaseModel):
     credential: str = Field(max_length=8192)  # the ID token from Google Identity Services
 
 
+class PasskeyBody(BaseModel):
+    credential: dict  # the PublicKeyCredential from the browser, as JSON (base64url fields)
+    name: str | None = None  # registration only; defaults to "Passkey"
+
+
+class PasskeyName(BaseModel):
+    name: str
+
+
 class PasswordBody(BaseModel):
     current: str
     new: str
@@ -964,16 +989,6 @@ def google_enabled():
     return settings.google_signin and bool(settings.google_client_id)
 
 
-def sign_in_methods(user_id):
-    """The ways this member can sign in right now (a linked Google account counts only while it's switched on)."""
-    user, methods = db.get_user(user_id), set()
-    if db.password_hash(user_id):
-        methods.add("password")
-    if user and user["google_email"] and google_enabled():
-        methods.add("google")
-    return methods
-
-
 async def google_claims(credential, ip):
     """Verified claims of a Google ID token; failed attempts count against the IP like wrong passwords."""
     if not google_enabled():
@@ -992,16 +1007,54 @@ async def google_claims(credential, ip):
     return claims
 
 
+def current_rp():
+    """The passkey relying party, or None while passkeys are switched off or the origin can't use them."""
+    return relying_party(settings.public_base_url, settings.speaker_name) if settings.passkey_signin else None
+
+
+def passkey_rp():
+    rp = current_rp()
+    if rp is None:
+        raise HTTPException(409, "Passkeys are off; they need passkey_signin and an https:// public_base_url")
+    return rp
+
+
+def passkey_policy_applies(user):
+    return settings.passkey_required_for_admins and user["role"] == "admin" and current_rp() is not None
+
+
+def refuse_without_passkey(user, ip, how):
+    """Sign-ins other than a passkey call this: an admin with a passkey must use it while the owner requires it."""
+    if passkey_policy_applies(user) and user["has_passkey"]:
+        db.log("system", "login failed", f"{user['username']} ({how}) needs a passkey, from {ip}")
+        raise HTTPException(403, "Owners sign in with a passkey")
+
+
+def sign_in_methods(user):
+    """The ways this member can sign in right now."""
+    methods = set()
+    if db.password_hash(user["id"]):
+        methods.add("password")
+    if user["google_email"] and google_enabled():
+        methods.add("google")
+    if user["has_passkey"] and current_rp() is not None:
+        methods.add("passkey")
+    return methods
+
+
 # --- Accounts ---
 
 @app.get("/auth/state")
 async def auth_state(who: Caller):
+    user = who.user if who else None
     state = {
-        "needs_setup": db.user_count() == 0, "user": who.user if who else None,
-        "methods": {"password": True, "google": google_enabled()},
+        "needs_setup": db.user_count() == 0, "user": user,
+        "methods": {"password": True, "google": google_enabled(), "passkey": current_rp() is not None},
     }
     if google_enabled():
         state["google_client_id"] = settings.google_client_id
+    if user and passkey_policy_applies(user) and not user["has_passkey"]:
+        state["passkey_required"] = True  # signed in with a password; the UI should ask for a passkey now
     return state
 
 
@@ -1040,6 +1093,7 @@ async def login(body: LoginBody, request: Request, response: Response):
         db.log("system", "login failed", f"{username} from {ip}")
         raise HTTPException(401, "This account is disabled" if ok else "Wrong username or password")
     login_throttle.clear(key)
+    refuse_without_passkey(user, ip, "password")
     user = start_session(request, response, user["id"])
     db.log(user["display_name"], "login ok", f"from {ip}")
     return {"user": user}
@@ -1058,9 +1112,47 @@ async def login_google(body: GoogleBody, request: Request, response: Response):
     if user["disabled"]:
         db.log("system", "login failed", f"{user['username']} (Google) from {ip}")
         raise HTTPException(401, "This account is disabled")
+    refuse_without_passkey(user, ip, "Google")
     db.link_google(user["id"], claims["sub"], claims["email"])  # keep the shown email current
     user = start_session(request, response, user["id"])
     db.log(user["display_name"], "login ok", f"with Google from {ip}")
+    return {"user": user}
+
+
+@app.post("/auth/passkey/options")
+async def passkey_login_options():
+    """Options for navigator.credentials.get(); any passkey registered here may answer."""
+    rp = passkey_rp()
+    return {"publicKey": authentication_options(rp, passkey_challenges.issue("login"))}
+
+
+@app.post("/auth/passkey/verify")
+async def passkey_login(body: PasskeyBody, request: Request, response: Response):
+    rp, ip = passkey_rp(), client_ip(request)
+    key = (ip, "#passkey")
+    throttled(key)
+    credential = body.credential
+    try:
+        challenge = challenge_of(credential)
+        passkey_challenges.take(challenge, "login")
+        passkey = db.passkey_by_credential(str(credential.get("id", "")))
+        if passkey is None:
+            raise PasskeyError("This passkey isn't registered here")
+        handle = (credential.get("response") or {}).get("userHandle")
+        if handle and b64url_decode(str(handle)) != b64url_decode(passkey["user_handle"]):
+            raise PasskeyError("This passkey belongs to another account")
+        sign_count = await asyncio.to_thread(verify_authentication, rp, credential, challenge, passkey)
+    except (PasskeyError, ValueError) as e:  # ValueError: a userHandle that isn't base64url
+        db.log("system", "login failed", f"passkey: {e} from {ip}"[:300], coalesce=VOLUME_COALESCE)
+        raise HTTPException(401, str(e)[:200]) from e
+    user = db.get_user(passkey["user_id"])
+    if user["disabled"]:
+        db.log("system", "login failed", f"{user['username']} (passkey) from {ip}")
+        raise HTTPException(401, "This account is disabled")
+    login_throttle.clear(key)
+    db.use_passkey(passkey["id"], sign_count)
+    user = start_session(request, response, user["id"])
+    db.log(user["display_name"], "login ok", f"with a passkey from {ip}")
     return {"user": user}
 
 
@@ -1119,12 +1211,74 @@ async def unlink_google(who: SignedIn):
     user = account_of(who)
     if not user["google_email"]:
         raise HTTPException(404, "No Google account is linked")
-    if not sign_in_methods(user["id"]) - {"google"}:
+    if not sign_in_methods(user) - {"google"}:
         raise HTTPException(409, "This is your only way to sign in; set a password or add another method first")
     email = user["google_email"]
     user = db.unlink_google(user["id"])
     record(who, "google unlink", email)
     return user
+
+
+@app.post("/me/passkeys/options")
+async def passkey_register_options(who: SignedIn):
+    """Options for navigator.credentials.create(); the member's existing passkeys are excluded."""
+    user, rp = account_of(who), passkey_rp()
+    handle, existing = db.passkey_handles(user["id"])
+    handle = handle or new_user_handle()
+    challenge = passkey_challenges.issue("register", user["id"], handle)
+    return {"publicKey": registration_options(rp, challenge, handle, user["username"], user["display_name"], existing)}
+
+
+@app.post("/me/passkeys")
+async def add_passkey(body: PasskeyBody, who: SignedIn):
+    user, rp = account_of(who), passkey_rp()
+    name = clean_text(body.name or "Passkey", "name", 64)
+    try:
+        challenge = challenge_of(body.credential)
+        handle = passkey_challenges.take(challenge, "register", user["id"])
+        cred = await asyncio.to_thread(verify_registration, rp, body.credential, challenge)
+    except PasskeyError as e:
+        raise HTTPException(400, str(e)[:200]) from e
+    try:
+        passkey = db.add_passkey(user["id"], handle, name, cred)
+    except Conflict as e:
+        raise HTTPException(409, str(e)) from e
+    record(who, "passkey add", name)
+    return passkey
+
+
+@app.get("/me/passkeys")
+async def list_passkeys(who: SignedIn):
+    return db.list_passkeys(account_of(who)["id"])
+
+
+@app.patch("/me/passkeys/{passkey_id}")
+async def rename_passkey(passkey_id: int, body: PasskeyName, who: SignedIn):
+    name = clean_text(body.name, "name", 64)
+    passkey = db.rename_passkey(account_of(who)["id"], passkey_id, name)
+    if passkey is None:
+        raise HTTPException(404, "No such passkey")
+    record(who, "passkey rename", name)
+    return passkey
+
+
+@app.delete("/me/passkeys/{passkey_id}", status_code=204)
+async def delete_passkey(passkey_id: int, who: SignedIn):
+    user = account_of(who)
+    names = {p["id"]: p["name"] for p in db.list_passkeys(user["id"])}
+    if passkey_policy_applies(user):
+        reason = "Owners must keep at least one passkey"
+    elif not sign_in_methods(user) - {"passkey"}:
+        reason = "This is your only way to sign in; set a password or add another method first"
+    else:
+        reason = None
+    try:
+        gone = db.delete_passkey(user["id"], passkey_id, keep_one=reason is not None)
+    except Conflict as e:
+        raise HTTPException(409, reason) from e
+    if not gone:
+        raise HTTPException(404, "No such passkey")
+    record(who, "passkey remove", names.get(passkey_id))
 
 
 # --- Members ---
@@ -1330,6 +1484,13 @@ async def update_settings(changes: dict, background: BackgroundTasks, who: Who):
         new = merge_settings(settings, changes)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+    if new.passkey_required_for_admins and not settings.passkey_required_for_admins:
+        if not new.passkey_signin or relying_party(new.public_base_url, new.speaker_name) is None:
+            raise HTTPException(409, "Passkeys aren't available; they need passkey_signin and an https:// "
+                                     "public_base_url")
+        missing = db.admins_without_passkey()
+        if missing:
+            raise HTTPException(409, f"Every admin needs a passkey first; missing: {', '.join(missing)}")
     old, settings = settings, new
     save_settings(new)
     record(who, "settings change", describe_changes(changes))

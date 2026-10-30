@@ -8,6 +8,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 import google_signin
+import store
 
 CLIENT_ID = "1234-test.apps.googleusercontent.com"
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -120,7 +121,7 @@ def test_unreachable_keys_are_reported_separately(app, monkeypatch):
 
 def test_state_offers_google_only_when_switched_on(anon, app, client):
     make_user()
-    assert anon.get("/auth/state").json()["methods"] == {"password": True, "google": False}
+    assert anon.get("/auth/state").json()["methods"]["google"] is False
     assert client.post("/settings", json={"google_signin": True}).status_code == 422  # needs a client id
     assert client.post("/settings", json={"google_client_id": "not a client id"}).status_code == 422
     r = client.post("/settings", json={"google_client_id": CLIENT_ID})
@@ -260,7 +261,6 @@ def test_member_list_shows_linked_email(client, app):
 def test_migrates_version_2_database_in_place(tmp_path):
     import sqlite3
 
-    import store
 
     path = tmp_path / "v2.db"
     db = sqlite3.connect(path)
@@ -276,7 +276,7 @@ def test_migrates_version_2_database_in_place(tmp_path):
     db.close()
 
     upgraded = store.Store(path)
-    assert upgraded.schema_version() == 3
+    assert upgraded.schema_version() == store.SCHEMA_VERSION
     user = upgraded.list_users()[0]
     assert user["username"] == "kept" and user["google_email"] is None
     upgraded.link_google(user["id"], "42", "kept@example.com")

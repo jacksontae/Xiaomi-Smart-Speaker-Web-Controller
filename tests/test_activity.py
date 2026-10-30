@@ -1,6 +1,8 @@
 import pytest
 from conftest import PASSWORD, make_user, session_client
 
+import store
+
 
 def actions(client):
     return [(e["actor"], e["action"], e["detail"]) for e in client.get("/activity").json()]
@@ -143,7 +145,7 @@ def test_activity_is_admin_only(as_role, role):
 
 
 def test_schema_version_and_tables(app):
-    assert app.db.schema_version() == 3
+    assert app.db.schema_version() == store.SCHEMA_VERSION
     with app.db.tx() as db:
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"users", "sessions", "playlists", "playlist_items", "phrases", "activity", "schedules"} <= tables

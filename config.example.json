@@ -11,6 +11,8 @@
   "api_token": null,
   "google_client_id": "change-me.apps.googleusercontent.com",
   "google_signin": false,
+  "passkey_signin": true,
+  "passkey_required_for_admins": false,
   "mqtt": {
     "host": "broker.example.com",
     "port": 8883,

@@ -1,4 +1,4 @@
-"""SQLite storage for accounts, sessions, playlists, quick phrases, schedules and the activity log.
+"""SQLite storage for accounts, passkeys, sessions, playlists, quick phrases, schedules and the activity log.
 
 Every call opens its own short-lived connection, so the store is safe to use from any thread.
 Writes that check-then-change (last-admin guard, reorder, first-run setup) run in one
@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 SESSION_TTL = 30 * 24 * 3600
 ACTIVITY_KEEP = 5000
 
@@ -98,7 +98,24 @@ MIGRATIONS = {
         "ALTER TABLE users ADD COLUMN google_email TEXT",
         "CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)",
     ],
+    4: [  # passkeys (WebAuthn credentials); credential_id is base64url, public_key the COSE key
+        """CREATE TABLE IF NOT EXISTS passkeys (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            credential_id TEXT NOT NULL UNIQUE,
+            public_key BLOB NOT NULL,
+            sign_count INTEGER NOT NULL DEFAULT 0,
+            user_handle TEXT NOT NULL,
+            name TEXT NOT NULL,
+            transports TEXT NOT NULL DEFAULT '[]',
+            backed_up INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            last_used_at TEXT
+        )""",
+        "CREATE INDEX IF NOT EXISTS passkeys_user ON passkeys(user_id)",
+    ],
 }
+USER_SELECT = "SELECT u.*, EXISTS (SELECT 1 FROM passkeys p WHERE p.user_id = u.id) AS has_passkey FROM users u"
 SCHEDULE_COLUMNS = (
     "name", "enabled", "action", "text", "lang", "playlist_id", "shuffle", "volume", "time", "days", "date",
     "next_run", "last_run", "last_result",
@@ -151,6 +168,17 @@ def _user(row):
         "id": row["id"], "username": row["username"], "display_name": row["display_name"], "role": row["role"],
         "disabled": bool(row["disabled"]), "created_at": row["created_at"], "last_login_at": row["last_login_at"],
         "google_email": row["google_email"],
+        "has_passkey": bool(row["has_passkey"]),
+    }
+
+
+def _passkey(row):
+    """A passkey as shown to its owner (no key material)."""
+    if row is None:
+        return None
+    return {
+        "id": row["id"], "name": row["name"], "backed_up": bool(row["backed_up"]),
+        "created_at": row["created_at"], "last_used_at": row["last_used_at"],
     }
 
 
@@ -220,20 +248,20 @@ class Store:
             "INSERT INTO users (username, display_name, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
             (username, display_name, role, password_hash, now_iso()),
         )
-        return _user(db.execute("SELECT * FROM users WHERE id = ?", (cur.lastrowid,)).fetchone())
+        return _user(db.execute(f"{USER_SELECT} WHERE u.id = ?", (cur.lastrowid,)).fetchone())
 
     def list_users(self):
         with self.tx() as db:
-            return [_user(r) for r in db.execute("SELECT * FROM users ORDER BY id")]
+            return [_user(r) for r in db.execute(f"{USER_SELECT} ORDER BY u.id")]
 
     def get_user(self, user_id):
         with self.tx() as db:
-            return _user(db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+            return _user(db.execute(f"{USER_SELECT} WHERE u.id = ?", (user_id,)).fetchone())
 
     def credentials(self, username):
         """(user, password_hash) for a login attempt, or (None, None)."""
         with self.tx() as db:
-            row = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+            row = db.execute(f"{USER_SELECT} WHERE u.username = ?", (username,)).fetchone()
         return (_user(row), row["password_hash"]) if row else (None, None)
 
     def password_hash(self, user_id):
@@ -244,7 +272,7 @@ class Store:
     def update_user(self, user_id, changes):
         """Apply {display_name, role, password_hash, disabled}; refuses to drop the last enabled admin."""
         with self.tx(immediate=True) as db:
-            row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            row = db.execute(f"{USER_SELECT} WHERE u.id = ?", (user_id,)).fetchone()
             if row is None:
                 return None
             losing_admin = row["role"] == "admin" and not row["disabled"] and (
@@ -256,11 +284,11 @@ class Store:
                 if column in changes:
                     value = int(changes[column]) if column == "disabled" else changes[column]
                     db.execute(f"UPDATE users SET {column} = ? WHERE id = ?", (value, user_id))
-            return _user(db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+            return _user(db.execute(f"{USER_SELECT} WHERE u.id = ?", (user_id,)).fetchone())
 
     def delete_user(self, user_id):
         with self.tx(immediate=True) as db:
-            row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            row = db.execute(f"{USER_SELECT} WHERE u.id = ?", (user_id,)).fetchone()
             if row is None:
                 return False
             if row["role"] == "admin" and not row["disabled"]:
@@ -278,7 +306,7 @@ class Store:
 
     def user_by_google(self, sub):
         with self.tx() as db:
-            return _user(db.execute("SELECT * FROM users WHERE google_sub = ?", (sub,)).fetchone())
+            return _user(db.execute(f"{USER_SELECT} WHERE u.google_sub = ?", (sub,)).fetchone())
 
     def link_google(self, user_id, sub, email):
         """Link (or refresh the email of) a Google account; one Google account belongs to one member."""
@@ -287,16 +315,80 @@ class Store:
             if owner and owner["id"] != user_id:
                 raise Conflict("This Google account is already linked to another member")
             db.execute("UPDATE users SET google_sub = ?, google_email = ? WHERE id = ?", (sub, email, user_id))
-            return _user(db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+            return _user(db.execute(f"{USER_SELECT} WHERE u.id = ?", (user_id,)).fetchone())
 
     def unlink_google(self, user_id):
         with self.tx() as db:
             db.execute("UPDATE users SET google_sub = NULL, google_email = NULL WHERE id = ?", (user_id,))
-            return _user(db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+            return _user(db.execute(f"{USER_SELECT} WHERE u.id = ?", (user_id,)).fetchone())
 
     def mark_login(self, user_id):
         with self.tx() as db:
             db.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (now_iso(), user_id))
+
+    # --- Passkeys ---
+
+    def list_passkeys(self, user_id):
+        with self.tx() as db:
+            rows = db.execute("SELECT * FROM passkeys WHERE user_id = ? ORDER BY id", (user_id,)).fetchall()
+        return [_passkey(r) for r in rows]
+
+    def passkey_handles(self, user_id):
+        """(user handle, [{credential_id, transports}]) for the registration options of this member."""
+        with self.tx() as db:
+            rows = db.execute(
+                "SELECT credential_id, transports, user_handle FROM passkeys WHERE user_id = ? ORDER BY id", (user_id,)
+            ).fetchall()
+        existing = [{"credential_id": r["credential_id"], "transports": json.loads(r["transports"])} for r in rows]
+        return (rows[0]["user_handle"] if rows else None), existing
+
+    def passkey_by_credential(self, credential_id):
+        """The stored credential (with key material and user_id) for a sign-in, or None."""
+        with self.tx() as db:
+            row = db.execute("SELECT * FROM passkeys WHERE credential_id = ?", (credential_id,)).fetchone()
+        return dict(row) if row else None
+
+    def add_passkey(self, user_id, user_handle, name, cred):
+        with self.tx(immediate=True) as db:
+            if db.execute("SELECT 1 FROM passkeys WHERE credential_id = ?", (cred["credential_id"],)).fetchone():
+                raise Conflict("This passkey is already registered")
+            cur = db.execute(
+                "INSERT INTO passkeys (user_id, credential_id, public_key, sign_count, user_handle, name, transports,"
+                " backed_up, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, cred["credential_id"], cred["public_key"], cred["sign_count"], user_handle, name,
+                 json.dumps(cred["transports"]), int(cred["backed_up"]), now_iso()),
+            )
+            return _passkey(db.execute("SELECT * FROM passkeys WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+    def use_passkey(self, passkey_id, sign_count):
+        with self.tx() as db:
+            db.execute(
+                "UPDATE passkeys SET sign_count = ?, last_used_at = ? WHERE id = ?", (sign_count, now_iso(), passkey_id)
+            )
+
+    def rename_passkey(self, user_id, passkey_id, name):
+        with self.tx() as db:
+            db.execute("UPDATE passkeys SET name = ? WHERE id = ? AND user_id = ?", (name, passkey_id, user_id))
+            row = db.execute("SELECT * FROM passkeys WHERE id = ? AND user_id = ?", (passkey_id, user_id)).fetchone()
+        return _passkey(row)
+
+    def delete_passkey(self, user_id, passkey_id, keep_one=False):
+        """Remove one of this member's passkeys; with keep_one, refuse to remove the last one."""
+        with self.tx(immediate=True) as db:
+            if not db.execute("SELECT 1 FROM passkeys WHERE id = ? AND user_id = ?", (passkey_id, user_id)).fetchone():
+                return False
+            if keep_one and db.execute("SELECT COUNT(*) FROM passkeys WHERE user_id = ?", (user_id,)).fetchone()[0] < 2:
+                raise Conflict("This is your last passkey")
+            db.execute("DELETE FROM passkeys WHERE id = ?", (passkey_id,))
+            return True
+
+    def admins_without_passkey(self):
+        with self.tx() as db:
+            rows = db.execute(
+                "SELECT username FROM users u WHERE role = 'admin' AND disabled = 0"
+                " AND NOT EXISTS (SELECT 1 FROM passkeys p WHERE p.user_id = u.id) ORDER BY id"
+            ).fetchall()
+        return [r[0] for r in rows]
 
     # --- Sessions (only the sha256 of the cookie value is stored) ---
 
@@ -313,7 +405,8 @@ class Store:
         """(user, expires_at) for a live session of an enabled user, else (None, None)."""
         with self.tx() as db:
             row = db.execute(
-                "SELECT u.*, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
+                "SELECT u.*, s.expires_at, EXISTS (SELECT 1 FROM passkeys p WHERE p.user_id = u.id) AS has_passkey"
+                " FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
                 (token_hash,),
             ).fetchone()
         if row is None or row["expires_at"] < time.time() or row["disabled"]:
