@@ -36,6 +36,7 @@ is installed.
 | `test_10_help.py` | search, deep links, Try it per role |
 | `test_11_roles_matrix.py` | every page × role × device, forbidden pages, API role gating |
 | `test_12_network.py` | aborted requests: list load, write, boot, blocked page script, status, inline save |
+| `test_14_this_device.py` | "This device" output: picker, a playlist's TTS item played in the browser (signed link, no speaker call), seek, notes, persistence, viewer |
 
 ## Run it
 
