@@ -1,17 +1,27 @@
 // App chrome around the views: phone top bar + tab bar, iPad/desktop sidebar, speaker control, account menu,
-// change-password sheet, page header helper. Built once per sign-in / language change by app.js.
+// change-password sheet, page header helper. Built once per sign-in / language / look change by app.js.
+// Android look (<html data-os="android">, css/android.css): the same markup restyled as a floating navigation pill
+// (phone) and a navigation rail (tablet), plus three small branches here: the account avatar in the phone top bar,
+// the Now Bar (a playing capsule above the nav on every page but Now) and short rail labels.
 import { h, icon, avatar, field, passwordInput, busy, tip, toast } from './ui.js';
 import { t, roleLabel } from './i18n.js';
 import { ROUTES, RANK, href } from './routes.js';
 import { openSheet, popover, isPhone, closePopover } from './sheet.js';
 import { errorText } from './api.js';
+import { isAndroid } from './prefs.js';
+import { aicon } from './a-icons.js';
+
+// Android rail: labels that fit an 80 px column (the phone tab label, else a short form, else the full name)
+const RAIL_LABEL = { settings: 'rail.settings', activity: 'rail.activity' };
 
 /**
- * buildShell({ user, api, onSignOut, onPickSpeaker }) -> shell
- * shell.el, shell.content (the <main>), shell.markRoute(route), shell.setSpeakers(list), shell.header(opts),
- * shell.accountItems(close) (menu rows reused by the phone Account page), shell.destroy()
+ * buildShell({ user, api, onSignOut, onPickSpeaker, onCommand }) -> shell
+ * shell.el, shell.content (the <main>), shell.markRoute(route), shell.setSpeakers(list), shell.setStatus(status, err),
+ * shell.header(opts), shell.accountItems(close) (menu rows reused by the phone Account page), shell.destroy()
+ * onCommand(path): POST a speaker command (Now Bar play/pause) and refresh /status; resolves when done.
  */
-export function buildShell({ user, api, onSignOut, onPickSpeaker }) {
+export function buildShell({ user, api, onSignOut, onPickSpeaker, onCommand }) {
+  const android = isAndroid();
   const can = (role) => RANK[user.role] >= RANK[role];
   const routes = ROUTES.filter((r) => can(r.min));
   const main = routes.filter((r) => r.section === 'main');
@@ -33,19 +43,21 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker }) {
 
   /* ----- iPad / desktop: sidebar ----- */
   const navThumb = h('span', { class: 'nv-thumb', 'aria-hidden': 'true' });
-  const link = (r) => h('a', { class: 'nv', href: href(r.id), dataset: { route: r.id } }, icon(r.icon), h('span', {}, t(r.label)));
+  const link = (r) => h('a', { class: 'nv', href: href(r.id), dataset: { route: r.id } }, icon(r.icon),
+    h('span', {}, t(android ? r.tab || RAIL_LABEL[r.id] || r.label : r.label)));
   const sbn = h('nav', { class: 'sbn', 'aria-label': t('nav.main') }, navThumb, main.map(link),
     admin.length ? [h('span', { class: 'sb-sep', 'aria-hidden': 'true' }), admin.map(link)] : null);
   const sideSpeaker = h('div', { class: 'sb-spk' });
   const uchip = h('button', {
     type: 'button', class: 'uchip', 'aria-haspopup': 'dialog', 'aria-expanded': 'false',
     'aria-label': t('acct.aria', user.display_name, roleLabel(user.role)),
-    onclick: () => popover({ anchor: uchip, place: 'above', label: t('acct.my'), className: 'acct', build: (el, close) => el.append(h('div', { class: 'menu' }, accountItems(close))) }),
+    onclick: () => popover({ anchor: uchip, place: android ? 'right' : 'above', label: t('acct.my'), className: 'acct', build: (el, close) => el.append(h('div', { class: 'menu' }, accountItems(close))) }),
   }, avatar(user), h('span', { class: 'uchip-tx' }, h('span', { class: 'uchip-n' }, user.display_name), h('span', { class: 'uchip-r' }, roleLabel(user.role))), icon('chev-up', 'sm chev'));
   const sidebar = h('aside', { class: 'sb' }, sideSpeaker, sbn, h('div', { class: 'sb-foot' }, uchip));
 
   const content = h('main', { class: 'main', id: 'view', tabindex: '-1' });
-  const el = h('div', { class: 'shell' }, sidebar, topbar, content, tabdock);
+  const nowbar = android ? buildNowBar() : null;
+  const el = h('div', { class: 'shell' }, sidebar, topbar, content, nowbar && nowbar.el, tabdock);
 
   /* ----- account menu (desktop/iPad popover, phone Account page) ----- */
   function accountItems(close = () => {}) {
@@ -169,15 +181,76 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker }) {
   const chip = () => { const c = speakerChip('chip'); chips.push(c); return c; };
 
   /* ----- page header helper (ctx.header) ----- */
-  function header({ title, back, actions } = {}) {
+  // sub: optional one-line context under the title (the Android big header's "Speaker is playing …" line)
+  function header({ title, back, actions, sub } = {}) {
     barTitle.textContent = title || '';
+    // Android phone: back is an arrow icon button at the left of the top bar, so it stays reachable after scrolling
+    if (android && back && isPhone()) {
+      const label = back.label || t('nav.back');
+      barLeft.replaceChildren(tip(h('a', { class: 'iconbtn bar-back', href: back.href, 'aria-label': label }, icon('arrow-back')), label));
+    }
     const helpBtn = h('a', { class: 'iconbtn glassy help-btn', href: href('help'), 'aria-label': t('nav.help') }, icon('help'));
     tip(helpBtn, t('nav.help'));
     return h('header', { class: 'phd' },
-      h('div', { style: { minWidth: 0 } },
-        back ? h('a', { class: 'phd-back', href: back.href }, icon('back', 'sm'), back.label || t('nav.back')) : null,
-        h('h1', { class: 'pt' }, title)),
+      h('div', { class: 'phd-l', style: { minWidth: 0 } },
+        back ? h('a', { class: 'phd-back', href: back.href }, icon(android ? 'arrow-back' : 'back', 'sm'), h('span', { class: 'phd-back-tx' }, back.label || t('nav.back'))) : null,
+        h('h1', { class: 'pt' }, title),
+        sub ? h('p', { class: 'phd-sub' }, sub) : null),
       h('div', { class: 'phd-r' }, actions || null, chip(), helpBtn));
+  }
+
+  /* ----- Android: account avatar in the phone top bar (the boards put it top-right, level with the title) ----- */
+  const meTop = () => h('a', { class: 'me-top', href: href('account'), dataset: { route: 'account' }, 'aria-label': t('acct.aria', user.display_name, roleLabel(user.role)) }, avatar(user));
+
+  /* ----- Android Now Bar: what's playing, above the nav pill (phone) or bottom-centre (tablet), on every page but
+           Now. Operators+ only (it carries play/pause); hidden while nothing plays or the speaker is unreachable.
+           Tap the capsule -> Now; the button -> POST /pause or /resume. The equalizer moves only while playing. ----- */
+  function buildNowBar() {
+    const title = h('span', { class: 'nb-t' });
+    const eq = h('span', { class: 'nb-eq', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'));
+    const openA = h('a', { class: 'nb-open', href: href('now'), 'aria-label': t('nb.open') }, eq, title);
+    const btn = h('button', { type: 'button', class: 'nb-btn' });
+    let playing = false;
+    btn.addEventListener('click', () => {
+      if (btn.disabled || !onCommand) return;
+      const path = playing ? '/pause' : '/resume';
+      paint(!playing); // answer the tap now; the next poll confirms
+      busy(btn, () => onCommand(path)).catch(() => {});
+    });
+    const bar = h('div', { class: 'nowbar', role: 'region', 'aria-label': t('nav.now'), hidden: true }, openA, btn);
+    function paint(on) {
+      playing = on;
+      bar.classList.toggle('paused', !on);
+      const label = t(on ? 'nb.pause' : 'nb.resume');
+      btn.replaceChildren(aicon(on ? 'pause' : 'play', 'sm'));
+      btn.setAttribute('aria-label', label);
+      tip(btn, label);
+    }
+    let visible = false;
+    function update(status, err) {
+      const m = (!err && status && status.media) || {};
+      const active = ['PLAYING', 'BUFFERING', 'PAUSED'].includes(m.state);
+      const announcing = active && m.title === 'Announcement';
+      const q = status && status.queue;
+      const cur = q && q.items && q.items[q.index];
+      const show = active && can('operator') && !!current && current.id !== 'now';
+      if (show) {
+        title.textContent = announcing ? t('nb.announcing') : (m.title || (cur && cur.title) || t('spk.label'));
+        btn.hidden = announcing;
+        if (!btn.disabled) paint(m.state !== 'PAUSED');
+      }
+      if (show !== visible) {
+        visible = show;
+        bar.hidden = !show;
+        document.documentElement.toggleAttribute('data-nowbar', show);
+      }
+    }
+    return { el: bar, update };
+  }
+  let lastStatus = null, lastErr = null;
+  function setStatus(status, err) {
+    lastStatus = status; lastErr = err;
+    if (nowbar) nowbar.update(status, err);
   }
 
   /* ----- current route marking + sliding thumbs ----- */
@@ -195,6 +268,12 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker }) {
       const hb = h('a', { class: 'iconbtn glassy', href: href('help'), 'aria-label': t('nav.help') }, icon('help'));
       barRight.append(tip(hb, t('nav.help')));
     }
+    if (android) {
+      const me = meTop();
+      if ((route.parent || route.id) === 'account') me.setAttribute('aria-current', 'page');
+      barRight.append(me);
+    }
+    if (nowbar) nowbar.update(lastStatus, lastErr);
     placeThumbs(animate);
     closePopover();
   }
@@ -214,16 +293,24 @@ export function buildShell({ user, api, onSignOut, onPickSpeaker }) {
   ro.observe(sbn);
 
   /* ----- scroll: phone top bar background/title, large-screen sticky header ----- */
+  // Android phone: the big One UI header is taller, so the bar takes the title once the big title has gone under it
+  const bigTitleGone = () => {
+    const pt = content.querySelector('.phd .pt');
+    return !pt || pt.getBoundingClientRect().bottom < topbar.offsetHeight;
+  };
   const onScroll = () => {
     const y = window.scrollY;
     document.documentElement.toggleAttribute('data-scrolled', y > 8);
     topbar.dataset.under = String(y > 4);
-    topbar.dataset.title = String(y > 44 && !!barTitle.textContent);
+    topbar.dataset.title = String(!!barTitle.textContent && (android && isPhone() ? y > 8 && bigTitleGone() : y > 44));
   };
   window.addEventListener('scroll', onScroll, { passive: true });
 
   return {
-    el, content, markRoute, setSpeakers, header, accountItems, changePassword, onScroll,
-    destroy() { ro.disconnect(); window.removeEventListener('scroll', onScroll); closePopover(); document.documentElement.removeAttribute('data-scrolled'); },
+    el, content, markRoute, setSpeakers, setStatus, header, accountItems, changePassword, onScroll,
+    destroy() {
+      ro.disconnect(); window.removeEventListener('scroll', onScroll); closePopover();
+      document.documentElement.removeAttribute('data-scrolled'); document.documentElement.removeAttribute('data-nowbar');
+    },
   };
 }
