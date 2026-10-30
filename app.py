@@ -50,6 +50,7 @@ from auth import (
     token_hash,
     verify_password,
 )
+from google_signin import GoogleVerifier, InvalidToken, KeysUnavailable
 from player import Queue
 from store import SESSION_TTL, Conflict, Store
 from transport import SPEAKER_ERRORS, TransportError, make_transport
@@ -76,6 +77,7 @@ SCHEDULE_POLL = 15.0  # seconds between checks for due schedules
 SCHEDULE_GRACE = timedelta(minutes=5)  # a schedule overdue by more than this (service was down) is skipped
 SCHEDULE_NAME_MAX = 80
 YT_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
+GOOGLE_CLIENT_ID_RE = re.compile(r"[A-Za-z0-9.-]+\.apps\.googleusercontent\.com")
 TIME_RE = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 AUDIO_SUFFIXES = {".m4a", ".webm", ".mp3", ".opus", ".ogg", ".mp4", ".aac"}
@@ -138,6 +140,9 @@ class Settings(BaseModel):
     public_base_url: str | None = None
     api_token: str | None = None  # Bearer token for the control API; generated on first run, never served
     mqtt: MqttSettings = Field(default_factory=MqttSettings)
+    # OAuth client id (Google Cloud console, type "Web application") for Sign in with Google. Not a secret.
+    google_client_id: str | None = None
+    google_signin: bool = False  # the owner's switch; members still have to link their Google account first
 
     @field_validator("public_base_url")
     @classmethod
@@ -150,10 +155,26 @@ class Settings(BaseModel):
             raise ValueError("public_base_url must be an http(s) URL like https://speaker.example.com")
         return v
 
+    @field_validator("google_client_id")
+    @classmethod
+    def check_google_client_id(cls, v):
+        if v is None or not v.strip():
+            return None
+        v = v.strip()
+        if not GOOGLE_CLIENT_ID_RE.fullmatch(v):
+            raise ValueError("google_client_id must look like 1234-abc.apps.googleusercontent.com")
+        return v
+
     @model_validator(mode="after")
     def check_transport(self):
         if self.transport == "mqtt" and not self.mqtt.host:
             raise ValueError("transport \"mqtt\" needs mqtt.host (config or MQTT_HOST)")
+        return self
+
+    @model_validator(mode="after")
+    def check_google(self):
+        if self.google_signin and not self.google_client_id:
+            raise ValueError("google_signin needs google_client_id")
         return self
 
 
@@ -261,6 +282,7 @@ settings = load_settings()
 transport = make_transport(settings)
 db = Store(DATA_PATH)
 login_throttle = Throttle(limit=5, window=300)
+google_verifier = GoogleVerifier()
 ZONE = local_zone()
 
 
@@ -822,6 +844,10 @@ class LoginBody(BaseModel):
     password: str
 
 
+class GoogleBody(BaseModel):
+    credential: str = Field(max_length=8192)  # the ID token from Google Identity Services
+
+
 class PasswordBody(BaseModel):
     current: str
     new: str
@@ -934,11 +960,49 @@ def start_session(request, response, user_id):
     return db.get_user(user_id)
 
 
+def google_enabled():
+    return settings.google_signin and bool(settings.google_client_id)
+
+
+def sign_in_methods(user_id):
+    """The ways this member can sign in right now (a linked Google account counts only while it's switched on)."""
+    user, methods = db.get_user(user_id), set()
+    if db.password_hash(user_id):
+        methods.add("password")
+    if user and user["google_email"] and google_enabled():
+        methods.add("google")
+    return methods
+
+
+async def google_claims(credential, ip):
+    """Verified claims of a Google ID token; failed attempts count against the IP like wrong passwords."""
+    if not google_enabled():
+        raise HTTPException(409, "Sign in with Google is turned off")
+    key = (ip, "#google")
+    throttled(key)
+    try:
+        claims = await asyncio.to_thread(google_verifier.verify, credential, settings.google_client_id)
+    except KeysUnavailable as e:
+        login_throttle.clear(key)  # not the caller's fault
+        raise HTTPException(503, "Couldn't reach Google to check the sign-in; try again") from e
+    except InvalidToken as e:
+        db.log("system", "login failed", f"Google: {e} from {ip}"[:300], coalesce=VOLUME_COALESCE)
+        raise HTTPException(401, "Google sign-in failed; try again") from e
+    login_throttle.clear(key)
+    return claims
+
+
 # --- Accounts ---
 
 @app.get("/auth/state")
 async def auth_state(who: Caller):
-    return {"needs_setup": db.user_count() == 0, "user": who.user if who else None}
+    state = {
+        "needs_setup": db.user_count() == 0, "user": who.user if who else None,
+        "methods": {"password": True, "google": google_enabled()},
+    }
+    if google_enabled():
+        state["google_client_id"] = settings.google_client_id
+    return state
 
 
 @app.post("/auth/setup")
@@ -981,6 +1045,25 @@ async def login(body: LoginBody, request: Request, response: Response):
     return {"user": user}
 
 
+@app.post("/auth/google")
+async def login_google(body: GoogleBody, request: Request, response: Response):
+    """Sign in with a linked Google account; there is no sign-up, so an unknown account is refused."""
+    ip = client_ip(request)
+    claims = await google_claims(body.credential, ip)
+    user = db.user_by_google(claims["sub"])
+    if user is None:
+        db.log("system", "login failed", f"Google account {claims['email']} is not linked, from {ip}"[:300])
+        raise HTTPException(401, "This Google account isn't linked to a member; sign in with your password and "
+                                 "link it under Account first")
+    if user["disabled"]:
+        db.log("system", "login failed", f"{user['username']} (Google) from {ip}")
+        raise HTTPException(401, "This account is disabled")
+    db.link_google(user["id"], claims["sub"], claims["email"])  # keep the shown email current
+    user = start_session(request, response, user["id"])
+    db.log(user["display_name"], "login ok", f"with Google from {ip}")
+    return {"user": user}
+
+
 @app.post("/auth/logout")
 async def logout(who: SignedIn, request: Request, response: Response):
     if who.session:
@@ -1017,6 +1100,31 @@ async def change_password(body: PasswordBody, who: SignedIn, request: Request):
     db.delete_sessions(user["id"], keep=who.session)
     record(who, "password change")
     return {"ok": True}
+
+
+@app.post("/me/google")
+async def link_google(body: GoogleBody, who: SignedIn, request: Request):
+    user = account_of(who)
+    claims = await google_claims(body.credential, client_ip(request))
+    try:
+        user = db.link_google(user["id"], claims["sub"], claims["email"])
+    except Conflict as e:
+        raise HTTPException(409, str(e)) from e
+    record(who, "google link", claims["email"])
+    return user
+
+
+@app.delete("/me/google")
+async def unlink_google(who: SignedIn):
+    user = account_of(who)
+    if not user["google_email"]:
+        raise HTTPException(404, "No Google account is linked")
+    if not sign_in_methods(user["id"]) - {"google"}:
+        raise HTTPException(409, "This is your only way to sign in; set a password or add another method first")
+    email = user["google_email"]
+    user = db.unlink_google(user["id"])
+    record(who, "google unlink", email)
+    return user
 
 
 # --- Members ---

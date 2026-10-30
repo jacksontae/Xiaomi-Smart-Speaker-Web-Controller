@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- Sign in with Google: members link their Google account (`POST/DELETE /me/google`) and then sign in with it
+  (`POST /auth/google`); no self-sign-up. ID tokens are checked against Google's keys (`aud`, `iss`, `exp`,
+  `email_verified`, single use). The owner switches it on with `google_client_id` + `google_signin`;
+  `GET /auth/state` reports `methods` and `google_client_id`.
+
 ## [0.2.0] - 2026-10-30
 
 ### Added

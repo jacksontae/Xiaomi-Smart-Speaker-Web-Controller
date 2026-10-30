@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SESSION_TTL = 30 * 24 * 3600
 ACTIVITY_KEEP = 5000
 
@@ -93,6 +93,11 @@ MIGRATIONS = {
         )""",
         "CREATE INDEX IF NOT EXISTS schedules_due ON schedules(enabled, next_run)",
     ],
+    3: [  # Sign in with Google: the account's stable subject id, and its email for display
+        "ALTER TABLE users ADD COLUMN google_sub TEXT",
+        "ALTER TABLE users ADD COLUMN google_email TEXT",
+        "CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)",
+    ],
 }
 SCHEDULE_COLUMNS = (
     "name", "enabled", "action", "text", "lang", "playlist_id", "shuffle", "volume", "time", "days", "date",
@@ -145,6 +150,7 @@ def _user(row):
     return {
         "id": row["id"], "username": row["username"], "display_name": row["display_name"], "role": row["role"],
         "disabled": bool(row["disabled"]), "created_at": row["created_at"], "last_login_at": row["last_login_at"],
+        "google_email": row["google_email"],
     }
 
 
@@ -269,6 +275,24 @@ class Store:
         ).fetchone()[0]
         if not others:
             raise Conflict("Can't remove, disable or demote the last enabled admin")
+
+    def user_by_google(self, sub):
+        with self.tx() as db:
+            return _user(db.execute("SELECT * FROM users WHERE google_sub = ?", (sub,)).fetchone())
+
+    def link_google(self, user_id, sub, email):
+        """Link (or refresh the email of) a Google account; one Google account belongs to one member."""
+        with self.tx(immediate=True) as db:
+            owner = db.execute("SELECT id FROM users WHERE google_sub = ?", (sub,)).fetchone()
+            if owner and owner["id"] != user_id:
+                raise Conflict("This Google account is already linked to another member")
+            db.execute("UPDATE users SET google_sub = ?, google_email = ? WHERE id = ?", (sub, email, user_id))
+            return _user(db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+
+    def unlink_google(self, user_id):
+        with self.tx() as db:
+            db.execute("UPDATE users SET google_sub = NULL, google_email = NULL WHERE id = ?", (user_id,))
+            return _user(db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
 
     def mark_login(self, user_id):
         with self.tx() as db:
