@@ -124,6 +124,7 @@ def fresh_state(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module, "feed_http", httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
     monkeypatch.setattr(app_module, "MEDIA_DIR", tmp_path / "media")
     app_module.clear_queue()
+    app_module._talk = app_module._talk_last = app_module._talk_on_speaker = None
     app_module._downloads.clear()
     spawned = SimpleNamespace(watchers=0, prefetch=[])
     monkeypatch.setattr(app_module, "ensure_queue_watcher", lambda: setattr(spawned, "watchers", spawned.watchers + 1))

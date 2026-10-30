@@ -5,6 +5,8 @@ The speaker fetches every stream from this service (TTS and YouTube are proxied)
 drives the speaker directly over Cast on the LAN, or through the ESP32 relay (firmware/) over MQTT
 when it runs elsewhere; see transport.py. Media URLs then go out under `public_base_url`.
 
+Operators can also talk through the speaker live from the browser's microphone (WebSocket /talk, see talk.py).
+
 Callers authenticate with either `Authorization: Bearer <api_token>` (acts as admin) or the
 `sid` session cookie of a web account (admin, operator or viewer). The speaker cannot send
 headers, so the media URLs handed to it are signed with an HMAC of the token instead.
@@ -26,8 +28,9 @@ import socket
 import time
 import urllib.parse
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from functools import cache
 from pathlib import Path
 from typing import Annotated, Literal
 from xml.etree import ElementTree
@@ -36,13 +39,14 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 import pychromecast.discovery
 import yt_dlp
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+import talk
 from auth import (
     DUMMY_HASH,
     PASSWORD_MAX,
@@ -118,6 +122,16 @@ EPISODES_MAX = 200
 USER_AGENT = "speaker-service/0.2"  # radio-browser asks clients to identify themselves
 STATION_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 ITUNES_NS = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+TALK_START_TIMEOUT = 10.0  # seconds a new /talk connection has to send its start message
+TALK_IDLE_TIMEOUT = 10.0  # end a talk when no audio arrives for this long
+TALK_TICK = 0.5  # how often the talk loop checks its timers while waiting for the next message
+TALK_DRAIN = 3.0  # seconds ffmpeg gets to flush after the talk ends before it is killed
+TALK_SPEAKER_WAIT = 15.0  # at the end, wait this long for a speaker command still in flight
+TALK_CHIME_WAIT = 5.0  # longest wait for the opening chime to finish
+TALK_END_WAIT = 20.0  # longest wait for the speaker to play out the stream before the closing chime
+TALK_POLL = 0.3
+TALK_GRACE = 60.0  # an ended talk's stream stays fetchable this long (a slow speaker still gets it all)
+TALK_MAX_RATE = 64 * 1024  # bytes/s of recorder input accepted on average (Opus/AAC use a fraction)
 
 
 class MqttSettings(BaseModel):
@@ -172,6 +186,7 @@ class Settings(BaseModel):
     tts_lang: str = "th"
     cache_keep: int = Field(20, ge=1)  # most recent YouTube tracks kept on disk
     resume_after_say: bool = True  # continue the interrupted YouTube track after /say
+    talk_max_seconds: int = Field(120, ge=10, le=600)  # a live talk ends after this long
     # Base of the signed media URLs given to the speaker, e.g. a Cloudflare Tunnel hostname.
     # None = this machine's LAN address (only works when the speaker is on the same LAN).
     public_base_url: str | None = None
@@ -335,6 +350,8 @@ async def lifespan(_app):
         yield
     finally:
         runner.cancel()
+        if _talk is not None:
+            _talk.transcoder.kill()  # never leave an ffmpeg behind
         transport.close()
 
 
@@ -825,8 +842,9 @@ async def queue_tick():
         if reason != "FINISHED":
             return  # stopped or replaced from elsewhere: leave it alone
         q.failures = 0
-    elif not (q.after_say and _resume is None and content_id.startswith(f"{base_url()}/tts.mp3")):
-        return  # an announcement (or something else) is playing; never advance on its end
+    elif not (q.after_say and _resume is None and _talk_on_speaker is None
+              and content_id.startswith((f"{base_url()}/tts.mp3", f"{base_url()}/talk/"))):
+        return  # an announcement, a live talk (or something else) is playing; never advance on its end
     if q.advance(auto=True):
         await play_queue(q)
     else:
@@ -1450,6 +1468,7 @@ async def status(who: Who):
             "resume_pending": _resume and _resume["title"],
             "tts_lang": settings.tts_lang,
             "queue": _queue.summary() if _queue is not None else None,
+            "talking": _talk.who.actor if _talk is not None else None,
         }
 
     try:
@@ -2409,6 +2428,330 @@ async def run_schedule_now(schedule_id: int, who: Who):
     return {"ok": True}
 
 
+# --- Live talk (WebSocket /talk) ---
+#
+# Protocol (JSON text frames unless noted):
+#   client -> {"type": "start", "mime": MediaRecorder.mimeType, "chime": bool, "volume": 0-1 | null}
+#   server -> {"type": "ready", "id", "max_seconds", "format"}   then the client sends binary recorder chunks
+#   server -> {"type": "live"}                                    the speaker has loaded the live stream
+#   client -> {"type": "stop"} | {"type": "ping"}  (server answers a ping with {"type": "pong"})
+#   server -> {"type": "ended", "reason", "seconds", "detail"?}  and closes (1000)
+#   server -> {"type": "error", "code", "detail"}                 and closes (44xx / 4503) instead of starting
+# One talker at a time. Music pauses for the talk and resumes after it, as after an announcement.
+
+TALK_CLOSE = {"bad_request": 4400, "unauthorized": 4401, "forbidden": 4403, "busy": 4409, "unavailable": 4503}
+
+talk_transcoder = talk.FfmpegTranscoder  # replaced by a fake in tests
+talk_available = talk.ffmpeg_available
+
+
+@dataclass
+class TalkSession:
+    id: str
+    who: Principal
+    chime: bool
+    volume: float | None
+    transcoder: object
+    live_url: str
+    stream: talk.LiveStream = field(default_factory=talk.LiveStream)
+    gen: int | None = None  # _say_gen once the talk has taken over the speaker
+    end_reason: str | None = None  # set by a helper task that wants the talk to end
+    detail: str | None = None
+    first_chunk: float | None = None
+    last_chunk: float | None = None
+    received: int = 0
+    ended_at: float | None = None
+
+    @property
+    def seconds(self):
+        return self.last_chunk - self.first_chunk if self.first_chunk is not None else 0.0
+
+
+_talk: TalkSession | None = None  # the talk in progress
+_talk_last: TalkSession | None = None  # the previous one, whose stream the speaker may still be reading
+_talk_on_speaker: TalkSession | None = None  # owns the speaker from its start until the music is back
+
+
+class TalkSender:
+    """Sends from the talk loop and its helper tasks one at a time; a closed socket is ignored."""
+
+    def __init__(self, ws):
+        self.ws, self.lock = ws, asyncio.Lock()
+
+    async def __call__(self, message):
+        async with self.lock:
+            try:
+                await self.ws.send_json(message)
+            except Exception:  # the client is gone (the exception type depends on the server)
+                pass
+
+
+async def talk_refuse(ws, code, detail):
+    try:
+        await ws.send_json({"type": "error", "code": code, "detail": detail})
+        await ws.close(TALK_CLOSE[code], reason=code)
+    except Exception:  # the client is gone
+        pass
+
+
+def talk_caller(ws):
+    """(Principal, None), or (None, (error code, detail)) for a connection that may not talk.
+
+    Browsers can't set headers on a WebSocket, so the session cookie authenticates and the Origin
+    check stands in for the X-Requested-With header; scripts may send the API token instead.
+    """
+    origin = ws.headers.get("origin")
+    if origin:
+        allowed = {ws.headers.get("host", "")}
+        if settings.public_base_url:
+            allowed.add(urllib.parse.urlsplit(settings.public_base_url).netloc)
+        if urllib.parse.urlsplit(origin).netloc not in allowed:
+            return None, ("forbidden", "Cross-site connection refused")
+    auth = ws.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        if not secrets.compare_digest(auth[7:].strip().encode(), settings.api_token.encode()):
+            return None, ("unauthorized", "Missing or invalid API token")
+        who = Principal("admin", "api-token")
+    else:
+        sid = ws.cookies.get(SESSION_COOKIE)
+        user = db.session_user(token_hash(sid))[0] if sid else None
+        if user is None:
+            return None, ("unauthorized", "Not signed in")
+        who = Principal(user["role"], user["display_name"], user, token_hash(sid))
+    if ROLE_RANK[who.role] < ROLE_RANK["operator"]:
+        return None, ("forbidden", "Live talk needs the operator role")
+    return who, None
+
+
+def parse_talk_start(message):
+    """(input format, chime, volume) from the start message; ValueError with a readable reason."""
+    if message.get("type") != "websocket.receive" or message.get("text") is None:
+        raise ValueError("Send a start message (JSON text) first")
+    try:
+        start = json.loads(message["text"])
+    except ValueError:
+        raise ValueError("The start message is not JSON") from None
+    if not isinstance(start, dict) or start.get("type") != "start":
+        raise ValueError('The first message must be {"type": "start", ...}')
+    fmt = talk.input_format(start.get("mime") if isinstance(start.get("mime"), str) else "")
+    if fmt is None:
+        raise ValueError(f"Unsupported recording format; use one of {', '.join(sorted(talk.INPUT_FORMATS))}")
+    volume = start.get("volume")
+    if volume is not None and (isinstance(volume, bool) or not isinstance(volume, (int, float))
+                               or not 0 <= volume <= 1):
+        raise ValueError("volume must be between 0 and 1")
+    return fmt, bool(start.get("chime")), volume
+
+
+@app.websocket("/talk")
+async def talk_socket(ws: WebSocket):
+    global _talk
+    await ws.accept()  # accept first: a refused handshake hides the reason from the browser
+    who, problem = talk_caller(ws)
+    if problem:
+        await talk_refuse(ws, *problem)
+        return
+    try:
+        message = await asyncio.wait_for(ws.receive(), TALK_START_TIMEOUT)
+    except TimeoutError:
+        await talk_refuse(ws, "bad_request", "No start message within 10 seconds")
+        return
+    if message["type"] == "websocket.disconnect":
+        return
+    try:
+        fmt, chime, volume = parse_talk_start(message)
+    except ValueError as e:
+        await talk_refuse(ws, "bad_request", str(e))
+        return
+    if not talk_available():
+        await talk_refuse(ws, "unavailable", "Live talk needs ffmpeg on the server, and it isn't installed")
+        return
+    if _talk is not None:
+        await talk_refuse(ws, "busy", f"{_talk.who.actor} is talking right now")
+        return
+    talk_id = secrets.token_urlsafe(9)
+    _talk = TalkSession(talk_id, who, chime, volume, talk_transcoder(fmt), media_url(f"/talk/{talk_id}/live"))
+    await run_talk(ws, _talk, TalkSender(ws))
+
+
+async def run_talk(ws, session, send):
+    """Run one talk from ffmpeg start to clean-up; every path ends with ffmpeg gone and the stream closed."""
+    global _talk, _talk_last, _talk_on_speaker
+    pump = speaker = None
+    started = False
+    try:
+        await session.transcoder.start()
+        started = True
+        pump = asyncio.create_task(talk_pump(session))
+        await send({"type": "ready", "id": session.id, "max_seconds": settings.talk_max_seconds,
+                    "format": "audio/mpeg"})
+        _talk_on_speaker = session
+        speaker = asyncio.create_task(talk_start_speaker(session, send))
+        session.end_reason = await talk_receive(ws, session, send)
+    except talk.TranscoderError as e:
+        session.end_reason, session.detail = "transcoder_error", str(e)
+    finally:
+        _talk, _talk_last = None, session  # the next talker may start while this one winds down
+        try:
+            await end_talk(ws, session, send, speaker, pump, started)
+        except asyncio.CancelledError:  # server shutting down mid clean-up: at least stop ffmpeg
+            session.transcoder.kill()
+            if _talk_on_speaker is session:
+                _talk_on_speaker = None
+            raise
+
+
+async def end_talk(ws, session, send, speaker, pump, started):
+    """Stop ffmpeg, close the stream, log, hand the speaker back and tell the client how it ended."""
+    global _talk_on_speaker
+    if speaker is not None:
+        await asyncio.wait({speaker}, timeout=TALK_SPEAKER_WAIT)
+        speaker.cancel()
+    await session.transcoder.finish(TALK_DRAIN)
+    if pump is not None:
+        await asyncio.wait({pump}, timeout=TALK_DRAIN)
+        pump.cancel()
+    await session.stream.close()
+    session.ended_at = time.monotonic()
+    reason = session.end_reason or "disconnected"
+    if started:
+        suffix = "" if reason in ("stopped", "disconnected") else f" ({reason.replace('_', ' ')})"
+        record(session.who, "talk", f"Talked live for {talk.format_seconds(session.seconds)}{suffix}")
+    if session.gen is not None and session.gen == _say_gen:
+        spawn(talk_finish_on_speaker(session))
+    elif _talk_on_speaker is session:
+        _talk_on_speaker = None
+    ended = {"type": "ended", "reason": reason, "seconds": round(session.seconds, 1)}
+    await send(ended | ({"detail": session.detail} if session.detail else {}))
+    try:
+        await ws.close(1000)
+    except Exception:  # already closed by the client
+        pass
+
+
+async def talk_receive(ws, session, send):
+    """Feed recorder chunks to ffmpeg until the talk should end; returns the reason."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + settings.talk_max_seconds
+    last_audio = loop.time()
+    pending = None
+    try:
+        while True:
+            if session.end_reason:
+                return session.end_reason
+            if session.gen is not None and session.gen != _say_gen:
+                return "interrupted"  # something else was played or announced
+            now = loop.time()
+            if now >= deadline:
+                return "max_length"
+            if now - last_audio >= TALK_IDLE_TIMEOUT:
+                return "idle"
+            if pending is None:
+                pending = asyncio.ensure_future(ws.receive())
+            done, _ = await asyncio.wait({pending}, timeout=min(TALK_TICK, deadline - now))
+            if not done:
+                continue
+            message, pending = pending.result(), None
+            if message["type"] == "websocket.disconnect":
+                return "disconnected"
+            if message.get("bytes"):
+                chunk = message["bytes"]
+                last_audio = loop.time()
+                if session.first_chunk is None:
+                    session.first_chunk = last_audio
+                session.last_chunk = last_audio
+                session.received += len(chunk)
+                if session.received > TALK_MAX_RATE * settings.talk_max_seconds:
+                    return "too_large"
+                await session.transcoder.write(chunk)
+            elif message.get("text"):
+                try:
+                    kind = json.loads(message["text"]).get("type")
+                except (ValueError, AttributeError):
+                    kind = None
+                if kind == "stop":
+                    return "stopped"
+                if kind == "ping":
+                    await send({"type": "pong"})
+    finally:
+        if pending is not None:
+            pending.cancel()
+
+
+async def talk_pump(session):
+    """Move ffmpeg's MP3 output into the live stream until ffmpeg exits."""
+    while chunk := await session.transcoder.read():
+        await session.stream.append(chunk)
+
+
+async def wait_until_idle(gen, url, timeout):
+    """Poll until the speaker has finished `url`, moved on to something else, or `timeout` has passed."""
+    loop = asyncio.get_running_loop()
+    deadline, seen = loop.time() + timeout, False
+    while loop.time() < deadline and gen == _say_gen:
+        m = await run_cast(transport.media)
+        if m.content_id == url:
+            seen = True
+            if m.player_state == "IDLE":
+                return
+        elif seen:
+            return
+        await asyncio.sleep(TALK_POLL)
+
+
+async def talk_start_speaker(session, send):
+    """Take over the speaker like an announcement: remember the music, optional chime, then the live stream."""
+    global _resume, _say_gen
+    try:
+        if settings.resume_after_say:
+            _resume = await run_cast(capture_youtube) or _resume
+        q = _queue
+        if q is not None:
+            q.after_say = _resume is None and await run_cast(queue_after_say, q)
+        _say_gen += 1
+        session.gen = gen = _say_gen
+        if session.chime:
+            chime = media_url("/talk/chime.wav", tone="start")
+            await run_cast(cast_play, chime, "audio/wav", "Chime", session.volume)
+            await wait_until_idle(gen, chime, TALK_CHIME_WAIT)
+            if gen != _say_gen:
+                return
+        await run_cast(cast_play, session.live_url, "audio/mpeg", f"Live: {session.who.actor}", session.volume,
+                       live=True)
+        await send({"type": "live"})
+    except HTTPException as e:
+        session.end_reason, session.detail = "speaker_error", str(e.detail)
+
+
+async def talk_finish_on_speaker(session):
+    """After a talk: let the speaker play out the stream, closing chime, then resume the interrupted music."""
+    global _talk_on_speaker
+    gen = session.gen
+    try:
+        if session.chime:
+            await wait_until_idle(gen, session.live_url, TALK_END_WAIT)
+            if gen != _say_gen:
+                return
+            await run_cast(cast_play, media_url("/talk/chime.wav", tone="end"), "audio/wav", "Chime",
+                           session.volume)
+        if _resume and gen == _say_gen:
+            await resume_after_announcement(gen, f"{base_url()}/talk/")
+        elif _queue is not None and _queue.after_say and gen == _say_gen:
+            await wait_until_idle(gen, session.live_url, TALK_END_WAIT)  # then queue_tick moves the queue on
+    except HTTPException as e:
+        print(f"talk: {e.detail}")
+    finally:
+        if _talk_on_speaker is session:
+            _talk_on_speaker = None
+
+
+@operator_api.get("/talk/status")
+async def talk_status():
+    """Whether live talk works on this server (ffmpeg installed) and who is talking."""
+    active = _talk and {"by": _talk.who.actor, "id": _talk.id}
+    return {"available": talk_available(), "max_seconds": settings.talk_max_seconds, "active": active}
+
+
 # --- Streams fetched by the speaker itself (signed URLs, no header) ---
 
 @app.get("/tts.mp3", dependencies=[Depends(verify_media)])
@@ -2439,6 +2782,27 @@ async def media_file(filename: str):
     if path.name.startswith(".") or not path.is_file():
         raise HTTPException(404, "No such file")
     return FileResponse(path, media_type=FILE_TYPES.get(path.suffix, "application/octet-stream"))
+
+
+@app.get("/talk/chime.wav", dependencies=[Depends(verify_media)])
+async def talk_chime(tone: Literal["start", "end"] = "start"):
+    return Response(chime_bytes(tone), media_type="audio/wav")
+
+
+@cache
+def chime_bytes(tone):
+    return talk.chime_wav(tone)
+
+
+@app.get("/talk/{talk_id}/live", dependencies=[Depends(verify_media)])
+async def talk_live(talk_id: str):
+    """The talk's MP3 as one endless response; it ends when the talk does."""
+    session = _talk if _talk is not None and _talk.id == talk_id else _talk_last
+    recent = session is not None and (session.ended_at is None or time.monotonic() - session.ended_at < TALK_GRACE)
+    if not recent or session.id != talk_id:
+        raise HTTPException(404, "No such live talk")
+    return StreamingResponse(session.stream.follow(), media_type="audio/mpeg",
+                             headers={"Cache-Control": "no-store"})
 
 
 # --- Web UI (public) ---
