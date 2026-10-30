@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- Web app v3, rebuilt from the approved prototype for iPhone, iPad and desktop: English by default with Thai,
+  light/dark/system theme, app-wide reduce motion, self-hosted Anuphan font, 3D speaker art. Pages: sign-in and
+  first-account setup, Now playing (queue, volume, relay health), Announce (quick phrases, live talk), Music
+  (YouTube, radio, podcasts, my files), Playlists, Schedule, Members, Activity, Speaker settings, App settings,
+  Account (Google link, passkeys), Sign-in methods and searchable Help. Offers a passkey after sign-in.
+- Scheduled announcements and playlists (`/schedules`), now working with both transports.
+- Nightly SQLite + config backups for the remote deployment (`backup` service), with restore.
+- Sign in with Google: members link their Google account (`POST/DELETE /me/google`) and then sign in with it
+  (`POST /auth/google`); no self-sign-up. ID tokens are checked against Google's keys (`aud`, `iss`, `exp`,
+  `email_verified`, single use). The owner switches it on with `google_client_id` + `google_signin`;
+  `GET /auth/state` reports `methods` and `google_client_id`.
+- Passkeys (WebAuthn): register, rename and remove passkeys under `/me/passkeys`, sign in with
+  `/auth/passkey/options` + `/auth/passkey/verify`. The RP ID is the host of `public_base_url` (HTTPS, or
+  localhost); single-use challenges, sign-counter checks. Owner settings `passkey_signin` and
+  `passkey_required_for_admins`; members carry `has_passkey`. Schema version 4 adds the `passkeys` table.
+- Music sources: internet radio (radio-browser.info search, favourites, played as a LIVE stream), podcasts
+  (iTunes Search API + RSS episodes) and "My files" (audio uploads with size/type/quota limits, served through
+  signed `/media/...` links). All three play directly, resume after an announcement, and can be playlist items
+  (`radio`, `podcast`, `file`). Database schema version 5 (version 3 adds the Google account columns).
+- Live talk: operators speak through the speaker from the browser's microphone (`WebSocket /talk`).
+  MediaRecorder chunks (WebM/Opus, Ogg/Opus or Safari's MP4/AAC) are transcoded by ffmpeg into a live MP3
+  stream at a signed `/talk/<id>/live` URL; music pauses and resumes afterwards, with an optional chime,
+  a `talk_max_seconds` limit (default 120) and an activity entry "Talked live for m:ss". Needs ffmpeg
+  (added to the Docker image).
+
 ## [0.2.0] - 2026-10-30
 
 ### Added

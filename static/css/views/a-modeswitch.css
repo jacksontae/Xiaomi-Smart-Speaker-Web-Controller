@@ -1,0 +1,9 @@
+/* Announce mode switch (js/a-modeswitch.js), the same on #/announce and #/schedule: three equal tabs
+   (two when Talk live is off), one sliding thumb. Phone/iPad: under the title; desktop: in the header. */
+.ann-seg { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-flow: row; background: var(--glass-soft); border: 1px solid var(--glass-edge); }
+.ann-seg.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ann-seg > button { padding: 0 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ann-seg > button[aria-selected="true"] { color: var(--accent); font-weight: 600; }
+.ann-seg > button:not([aria-selected="true"]):hover { color: var(--ink); }
+.ann-headacts .ann-seg { width: 440px; }
+.ann-segslot:empty { display: none; }

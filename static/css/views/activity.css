@@ -1,0 +1,27 @@
+/* Activity: day groups, rows, filters (segmented on phone/iPad, list on desktop). */
+.a-side { display: none; }
+.a-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.a-feed { display: flex; flex-direction: column; gap: 20px; }
+.a-day { display: flex; flex-direction: column; gap: 14px; }
+.a-list { list-style: none; margin: 0; padding: 0; }
+.a-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "ic tx time"; align-items: start; gap: 12px; padding: 12px 16px; }
+.a-row .c-tile { grid-area: ic; }
+.a-tx { grid-area: tx; min-width: 0; padding-top: 1px; }
+.a-time { grid-area: time; font-size: 14px; line-height: 1.5; color: var(--ink-2); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.a-title { font-size: 15px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.a-detail { font-size: 13px; line-height: 1.5; color: var(--ink-2); overflow-wrap: anywhere; }
+.a-row.fail .a-title { color: var(--danger-ink); }
+.a-more { align-self: center; min-width: 200px; }
+.a-end { text-align: center; }
+
+@media (min-width: 1280px) {
+  .a-seg { display: none; }
+  .a-grid { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; align-items: start; }
+  .a-side { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 100px; }
+  .a-side button { min-height: 48px; padding: 0 16px; border: 0; border-radius: var(--r-row); background: transparent; color: var(--ink-2); font-size: 15px; text-align: left; }
+  .a-side button:hover { background: var(--glass-soft); color: var(--ink); }
+  .a-side button[aria-checked="true"] { background: var(--surface); color: var(--accent); font-weight: 600; box-shadow: var(--seg-shadow); }
+  .a-row { grid-template-columns: 64px auto minmax(0, 1fr); grid-template-areas: "time ic tx"; padding: 14px 20px; }
+  .a-more { align-self: flex-start; }
+  .a-end { text-align: left; }
+}

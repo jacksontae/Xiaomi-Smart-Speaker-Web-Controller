@@ -1,6 +1,8 @@
 import asyncio
 import json
+import re
 
+import pytest
 from conftest import BASE, path_of
 
 from transport import DEFAULT_MEDIA_RECEIVER
@@ -84,6 +86,48 @@ def test_settings_partial_update_persists(client, app):
 
 def test_settings_reject_invalid(client):
     assert client.post("/settings", json={"default_volume": 5}).status_code == 422
+
+
+@pytest.mark.parametrize("ip", ["192.0.2.10", "2001:db8::10", "speaker.local", "speaker", "kitchen-1.example.com.",
+                                "  192.0.2.11  "])
+def test_speaker_ip_accepts_addresses_and_hostnames(app, ip):
+    assert app.Settings(speaker_ip=ip).speaker_ip == ip.strip()
+
+
+@pytest.mark.parametrize("ip", ["", "   ", "999.1.1.1", "192.0.2", "http://192.0.2.10", "192.0.2.10:8009",
+                                "my speaker", "-bad.example.com", "a..b", "speaker_1.local", "x" * 64 + ".com"])
+def test_speaker_ip_rejects_garbage(app, ip):
+    with pytest.raises(ValueError, match="speaker_ip must be an IP address"):
+        app.Settings(speaker_ip=ip)
+
+
+def test_speaker_name_is_trimmed_and_required(app):
+    assert app.Settings(speaker_name="  Living\troom  ").speaker_name == "Living room"
+    for bad, why in (("", "can't be empty"), ("  \n ", "can't be empty"), ("x" * 65, "at most 64")):
+        with pytest.raises(ValueError, match=why):
+            app.Settings(speaker_name=bad)
+    assert len(app.Settings(speaker_name="x" * 64).speaker_name) == 64
+
+
+def test_settings_api_rejects_bad_speaker_without_saving(client, app):
+    before = app.CONFIG_PATH.read_text()
+    transport = app.transport
+    r = client.post("/settings", json={"speaker_ip": "not an ip"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "speaker_ip must be an IP address like 192.0.2.10 or a hostname like speaker.local"
+    r = client.post("/settings", json={"speaker_name": "   "})
+    assert r.status_code == 422 and r.json()["detail"] == "speaker_name can't be empty"
+    r = client.post("/settings", json={"speaker_name": "", "speaker_ip": ""})
+    assert r.status_code == 422
+    assert "speaker_ip must be" in r.json()["detail"] and "; speaker_name can't be empty" in r.json()["detail"]
+    assert app.CONFIG_PATH.read_text() == before and app.transport is transport  # nothing saved or restarted
+
+
+def test_settings_api_422_names_the_field(client):
+    r = client.post("/settings", json={"default_volume": 5})
+    assert r.json()["detail"] == "default_volume: Input should be less than or equal to 1"
+    r = client.post("/settings", json={"mqtt": {"base_topic": "a/#"}})
+    assert r.json()["detail"].startswith("mqtt.base_topic: base_topic must be")
 
 
 def test_settings_port_change_requests_restart(client, app, monkeypatch):
@@ -239,3 +283,62 @@ def test_signed_link_survives_url_encoding(anon, app, monkeypatch):
     monkeypatch.setattr(app.http, "get", fake_get)
     text = "a b&c=d+e/ไทย 100% ?#"
     assert anon.get(path_of(app.media_url("/tts.mp3", text=text, lang="th"))).status_code == 200
+
+
+def test_web_app_files_are_revalidated(anon):
+    """Unversioned paths (manifest icons, anything referenced absolutely) and the page itself are checked back."""
+    for path in ("/", "/static/js/app.js", "/static/css/base.css", "/static/icon-192.png"):
+        r = anon.get(path)
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-cache", path
+    etag = anon.get("/static/js/app.js").headers["etag"]
+    assert anon.get("/static/js/app.js", headers={"If-None-Match": etag}).status_code == 304
+
+
+def build_prefix(anon):
+    m = re.search(r'src="/static/([0-9a-f]{12})/js/app\.js"', anon.get("/").text)
+    assert m, "index.html must load the app from the versioned path"
+    return f"/static/{m.group(1)}"
+
+
+def test_index_points_at_versioned_immutable_files(anon, app):
+    html = anon.get("/").text
+    prefix = build_prefix(anon)
+    assert prefix[len("/static/"):] == app.static_build.id
+    # every app file comes from this build; the root-level icons stay where iOS and the manifest expect them
+    assert re.findall(r'"/static/(?![0-9a-f]{12}/)', html) == []
+    assert 'href="/manifest.webmanifest"' in html and 'href="/apple-touch-icon.png"' in html
+    for path in ("js/app.js", "js/views/now.js", "css/base.css", "fonts/anuphan-latin-wght-normal.woff2"):
+        r = anon.get(f"{prefix}/{path}")
+        assert r.status_code == 200, path
+        assert r.headers["cache-control"] == "public, max-age=31536000, immutable", path
+        assert r.content == anon.get(f"/static/{path}").content
+    etag = anon.get(f"{prefix}/js/app.js").headers["etag"]
+    r = anon.get(f"{prefix}/js/app.js", headers={"If-None-Match": etag})
+    assert r.status_code == 304 and r.headers["cache-control"].endswith("immutable")
+
+
+def test_versioned_static_refuses_other_builds_and_escapes(anon):
+    prefix = build_prefix(anon)
+    for path in ("/static/0123456789ab/js/app.js", f"{prefix}/js/nope.js", f"{prefix}/../../config.json", prefix):
+        r = anon.get(path)
+        assert r.status_code == 404, path
+        assert "immutable" not in r.headers.get("cache-control", ""), path
+    # a tab from an older build must not get a cached 404 either: the next index.html names the new build
+    assert anon.get("/static/0123456789ab/js/app.js").headers["cache-control"] == "no-store"
+
+
+def test_build_id_follows_static_content(app, tmp_path):
+    (tmp_path / "index.html").write_text('<script type="module" src="/static/js/app.js"></script>')
+    (tmp_path / "js").mkdir()
+    (tmp_path / "js" / "app.js").write_text("export const a = 1;")
+    build = app.StaticBuild(tmp_path).refresh()
+    first = build.id
+    assert app.BUILD_ID.fullmatch(first)
+    assert build.index == f'<script type="module" src="/static/{first}/js/app.js"></script>'
+    assert build.refresh().id == first  # unchanged files: same id
+    (tmp_path / "js" / "app.js").write_text("export const a = 22;")
+    assert build.refresh().id != first
+    (tmp_path / "js" / "app.js").write_text("export const a = 1;")
+    assert build.refresh().id == first  # content, not timestamps
+    (tmp_path / "js" / "new.js").write_text("")
+    assert build.refresh().id != first

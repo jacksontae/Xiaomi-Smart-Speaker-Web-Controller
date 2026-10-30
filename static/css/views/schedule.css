@@ -1,0 +1,52 @@
+/* Schedule (boards T_Schedule / D_Schedule; the iPhone Announce board's Schedule mode). Shared rows: teamb.css. */
+.sc-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; }
+.sc-list { display: flex; flex-direction: column; gap: 18px; }
+.sc-group { display: flex; flex-direction: column; gap: 8px; }
+.sc-gh { padding: 0 4px; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.sc-row { min-height: 72px; gap: 14px; padding-block: 12px; }
+.sc-row.sel { background: var(--accent-tint); }
+.sc-row.sel .tb-t, .sc-row.sel .sc-time { color: var(--accent); }
+.sc-time { flex: 0 0 auto; min-width: 66px; font-size: 24px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.sc-row.off .sc-time, .sc-row.off .tb-t { color: var(--ink-3); }
+.sc-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.sc-sub .icon { flex: 0 0 auto; }
+.sc-soon { color: var(--accent); font-weight: 600; }
+.sc-fail { align-self: flex-start; margin-top: 4px; padding: 2px 8px; border-radius: 8px; background: var(--danger-tint); color: var(--danger-ink); font-size: 13px; line-height: 1.45; }
+.sc-last { font-size: 13px; line-height: 1.45; color: var(--ink-2); }
+.sc-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 28px 20px; border-radius: var(--r-lg); color: var(--accent); }
+
+/* editor */
+.sc-form { display: flex; flex-direction: column; gap: 18px; }
+.sc-what { display: flex; flex-direction: column; gap: 12px; }
+.sc-swrow, .sc-timerow { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 6px 8px 6px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--glass); color: var(--ink); font-size: 15px; font-weight: 500; }
+.sc-timein { width: 150px; height: 44px; padding: 0 10px; font-size: 22px; font-weight: 700; color: var(--accent); text-align: center; font-variant-numeric: tabular-nums; }
+.sc-timein:focus, .sc-timein[aria-invalid="true"] { padding: 0 9px; }
+.sc-presets { flex-wrap: wrap; overflow: visible; }
+.sc-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.sc-day { min-height: 44px; padding: 0; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); color: var(--ink); font-size: 14px; font-weight: 600; transition: background-color var(--t-fast) var(--ease); }
+.sc-day[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.sc-summary { font-weight: 400; }
+.sc-summary.err { color: var(--danger-ink); }
+.sc-volbox { display: flex; flex-direction: column; gap: 8px; }
+.sc-volbox .small { font-weight: 400; }
+.sc-volrow { display: flex; align-items: center; gap: 12px; padding: 0 4px; }
+.sc-range { flex: 1 1 auto; min-height: 44px; accent-color: var(--accent); }
+.sc-volv { min-width: 48px; text-align: right; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sc-info { display: flex; flex-direction: column; gap: 2px; }
+.sc-info .sc-fail { margin-top: 6px; }
+.sc-del { display: flex; flex-direction: column; gap: 8px; }
+.sc-delbtn { align-self: flex-start; color: var(--danger-ink); }
+.sc-delbtn:hover { color: var(--danger-ink); }
+.sc-delask { display: flex; gap: 10px; }
+.sc-hint { padding: 24px 4px; }
+.sc-sheet .sheet { height: calc(100% - 40px - var(--safe-t)); }
+
+@media (min-width: 744px) {
+  .sc-sheet .sheet { width: min(560px, calc(100% - 48px)); height: min(860px, calc(100% - 48px)); }
+}
+@media (min-width: 1280px) {
+  .sc-split { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 20px; align-items: start; }
+  .sc-pane { position: sticky; top: 100px; max-height: calc(100vh - 124px); overflow-y: auto; padding: 20px 22px 24px; border-radius: var(--r-xl); }
+  .sc-ph h2 { margin-bottom: 14px; font-size: 18px; font-weight: 700; }
+}
+.sc-nextday { color: var(--ink-2); }

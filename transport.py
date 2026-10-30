@@ -6,7 +6,8 @@
 
 Both expose the same small surface, so app.py (queue, resume-after-announcement, /status) does not
 care which one is in use: play / set_volume / pause / resume / stop, media() and receiver().
-Methods block; app.py calls them from a worker thread under its cast lock.
+Methods block; app.py calls them from a worker thread under its cast lock. Failures in UNREACHABLE_ERRORS
+make app.py treat the speaker as offline (fail fast, retry in the background) until a call succeeds again.
 """
 import itertools
 import json
@@ -28,7 +29,18 @@ class TransportError(Exception):
     """The speaker (or the relay in front of it) can't carry out a command. str() is shown to the caller."""
 
 
+class SpeakerUnreachable(TransportError):
+    """The relay can't be reached at all (offline, no broker, no answer), as opposed to refusing one command."""
+
+
 SPEAKER_ERRORS = (pychromecast.error.PyChromecastError, OSError, TransportError)
+# Failures that mean "nothing answers", so app.py treats the speaker as offline for a while.
+# Other errors (a refused LOAD, an unsupported namespace) come from a live speaker and are passed through.
+UNREACHABLE_ERRORS = (
+    OSError, SpeakerUnreachable, pychromecast.error.ChromecastConnectionError, pychromecast.error.NotConnected,
+    pychromecast.error.RequestTimeout, pychromecast.error.ChromecastConnectionClosed,
+    pychromecast.error.PyChromecastStopped,
+)
 
 
 @dataclass
@@ -94,7 +106,7 @@ class CastTransport:
             self._cast.socket_client.disconnect()
             self._cast = None
 
-    def play(self, url, content_type, title=None, volume=None, position=None):
+    def play(self, url, content_type, title=None, volume=None, position=None, live=False):
         cast = self.get_cast()
         if volume is not None:
             cast.set_volume(volume)
@@ -103,8 +115,12 @@ class CastTransport:
             cast.start_app(DEFAULT_MEDIA_RECEIVER)
             cast.wait(timeout=10)
         mc = cast.media_controller
-        # BUFFERED (not the LIVE default) so the receiver honours current_time and allows seeking.
-        mc.play_media(url, content_type, title=title, current_time=position, stream_type="BUFFERED")
+        # BUFFERED (not the LIVE default) so the receiver honours current_time and allows seeking;
+        # LIVE only for endless streams (internet radio, live talk), which have no position to seek to.
+        if live:
+            mc.play_media(url, content_type, title=title, stream_type="LIVE")
+        else:
+            mc.play_media(url, content_type, title=title, current_time=position, stream_type="BUFFERED")
         mc.block_until_active(timeout=10)
 
     def set_volume(self, level):
@@ -284,11 +300,11 @@ class MqttRelayTransport:
 
     def _offline_error(self):
         if not self.broker_connected:
-            return TransportError("Speaker relay unavailable: not connected to the MQTT broker")
+            return SpeakerUnreachable("Speaker relay unavailable: not connected to the MQTT broker")
         if self._seen_wall is None:
-            return TransportError("Speaker relay is offline (never seen)")
+            return SpeakerUnreachable("Speaker relay is offline (never seen)")
         ago = int(self.wall() - self._seen_wall)
-        return TransportError(f"Speaker relay is offline (last seen {ago} s ago)")
+        return SpeakerUnreachable(f"Speaker relay is offline (last seen {ago} s ago)")
 
     # --- commands ---
 
@@ -303,15 +319,15 @@ class MqttRelayTransport:
         try:
             info = self.client.publish(self.topic("cmd"), json.dumps({"cmd": cmd, "id": rid, **fields}), qos=1)
             if getattr(info, "rc", 0):
-                raise TransportError(f"Speaker relay unavailable: MQTT publish failed (rc {info.rc})")
+                raise SpeakerUnreachable(f"Speaker relay unavailable: MQTT publish failed (rc {info.rc})")
             deadline = self.clock() + timeout
             with self._cond:
                 while rid not in self._results:
                     left = deadline - self.clock()
                     if left <= 0:
-                        raise TransportError(f"Speaker relay did not answer {cmd!r} within {timeout:g} s")
+                        raise SpeakerUnreachable(f"Speaker relay did not answer {cmd!r} within {timeout:g} s")
                     if not self.broker_connected:
-                        raise TransportError("Speaker relay unavailable: lost the MQTT broker connection")
+                        raise SpeakerUnreachable("Speaker relay unavailable: lost the MQTT broker connection")
                     self._cond.wait(min(left, 0.25))  # short slices: re-check the broker link too
                 result = self._results.pop(rid)
         finally:
@@ -322,11 +338,13 @@ class MqttRelayTransport:
             raise TransportError(f"Speaker relay: {result.get('error') or 'command failed'}")
         return result
 
-    def play(self, url, content_type, title=None, volume=None, position=None):
+    def play(self, url, content_type, title=None, volume=None, position=None, live=False):
         fields = {"url": url, "content_type": content_type, "title": title or ""}
         if volume is not None:
             fields["volume"] = volume
-        if position:
+        if live:
+            fields["stream_type"] = "LIVE"  # relays that don't know the field play it as BUFFERED
+        elif position:
             fields["position"] = position
         with self._cond:
             self._loaded[url] = content_type

@@ -1,75 +1,68 @@
 <!doctype html>
-<html lang="th">
+<html lang="en" data-theme="light" data-motion="full">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#e9f0ef" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#07131a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#0b1417" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="ลำโพง">
+<meta name="apple-mobile-web-app-title" content="Speaker">
 <meta name="format-detection" content="telephone=no">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/static/app.css">
-<title>ลำโพง</title>
+<link rel="preload" href="/static/fonts/anuphan-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/anuphan-thai-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/css/base.css">
+<link rel="stylesheet" href="/static/css/shell.css">
+<script src="/static/js/boot.js"></script>
+<title>Speaker</title>
 <script type="module" src="/static/js/app.js"></script>
+<!-- app.js's imports, fetched in parallel with it instead of after it (keep in sync with its import list) -->
+<link rel="modulepreload" href="/static/js/api.js">
+<link rel="modulepreload" href="/static/js/i18n.js">
+<link rel="modulepreload" href="/static/js/prefs.js">
+<link rel="modulepreload" href="/static/js/ui.js">
+<link rel="modulepreload" href="/static/js/sheet.js">
+<link rel="modulepreload" href="/static/js/shell.js">
+<link rel="modulepreload" href="/static/js/routes.js">
 </head>
-<body>
+<body data-mood="idle">
+<!-- Icon sprite: 24px line icons, stroke 2, round caps (prototype boards). Use with ui.js icon('name'). -->
 <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
-  <symbol id="i-now" viewBox="0 0 24 24"><path d="M3.5 9.5h3l4.5-4v13l-4.5-4h-3z"/><path d="M14.8 9.2a4 4 0 0 1 0 5.6M17.6 6.4a8 8 0 0 1 0 11.2"/></symbol>
-  <symbol id="i-vol-low" viewBox="0 0 24 24"><path d="M5 9.5h3l4.5-4v13l-4.5-4H5z"/><path d="M16.3 9.2a4 4 0 0 1 0 5.6"/></symbol>
-  <symbol id="i-announce" viewBox="0 0 24 24"><path d="M4 10.2v3.6c0 .7.5 1.2 1.2 1.2H7l8.5 4.5V4.5L7 9H5.2C4.5 9 4 9.5 4 10.2z"/><path d="M7.5 15.2 9 20h2.3"/><path d="M19 9.6a3.4 3.4 0 0 1 0 4.8"/></symbol>
-  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></symbol>
-  <symbol id="i-playlists" viewBox="0 0 24 24"><path d="M4 6.5h11M4 11.5h11M4 16.5h6"/><circle cx="16" cy="18" r="2.2"/><path d="M18.2 18V8.2l2.8-1"/></symbol>
-  <symbol id="i-members" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3 2.8-4.8 5.5-4.8s4.9 1.8 5.5 4.8"/><circle cx="16.5" cy="9" r="2.5"/><path d="M16 13.8c2.3 0 4 1.5 4.5 4"/></symbol>
-  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/></symbol>
-  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h8M16 7h4M4 17h3M11 17h9"/><circle cx="14" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></symbol>
-  <symbol id="i-activity" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
-  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></symbol>
-  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.6v12.8a1 1 0 0 0 1.5.9l10.2-6.4a1 1 0 0 0 0-1.7L9.5 4.7A1 1 0 0 0 8 5.6z"/></symbol>
-  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.3"/><rect x="13.5" y="5" width="4" height="14" rx="1.3"/></symbol>
-  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2.4"/></symbol>
-  <symbol id="i-next" viewBox="0 0 24 24"><path d="M5 6.4v11.2a.9.9 0 0 0 1.4.8l8.4-5.6a1 1 0 0 0 0-1.6L6.4 5.6A.9.9 0 0 0 5 6.4z"/><rect x="16.5" y="5.5" width="2.6" height="13" rx="1.1"/></symbol>
-  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M19 6.4v11.2a.9.9 0 0 1-1.4.8l-8.4-5.6a1 1 0 0 1 0-1.6l8.4-5.6a.9.9 0 0 1 1.4.8z"/><rect x="4.9" y="5.5" width="2.6" height="13" rx="1.1"/></symbol>
-  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M3.5 7.5h3c2 0 3 1 4.2 2.8l2.6 3.9c1.2 1.8 2.2 2.8 4.2 2.8h3M3.5 16.5h3c1.1 0 1.9-.3 2.6-.9M14.9 8.4c.7-.6 1.5-.9 2.6-.9h3M18 5l2.5 2.5L18 10M18 14l2.5 2.5L18 19"/></symbol>
-  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4 11.5V10a3 3 0 0 1 3-3h12.5M17 4.5 19.5 7 17 9.5M20 12.5V14a3 3 0 0 1-3 3H4.5M7 19.5 4.5 17 7 14.5"/></symbol>
-  <symbol id="i-repeat-one" viewBox="0 0 24 24"><path d="M4 11.5V10a3 3 0 0 1 3-3h12.5M17 4.5 19.5 7 17 9.5M20 12.5V14a3 3 0 0 1-3 3H4.5M7 19.5 4.5 17 7 14.5"/><path d="M11.3 10.8l1.2-.8v4.3"/></symbol>
+  <symbol id="i-now" viewBox="0 0 24 24"><path d="M3 10v4h4l6 5V5L7 10H3z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/></symbol>
+  <symbol id="i-announce" viewBox="0 0 24 24"><path d="M4 10v4l12 5V5L4 10z"/><path d="M19 9.5a3 3 0 0 1 0 5"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></symbol>
+  <symbol id="i-playlists" viewBox="0 0 24 24"><path d="M4 6h12M4 12h12M4 18h7"/><circle cx="18" cy="17" r="2.5"/><path d="M20.5 17V8"/></symbol>
+  <symbol id="i-members" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14.2A5 5 0 0 1 21.5 19"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 0 1 5 0c0 1.7-2.5 2-2.5 3.5M12 17h.01"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10 13l9-9M16 7l2.5 2.5M14 9l2 2"/></symbol>
+  <symbol id="i-devices" viewBox="0 0 24 24"><rect x="3" y="5" width="12" height="10" rx="2"/><rect x="14" y="9" width="7" height="11" rx="1.5"/><path d="M6 19h6"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"/><path d="M14 8l4 4-4 4M18 12H9"/></symbol>
+  <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-chev-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.7 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+  <symbol id="i-speaker" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="4"/><circle cx="12" cy="14" r="3"/><path d="M12 7h.01"/></symbol>
+  <symbol id="i-passkey" viewBox="0 0 24 24"><circle cx="9" cy="7.5" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 10.2-5.4"/><circle cx="18" cy="11.5" r="2.5"/><path d="M18 14v7M18 18.5h2.2"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v4h-4"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
-  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></symbol>
-  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
-  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V5.2c0-.6.5-1.2 1.2-1.2h2.6c.7 0 1.2.6 1.2 1.2V7M6.5 7l.8 11.3c.1 1 .9 1.7 1.9 1.7h5.6c1 0 1.8-.7 1.9-1.7L17.5 7"/></symbol>
-  <symbol id="i-grip" viewBox="0 0 24 24"><path d="M5 9h14M5 15h14"/></symbol>
-  <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 14.5 6-6 6 6"/></symbol>
-  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"/></symbol>
-  <symbol id="i-back" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5"/></symbol>
-  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></symbol>
-  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
-  <symbol id="i-text" viewBox="0 0 24 24"><path d="M5 6.5h14M5 11h14M5 15.5h9"/><path d="M17 15v5l2.5-2.2"/></symbol>
-  <symbol id="i-note" viewBox="0 0 24 24"><circle cx="8" cy="17.5" r="2.5"/><circle cx="17" cy="15.5" r="2.5"/><path d="M10.5 17.5V6.5l9-2v11"/></symbol>
-  <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10M21 12h0"/></symbol>
-  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v3.8h-3.8"/></symbol>
-  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M14 4.5H7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h7M11 12h9.5M17 8.5l3.5 3.5-3.5 3.5"/></symbol>
-  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="3.8"/><path d="m10.8 12.3 8.2-8.2M16 7l2.5 2.5M14 9l2 2"/></symbol>
-  <symbol id="i-offline" viewBox="0 0 24 24"><path d="M3.5 9.5h3l4.5-4v13l-4.5-4h-3z"/><path d="m15 9.5 5 5M20 9.5l-5 5"/></symbol>
-  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h0"/></symbol>
-  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10z"/><path d="m13.5 6.5 4 4"/></symbol>
-  <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.6"/><path d="M8 16a5.6 5.6 0 0 1 0-8M16 8a5.6 5.6 0 0 1 0 8M5.2 18.8a9.6 9.6 0 0 1 0-13.6M18.8 5.2a9.6 9.6 0 0 1 0 13.6"/></symbol>
-  <symbol id="i-mark" viewBox="0 0 64 64"><defs><linearGradient id="mk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#18a3a8"/><stop offset=".55" stop-color="#0b6f78"/><stop offset="1" stop-color="#5a3b78"/></linearGradient><radialGradient id="mkg" cx=".3" cy=".15" r=".8"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".6" stop-color="#fff" stop-opacity="0"/></radialGradient></defs><rect width="64" height="64" rx="15" fill="url(#mk)" stroke="none"/><rect width="64" height="64" rx="15" fill="url(#mkg)" stroke="none"/><circle cx="26" cy="32" r="5" fill="#fff" stroke="none"/><path d="M32.4 24.3A10 10 0 0 1 32.4 39.7M37.6 18.2A18 18 0 0 1 37.6 45.8M42.7 12.1A26 26 0 0 1 42.7 51.9" fill="none" stroke="#fff" stroke-width="4.4" stroke-linecap="round" opacity=".95"/></symbol>
 </svg>
-<div id="ambient" aria-hidden="true">
-  <div class="mood mood-idle on" data-mood="idle"></div>
-  <div class="mood mood-music" data-mood="music"></div>
-  <div class="mood mood-announce" data-mood="announce"></div>
-  <div class="mood mood-offline" data-mood="offline"></div>
-  <canvas class="amb-art" width="48" height="36"></canvas>
-  <div class="amb-scrim"></div>
-</div>
+<div class="ambient" aria-hidden="true"></div>
 <div id="app"></div>
 <div class="toasts" id="toasts"></div>
-<noscript><p style="padding:24px">หน้านี้ต้องเปิดใช้ JavaScript</p></noscript>
+<noscript><p style="padding:24px">This page needs JavaScript. / หน้านี้ต้องเปิดใช้ JavaScript</p></noscript>
 </body>
 </html>

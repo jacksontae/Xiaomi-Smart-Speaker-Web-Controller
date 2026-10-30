@@ -7,17 +7,22 @@
 #   sh deploy/remote/mosquitto/add-user.sh relay-1                   # the relay's own login
 #   docker compose -f deploy/remote/docker-compose.yml up -d --build
 #
+# The backup service saves data.db (online SQLite backup) and config.json every night; see README
+# "Backups and restore" for listing, copying off the VM and restoring.
+#
 # In the Cloudflare dashboard, point the tunnel's public hostnames at http://speaker-service:8090 and
 # http://mosquitto:9001. Those names only resolve inside this compose network, so run cloudflared from this
 # file; a cloudflared installed on the host answers 502 (stop it: systemctl disable --now cloudflared).
 #
 # Every value below is a placeholder. Real hostnames, broker credentials and tunnel tokens go in .env
 # (git-ignored), never in this file.
+x-speaker-build: &speaker-build
+  context: ../..
+  dockerfile: deploy/remote/Dockerfile
+
 services:
   speaker-service:
-    build:
-      context: ../..
-      dockerfile: deploy/remote/Dockerfile
+    build: *speaker-build
     restart: unless-stopped
     environment:
       SPEAKER_TRANSPORT: mqtt
@@ -37,6 +42,19 @@ services:
       - "127.0.0.1:8090:8090"
     depends_on:
       - mosquitto
+
+  # Same image and user as the service, so it can read the database and its WAL. Idle except for a few
+  # seconds a night. Backups stay on this VM; copy them elsewhere too (see README).
+  backup:
+    build: *speaker-build
+    restart: unless-stopped
+    command: ["python", "backup.py", "--daemon"]
+    environment:
+      BACKUP_TIME: ${BACKUP_TIME:-03:30}         # HH:MM, UTC
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}            # newest backups kept
+    volumes:
+      - speaker-data:/data
+      - speaker-backups:/backups
 
   mosquitto:
     image: eclipse-mosquitto:2.1.2-alpine
@@ -59,4 +77,5 @@ services:
 
 volumes:
   speaker-data:
+  speaker-backups:
   mosquitto-data:

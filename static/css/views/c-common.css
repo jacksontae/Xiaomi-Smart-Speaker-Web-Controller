@@ -1,0 +1,63 @@
+/* Owner/account pages (members, activity, settings, prefs, account, auth): grouped cards, setting rows,
+   captions, badges, two-column layout on desktop. Built by js/c-kit.js. */
+
+.c-cap { margin: 6px 0 -8px 8px; font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--ink-2); }
+.c-card { border-radius: var(--r-lg); background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: var(--glass-hi); overflow: hidden; }
+.c-card > * + * { border-top: 1px solid var(--line); }
+.c-card > .c-pad { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.c-note { margin: -6px 8px 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+
+.c-row { display: flex; align-items: center; gap: 12px; min-height: 56px; width: 100%; padding: 10px 16px; border: 0; background: transparent; color: var(--ink); font-size: 16px; text-align: left; text-decoration: none; }
+.c-row-tx { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.c-title { font-size: 16px; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+.c-sub { font-size: 13px; line-height: 1.5; color: var(--ink-2); overflow-wrap: anywhere; }
+.c-sub.err { color: var(--danger-ink); }
+.c-val { flex: 0 0 auto; font-size: 14px; color: var(--ink-2); }
+.c-chev { flex: 0 0 auto; font-size: 20px; line-height: 1; color: var(--ink-3); }
+a.c-link:hover, button.c-link:hover { background: var(--fill); color: var(--ink); }
+.c-row .btn { flex: 0 0 auto; min-height: 40px; padding: 0 16px; font-size: 15px; }
+.c-row.danger .c-title { color: var(--danger); }
+.c-stack { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
+.c-stack > .c-title { font-weight: 500; }
+
+.c-tile { width: 36px; height: 36px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border-radius: 11px; background: var(--accent-tint); color: var(--accent); }
+.c-tile .icon { width: 18px; height: 18px; }
+.c-tile.lamp { background: color-mix(in srgb, var(--lamp) 22%, transparent); color: var(--warn); }
+.c-tile.lotus { background: color-mix(in srgb, var(--lotus) 16%, transparent); color: var(--lotus-ink); }
+.c-tile.danger { background: var(--danger-tint); color: var(--danger); }
+.c-tile.plain { background: var(--fill); color: var(--ink); }
+.c-g { display: inline-flex; flex: 0 0 auto; }
+.c-g .icon { width: 16px; height: 16px; }
+
+.c-badge { display: inline-flex; align-items: center; min-height: 24px; padding: 0 10px; border-radius: var(--pill); background: var(--accent-tint); color: var(--accent); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.c-badge.danger { background: var(--danger-tint); color: var(--danger-ink); }
+.c-badge.plain { background: transparent; color: var(--ink-2); font-weight: 500; padding: 0; }
+
+.c-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.c-confirm { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border-radius: var(--r-row); background: var(--danger-tint); }
+.c-confirm p { font-size: 15px; line-height: 1.5; }
+.c-inline { display: flex; gap: 10px; align-items: center; }
+.c-inline > .input, .c-inline > .pw { flex: 1 1 auto; min-width: 0; }
+.c-inline > .btn { flex: 0 0 auto; }
+.c-empty { padding: 28px 16px; text-align: center; color: var(--ink-2); font-size: 15px; }
+.c-range { width: 100%; accent-color: var(--accent); height: 32px; }
+.c-num { width: 104px; height: 44px; text-align: center; font-size: 17px; font-weight: 600; }
+.c-seg-wrap { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
+.c-seg-wrap > .c-title { font-weight: 500; }
+.c-save { display: flex; align-items: center; gap: 12px; }
+.c-save .small { white-space: nowrap; }
+
+/* back link to Account: phones only */
+@media (min-width: 744px) { .c-phone-only { display: none !important; } }
+@media (max-width: 743.98px) { .c-large-only { display: none !important; } }
+
+/* desktop: two columns where the boards show them */
+.c-cols { display: flex; flex-direction: column; gap: 16px; }
+.c-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (min-width: 1280px) {
+  .c-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+}
+.c-count { font-size: 16px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.c-sub .help-link, .c-note .help-link { min-height: 0; font-size: 13px; }
+/* one column below desktop: sections follow their `order` instead of the column they sit in */
+@media (max-width: 1279.98px) { .c-cols.c-reorder > .c-col { display: contents; } }

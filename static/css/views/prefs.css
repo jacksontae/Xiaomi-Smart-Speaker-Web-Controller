@@ -1,0 +1,15 @@
+/* Account + App settings (account.js, prefs.js, c-account.js). Cards/rows: c-common.css. */
+.ca-head { display: flex; align-items: center; gap: 14px; }
+.ca-head-tx { flex: 1 1 auto; min-width: 0; }
+.ca-name { font-size: 20px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.acc-head { padding: 4px 4px 0; }
+.ca-namefield { padding-top: 12px; border-top: 1px solid var(--line); }
+.ca-danger { color: var(--danger); border-color: var(--danger-tint); }
+.ca-add .c-title { color: var(--accent); font-weight: 500; }
+.ca-add .c-tile { background: transparent; color: var(--accent); }
+.ca-pad:empty { display: none; }
+.ca-pad { padding: 0 16px 12px; border-top: 0 !important; }
+.ca-form { display: flex; flex-direction: column; gap: 14px; }
+.ca-pks > * + * { border-top: 1px solid var(--line); }
+.p-lead { margin: -4px 4px 0; }
+.gsi-slot { min-height: 52px; display: flex; justify-content: center; }

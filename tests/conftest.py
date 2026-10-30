@@ -1,10 +1,12 @@
 """Test setup: isolate config/cache/database in a temp dir and replace the speaker with a fake."""
+import asyncio
 import os
 import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 _TMP = Path(tempfile.mkdtemp(prefix="speaker-test-"))
@@ -25,6 +27,7 @@ PASSWORD_HASH = hash_password(PASSWORD)  # scrypt is slow; hash once for every t
 REAL_SCHEDULE_PREFETCH = app_module.schedule_prefetch
 REAL_YT_DOWNLOAD = app_module.yt_download
 REAL_YT_EXTRACT = app_module.yt_extract
+REAL_ENSURE_PROBE = app_module.ensure_probe
 
 
 class FakeMediaController:
@@ -107,17 +110,29 @@ def _no_network(*args, **kwargs):
     raise AssertionError("tests must not reach YouTube; monkeypatch yt_download / yt_extract")
 
 
+def _no_http(request):
+    raise AssertionError(f"tests must not reach {request.url.host}; mock app.http / app.feed_http")
+
+
 @pytest.fixture(autouse=True)
 def fresh_state(monkeypatch, tmp_path):
-    """Empty database, no queue, no throttling history; background tasks recorded instead of spawned."""
+    """Empty database and upload dir, no queue, no throttling history, no network, speaker not known offline;
+    background tasks recorded instead of spawned."""
     monkeypatch.setattr(app_module, "db", Store(tmp_path / "data.db"))
     monkeypatch.setattr(app_module, "login_throttle", Throttle(limit=5, window=300))
     monkeypatch.setattr(app_module, "yt_download", _no_network)
     monkeypatch.setattr(app_module, "yt_extract", _no_network)
+    monkeypatch.setattr(app_module, "http", httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
+    monkeypatch.setattr(app_module, "feed_http", httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
+    monkeypatch.setattr(app_module, "MEDIA_DIR", tmp_path / "media")
     app_module.clear_queue()
+    app_module._talk = app_module._talk_last = app_module._talk_on_speaker = None
     app_module._downloads.clear()
-    spawned = SimpleNamespace(watchers=0, prefetch=[])
+    spawned = SimpleNamespace(watchers=0, prefetch=[], probes=0)
+    app_module.reset_reachability()
+    monkeypatch.setattr(app_module, "cast_lock", asyncio.Lock())  # a contended lock binds to its test's event loop
     monkeypatch.setattr(app_module, "ensure_queue_watcher", lambda: setattr(spawned, "watchers", spawned.watchers + 1))
+    monkeypatch.setattr(app_module, "ensure_probe", lambda: setattr(spawned, "probes", spawned.probes + 1))
     monkeypatch.setattr(app_module, "schedule_prefetch", lambda q: spawned.prefetch.append(q.peek_next()))
     return spawned
 
