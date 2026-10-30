@@ -7,6 +7,10 @@
 #   sh deploy/remote/mosquitto/add-user.sh relay-1                   # the relay's own login
 #   docker compose -f deploy/remote/docker-compose.yml up -d --build
 #
+# In the Cloudflare dashboard, point the tunnel's public hostnames at http://speaker-service:8090 and
+# http://mosquitto:9001. Those names only resolve inside this compose network, so run cloudflared from this
+# file; a cloudflared installed on the host answers 502 (stop it: systemctl disable --now cloudflared).
+#
 # Every value below is a placeholder. Real hostnames, broker credentials and tunnel tokens go in .env
 # (git-ignored), never in this file.
 services:
