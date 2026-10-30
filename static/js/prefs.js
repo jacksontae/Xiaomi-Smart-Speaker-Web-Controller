@@ -1,6 +1,7 @@
 // Per-device app preferences: language, theme, reduce motion. Stored in localStorage (spk.lang, spk.theme,
 // spk.motion), resolved and written to <html lang / data-theme / data-motion>. CSS styles off those attributes;
-// JS asks motionReduced(). js/boot.js applies the same values before first paint.
+// JS asks motionReduced(). js/boot.js applies the same values before first paint, plus <html data-os="android">
+// on Android (the look follows the OS; isAndroid() below).
 
 const KEYS = { lang: 'spk.lang', theme: 'spk.theme', motion: 'spk.motion' };
 const ALLOWED = { lang: ['en', 'th'], theme: ['system', 'light', 'dark'], motion: ['system', 'on', 'off'] };
@@ -31,6 +32,11 @@ export const resolvedTheme = () => { const t = read('theme'); return t === 'syst
 /** True when animation should be skipped: the app setting, or the OS setting when the app follows the system. */
 export function motionReduced() { const m = read('motion'); return m === 'on' || (m === 'system' && motionMq.matches); }
 
+/** The Android look: the device runs Android (Chrome's client hints, else the user agent). Same test as boot.js,
+ *  which sets <html data-os="android"> and loads css/android.css before first paint. Fixed for the page's life. */
+const ANDROID = (navigator.userAgentData && navigator.userAgentData.platform === 'Android') || /Android/i.test(navigator.userAgent);
+export const isAndroid = () => ANDROID;
+
 /** Run fn({lang, theme, motionReduced}) whenever any of them changes (setting, OS, or another tab). Returns unsubscribe. */
 export function onChange(fn) { subs.add(fn); return () => subs.delete(fn); }
 
@@ -40,7 +46,9 @@ export function apply() {
   root.lang = state.lang;
   root.dataset.theme = state.theme;
   root.dataset.motion = state.motionReduced ? 'reduce' : 'full';
-  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => { m.content = state.theme === 'dark' ? '#0b1417' : '#e9f0ef'; m.removeAttribute('media'); });
+  // the browser/status bar colour: the page background of the current look (Android: M3 surface)
+  const bar = ANDROID ? (state.theme === 'dark' ? '#0e1415' : '#f2f5f5') : (state.theme === 'dark' ? '#0b1417' : '#e9f0ef');
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => { m.content = bar; m.removeAttribute('media'); });
   const sig = JSON.stringify(state);
   if (sig === last) return;
   last = sig;

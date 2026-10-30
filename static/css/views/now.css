@@ -108,3 +108,120 @@ button.np-row:hover { background: var(--fill); }
 }
 
 :root[data-motion="reduce"] .np-fill { transition: none; }
+
+/* ================= Android look (boards A_Now / AT_Now; css/android.css has the tokens) =================
+   The pinned title with the speaker chip under it (not in the top bar), one player card whose top band carries a
+   subtle tint of the speaker's state (data-np, set by now.js), wavy progress (js/a-wavy.js), and the transport and
+   queue tools as M3 Expressive button groups. Heat: the only loop is the wave's phase, and only while playing. */
+@property --np-tint { syntax: "<color>"; inherits: true; initial-value: transparent; }
+:root[data-os="android"] .now-page {
+  --np-tint: var(--md-surface-high);
+  transition: --np-tint 700ms var(--ease);
+}
+:root[data-os="android"] .now-page:is([data-np="playing"], [data-np="loading"]) { --np-tint: var(--md-primary-container); }
+:root[data-os="android"] .now-page[data-np="paused"] { --np-tint: color-mix(in srgb, var(--md-primary-container) 40%, var(--md-surface-high)); }
+:root[data-os="android"] .now-page[data-np="idle"] { --np-tint: var(--md-secondary-container); }
+:root[data-os="android"] .now-page[data-np="announce"] { --np-tint: color-mix(in srgb, var(--md-lamp) 42%, var(--md-card)); }
+:root[data-os="android"] .now-page[data-np="off"] { --np-tint: color-mix(in srgb, var(--md-error-container) 75%, var(--md-card)); }
+:root[data-os="android"][data-theme="dark"] .now-page[data-np="off"] { --np-tint: color-mix(in srgb, var(--md-error-container) 40%, var(--md-card)); }
+
+/* header: title, then the speaker chip; the top bar keeps only its title, Help and the avatar on this page (shell.js) */
+:root[data-os="android"] .now-page > .phd { display: flex; flex-direction: column; align-items: flex-start; flex-wrap: nowrap; gap: 10px; }
+:root[data-os="android"] .now-page > .phd .phd-r .spchip { display: inline-flex; }
+:root[data-os="android"] .now-page > .phd .phd-r .help-btn { display: none; }
+
+/* the player card */
+:root[data-os="android"] .now-page .np-col { gap: 0; padding-bottom: 20px; border-radius: var(--r-lg); background: var(--md-card); overflow: hidden; }
+:root[data-os="android"] .now-page .np-hero { gap: 0; }
+:root[data-os="android"] .now-page .np-stage {
+  margin: 0; padding: 16px 0 8px;
+  background: radial-gradient(60% 75% at 50% 48%, var(--np-tint), transparent 72%),
+    linear-gradient(color-mix(in srgb, var(--np-tint) 38%, var(--md-card)), var(--md-card));
+}
+:root[data-os="android"] .now-page .np-stage .spk-stage { --spk-size: clamp(180px, 52vw, 230px); }
+:root[data-os="android"] .now-page .np-meta { padding: 8px 20px 0; }
+:root[data-os="android"] .now-page .np-kind { color: var(--md-primary); }
+:root[data-os="android"] .now-page .np-title { font-size: 26px; line-height: 1.3; }
+:root[data-os="android"] .now-page .np-line { font-size: 14px; color: var(--md-on-surface-variant); }
+:root[data-os="android"] .now-page .np-prog { padding: 14px 20px 0; }
+:root[data-os="android"] .now-page .np-times { font-size: 12px; font-weight: 600; color: var(--md-on-surface-variant); }
+:root[data-os="android"] .now-page .np-livetag { margin: 12px 20px 0; }
+:root[data-os="android"] .now-page .np-livetag span { background: var(--md-lamp); }
+:root[data-os="android"] .now-page .np-acts { padding: 16px 20px 0; }
+:root[data-os="android"] .now-page .np-acts .btn { flex: 1 1 auto; }
+
+/* wavy progress */
+:root[data-os="android"] .np-bar.np-wavy { height: 16px; overflow: visible; border-radius: 0; background: none; }
+:root[data-os="android"] .np-wavy .np-fill { display: none; }
+:root[data-os="android"] .aw { position: absolute; inset: 0; }
+:root[data-os="android"] .aw-on { position: absolute; left: 0; top: 0; bottom: 0; width: var(--np-pos, 0%); overflow: hidden; }
+:root[data-os="android"] .aw-wave { position: absolute; left: 0; top: 0; fill: none; stroke: var(--md-primary); stroke-width: 4px; stroke-linecap: round; }
+:root[data-os="android"] .aw-off { position: absolute; right: 0; top: 6px; left: min(calc(var(--np-pos, 0%) + 6px), calc(100% - 4px)); height: 4px; border-radius: 2px; background: var(--md-secondary-container); }
+:root[data-os="android"] .aw-off::after { content: ""; position: absolute; right: 0; top: 0; width: 4px; height: 4px; border-radius: 50%; background: var(--md-primary); }
+/* 10 steps a second, 2 px each: reads as a drift, costs ~1% CPU where a 60 fps glide cost ~5% (cpu probe, 412x915) */
+:root[data-os="android"] .now-page[data-np="playing"] .aw-wave { will-change: transform; animation: aw-phase 1.4s steps(14) infinite; }
+:root[data-os="android"][data-motion="reduce"] .aw-wave { animation: none !important; }
+@keyframes aw-phase { to { transform: translateX(-28px); } }
+
+/* transport: prev | play | next as one button group (the pressed one widens, its neighbours give way), stop apart.
+   Play is a circle while paused and morphs to a rounded square while playing. */
+:root[data-os="android"] .now-page .np-ctrls { gap: 4px; padding: 16px 16px 0; }
+:root[data-os="android"] .np-transport { justify-content: center; gap: 8px; min-height: 0; padding: 0; border-radius: 0; background: none; }
+:root[data-os="android"] .np-b {
+  --w: 56px; width: var(--w); height: 56px; border-radius: 28px; background: var(--md-tonal); color: var(--md-on-tonal);
+  transition: width var(--t-slow) var(--md-spring), border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .np-b:hover { background: color-mix(in srgb, var(--md-on-tonal) 8%, var(--md-tonal)); }
+:root[data-os="android"] .np-b:active { transform: none; }
+:root[data-os="android"] .np-transport:has(> .np-b:not(:last-child):active) > .np-b:not(:last-child):not(:active) { width: calc(var(--w) - 6px); }
+:root[data-os="android"] .np-b:not(:last-child):active { width: calc(var(--w) + 12px); border-radius: 16px; }
+:root[data-os="android"] .np-b.np-main { --w: 72px; height: 72px; border-radius: 36px; background: var(--md-primary); color: var(--md-on-primary); }
+:root[data-os="android"] .np-b.np-main[data-on="true"] { --w: 96px; border-radius: 22px; }
+:root[data-os="android"] .np-b.np-main:hover { background: color-mix(in srgb, var(--md-on-primary) 8%, var(--md-primary)); }
+:root[data-os="android"] .np-b.np-main:active { border-radius: 16px; }
+:root[data-os="android"] .np-b.np-main .icon.lg { width: 30px; height: 30px; }
+:root[data-os="android"] .np-b:last-child { margin-left: 8px; background: transparent; color: var(--md-on-surface-variant); }
+:root[data-os="android"] .np-b:last-child:hover { background: color-mix(in srgb, var(--md-state) 8%, transparent); }
+:root[data-os="android"] .np-b:last-child:active { border-radius: 16px; }
+:root[data-os="android"] .np-volume { min-height: 56px; padding: 0 4px 0 8px; border-radius: 0; background: none; color: var(--md-on-surface-variant); }
+:root[data-os="android"] .np-volout { font-size: 16px; font-weight: 700; }
+
+/* queue: shuffle | repeat as a connected button group, rows in a card */
+:root[data-os="android"] .np-qhead { margin-bottom: 8px; padding: 0 4px 0 8px; }
+:root[data-os="android"] .np-tools { gap: 2px; }
+:root[data-os="android"] .np-tool {
+  width: 52px; height: 44px; border-radius: 8px; background: var(--md-tonal); color: var(--md-on-tonal);
+  transition: border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .np-tool:first-child { border-radius: 22px 8px 8px 22px; }
+:root[data-os="android"] .np-tool:last-child { border-radius: 8px 22px 22px 8px; }
+:root[data-os="android"] .np-tool[aria-pressed="true"] { border-radius: 22px; background: var(--md-primary); color: var(--md-on-primary); }
+:root[data-os="android"] .np-tool:active { border-radius: 14px; }
+:root[data-os="android"] .np-list { border: 0; border-radius: var(--r-lg); background: var(--md-card); overflow: hidden; }
+:root[data-os="android"] .np-list li + li { border-top: 0; background-image: linear-gradient(var(--line), var(--line)); background-size: calc(100% - 32px) 1px; background-position: 16px 0; background-repeat: no-repeat; }
+:root[data-os="android"] .np-row { min-height: 68px; }
+:root[data-os="android"] .np-row.cur { background: color-mix(in srgb, var(--md-primary) 10%, var(--md-card)); }
+:root[data-os="android"] .np-row.cur .np-rt { color: var(--md-on-surface); }
+:root[data-os="android"] .np-thumb { border-radius: 12px; background: var(--md-surface-container); color: var(--md-primary); }
+:root[data-os="android"] .np-row.cur .np-thumb:not(.img) { background: var(--md-inverse-surface); color: var(--md-lamp); }
+:root[data-os="android"][data-theme="dark"] .np-row.cur .np-thumb:not(.img) { background: var(--md-surface-highest); }
+:root[data-os="android"] .np-more { margin: 8px 0 0 8px; }
+
+/* tablet (AT_Now): title 32 px from the top, not sticky; portrait one centred column, landscape player | queue */
+@media (min-width: 744px) {
+  :root[data-os="android"] .now-page > .phd { position: static; margin-top: 0; padding: 0 0 20px; }
+  :root[data-os="android"] .now-page > .phd::before { display: none; }
+  :root[data-os="android"] .now-page > .phd .pt { transform: none; }
+  :root[data-os="android"] .now-page .np-grid { max-width: 680px; }
+  :root[data-os="android"] .now-page .np-hero { flex-direction: column; align-items: stretch; gap: 0; }
+  :root[data-os="android"] .now-page .np-stage .spk-stage { --spk-size: 220px; }
+  :root[data-os="android"] .now-page .np-meta { padding: 12px 24px 0; }
+  :root[data-os="android"] .now-page .np-title { font-size: 28px; }
+  :root[data-os="android"] .now-page :is(.np-prog, .np-acts) { padding-inline: 24px; }
+  :root[data-os="android"] .now-page .np-ctrls { flex-direction: column; padding-inline: 20px; }
+  :root[data-os="android"] .now-page .np-ctrls > * { flex: 0 0 auto; }
+}
+@media (min-width: 1024px) {
+  :root[data-os="android"] .now-page .np-grid { max-width: 1120px; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+  :root[data-os="android"] .now-page .np-side { position: sticky; top: 24px; }
+}

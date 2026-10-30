@@ -1,0 +1,61 @@
+/* Android kit (js/android-kit.js): extended FAB and full-screen dialog. Loaded only on Android by kitCss(ctx); every
+   rule is scoped to :root[data-os="android"] anyway. Tokens: css/android.css. */
+
+/* ---------- extended FAB (phones): 56 px, radius 16, primaryContainer, above the nav pill / Now Bar ---------- */
+:root[data-os="android"] .ak-fab {
+  position: fixed; z-index: 38; right: max(16px, calc((100% - 560px) / 2)); bottom: calc(96px + var(--safe-b));
+  display: inline-flex; align-items: center; height: 56px; min-width: 56px; padding: 0 16px; border: 0; border-radius: 16px;
+  background: var(--md-primary-container); color: var(--md-on-primary-container); font-size: 16px; font-weight: 700; line-height: 1;
+  box-shadow: 0 4px 10px rgba(0, 30, 32, .18), 0 1px 3px rgba(0, 30, 32, .16); -webkit-tap-highlight-color: transparent;
+  transform: translateY(calc(-1 * var(--ak-lift, 0px)));
+  transition: transform var(--t-slow) var(--md-spring), border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease);
+  animation: ak-fab-in var(--t-slow) var(--md-spring) backwards;
+}
+:root[data-os="android"][data-nowbar] .ak-fab { bottom: calc(152px + var(--safe-b)); }
+:root[data-os="android"] .ak-fab > .icon { flex: 0 0 auto; width: 24px; height: 24px; }
+:root[data-os="android"] .ak-fab-l {
+  max-width: 260px; margin-left: 12px; margin-right: 4px; overflow: hidden; white-space: nowrap;
+  transition: max-width var(--t-slow) var(--ease), margin var(--t-slow) var(--ease), opacity var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .ak-fab.small .ak-fab-l { max-width: 0; margin: 0; opacity: 0; }
+:root[data-os="android"] .ak-fab:hover { background: color-mix(in srgb, var(--md-on-primary-container) 8%, var(--md-primary-container)); }
+:root[data-os="android"] .ak-fab:active { border-radius: 24px; background: color-mix(in srgb, var(--md-on-primary-container) 12%, var(--md-primary-container)); }
+:root[data-os="android"] .ak-fab:focus-visible { outline-offset: 3px; }
+:root[data-os="android"][data-theme="dark"] .ak-fab { box-shadow: 0 4px 10px rgba(0, 0, 0, .45); }
+@keyframes ak-fab-in { from { opacity: 0; transform: scale(.6); } }
+/* the page scrolls clear of it: nav pill (108) / + Now Bar (164) from android.css, plus the FAB and a gap */
+@media (max-width: 743.98px) {
+  :root[data-os="android"][data-fab] .main { padding-bottom: calc(180px + var(--safe-b)); }
+  :root[data-os="android"][data-fab][data-nowbar] .main { padding-bottom: calc(236px + var(--safe-b)); }
+  :root[data-os="android"] .ak-replaced { display: none !important; }
+}
+@media (min-width: 744px) {
+  :root[data-os="android"] .ak-fab { display: none; }
+}
+
+/* ---------- full-screen dialog (phones): top bar X / title / Save, big title, scrolling body ---------- */
+:root[data-os="android"] dialog.ak-full { background: transparent; }
+:root[data-os="android"] .ak-full-panel {
+  position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+  background: var(--md-surface); color: var(--md-on-surface); animation: ak-full-in var(--t-slow) cubic-bezier(.2, 0, 0, 1) both;
+}
+:root[data-os="android"] .ak-full-panel::-webkit-scrollbar { display: none; }
+:root[data-os="android"] .ov.closing .ak-full-panel { animation: ak-full-out 200ms var(--ease) both; }
+@keyframes ak-full-in { from { opacity: .4; transform: translateY(48px); } }
+@keyframes ak-full-out { to { opacity: 0; transform: translateY(32px); } }
+:root[data-os="android"] .ak-full-bar {
+  position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 4px; min-height: calc(64px + var(--safe-t));
+  padding: var(--safe-t) 12px 0 4px; background: var(--md-surface); transition: box-shadow var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .ak-full-bar[data-under="true"] { background: var(--md-bar); box-shadow: 0 1px 0 var(--md-surface-high); }
+:root[data-os="android"] .ak-full-x { width: 48px; height: 48px; color: var(--md-on-surface); }
+:root[data-os="android"] .ak-full-bt {
+  flex: 1 1 auto; min-width: 0; padding-left: 4px; font-size: 20px; font-weight: 700; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; opacity: 0; transition: opacity var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .ak-full-bar[data-title="true"] .ak-full-bt { opacity: 1; }
+:root[data-os="android"] .ak-full-save { flex: 0 0 auto; --btn-r: 20px; --btn-r-press: 12px; min-height: 40px; padding: 0 20px; font-size: 15px; }
+:root[data-os="android"] .ak-full-t { padding: 12px 24px 0; font-size: 34px; line-height: 44px; font-weight: 700; letter-spacing: -.2px; overflow-wrap: anywhere; }
+:root[data-os="android"] .ak-full-body { display: flex; flex-direction: column; gap: 16px; padding: 16px 16px calc(32px + var(--safe-b)); }
+/* toasts stay at the bottom (the Save button is at the top) */
+:root[data-os="android"] body:has(dialog.ak-full[open]) .toasts { top: auto; bottom: calc(16px + var(--safe-b)); }

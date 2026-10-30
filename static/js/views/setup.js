@@ -1,7 +1,9 @@
 // First-time setup (board Setup): shown instead of Sign in while the server has no account yet. Creates the owner
 // account with the API token from ./speakerctl token. On iPhone there is no card: the form sits on the backdrop.
+// Android (A_Setup / AT_Setup): the lock-screen date and clock of Sign in sit above the form.
 import { h, field, passwordInput } from '../ui.js';
-import { register, t } from '../i18n.js';
+import { register, t, fmtDate, fmtClock } from '../i18n.js';
+import { isAndroid } from '../prefs.js';
 import { errorText } from '../api.js';
 import { langToggle } from './login.js';
 
@@ -107,10 +109,21 @@ export async function render(ctx) {
     },
   }, t('setup.signIn'));
 
+  let hero = null;
+  if (isAndroid()) {
+    const dateEl = h('p', { class: 'auth-date' });
+    const clockEl = h('p', { class: 'auth-clock' });
+    const tick = () => { const d = new Date(); dateEl.textContent = fmtDate(d); clockEl.textContent = fmtClock(d); };
+    tick();
+    const timer = setInterval(tick, 1000);
+    ctx.onCleanup(() => clearInterval(timer));
+    hero = h('section', { class: 'auth-hero setup-hero', 'aria-label': t('login.clock') }, dateEl, clockEl);
+  }
+
   if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => token.input.focus({ preventScroll: true }), 50);
   document.title = `${t('setup.title')} · ${t('app.name')}`;
   return h('div', { class: 'auth setup' },
     h('div', { class: 'auth-bloom', 'aria-hidden': 'true' }),
     langToggle(),
-    h('div', { class: 'setup-col' }, form, h('p', { class: 'setup-foot' }, `${t('setup.haveAcc')} `, signInBtn)));
+    h('div', { class: 'setup-col' }, hero, form, h('p', { class: 'setup-foot' }, `${t('setup.haveAcc')} `, signInBtn)));
 }

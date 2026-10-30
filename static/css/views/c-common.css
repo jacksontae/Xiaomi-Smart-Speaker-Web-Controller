@@ -61,3 +61,33 @@ a.c-link:hover, button.c-link:hover { background: var(--fill); color: var(--ink)
 .c-sub .help-link, .c-note .help-link { min-height: 0; font-size: 13px; }
 /* one column below desktop: sections follow their `order` instead of the column they sit in */
 @media (max-width: 1279.98px) { .c-cols.c-reorder > .c-col { display: contents; } }
+
+/* ======================= Android look (A_/AT_ Members, Settings, Activity, Account, Prefs, Auth) ======================= */
+/* tile tones stay readable as tones (android.css gives every tile the secondary container) */
+:root[data-os="android"] .c-tile.lamp { background: color-mix(in srgb, var(--md-lamp) 26%, var(--md-card)); color: #7a5300; }
+:root[data-os="android"] .c-tile.lotus { background: color-mix(in srgb, var(--lotus) 18%, var(--md-card)); color: var(--lotus-ink); }
+:root[data-os="android"] .c-tile.danger { background: var(--md-error-container); color: var(--md-on-error-container); }
+:root[data-os="android"] .c-tile.plain { background: var(--md-surface-high); color: var(--md-on-surface-variant); }
+:root[data-os="android"][data-theme="dark"] .c-tile.lamp { background: color-mix(in srgb, var(--md-lamp) 22%, var(--md-card)); color: var(--md-lamp); }
+:root[data-os="android"] .c-row.danger .c-title { color: var(--md-error); }
+:root[data-os="android"] .c-chev { color: var(--md-on-surface-variant); }
+:root[data-os="android"] .c-row { min-height: 64px; gap: 16px; }
+:root[data-os="android"] .c-cap { padding-left: 4px; }
+:root[data-os="android"] .c-note { margin: -8px 12px 0; }
+:root[data-os="android"] .c-confirm { border-radius: var(--r-md); background: var(--md-error-container); color: var(--md-on-error-container); }
+
+/* a labelled text field in a card (Speaker name, address): the label sits inside the box (M3 filled-in label) */
+:root[data-os="android"] .c-stack:has(> label.c-title:first-child + .input) { position: relative; }
+:root[data-os="android"] .c-stack > label.c-title:first-child:has(+ .input) {
+  position: absolute; z-index: 1; top: 23px; left: 33px; right: 33px; font-size: 12px; line-height: 16px; font-weight: 600;
+  color: var(--md-on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+:root[data-os="android"] .c-stack:focus-within > label.c-title:first-child { color: var(--md-primary); }
+:root[data-os="android"] .c-stack > label.c-title:first-child + .input { height: 60px; padding-top: 18px; }
+
+/* tablets: one centred column like the AT_ boards (no desktop two-column layout) */
+@media (min-width: 744px) {
+  :root[data-os="android"] .page:has(> .c-cols) { max-width: 680px; }
+  :root[data-os="android"] .c-cols { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
+  :root[data-os="android"] .c-cols.c-reorder > .c-col { display: contents; }
+}

@@ -3,7 +3,7 @@
 // the server offers them. No link to first-time setup: a fresh server opens Setup instead (app.js).
 import { h, icon, field, passwordInput } from '../ui.js';
 import { register, t, lang, fmtDate, fmtClock } from '../i18n.js';
-import { set as setPref } from '../prefs.js';
+import { set as setPref, isAndroid } from '../prefs.js';
 import { errorText, waitText } from '../api.js';
 import { methodsOf, googleCredential, googleSignIn, passkeySignIn } from '../signin.js';
 import { speaker3d } from '../speaker3d.js';
@@ -106,9 +106,11 @@ export async function render(ctx) {
     h('div', { class: 'auth-bloom', 'aria-hidden': 'true' }), h('div', { class: 'auth-glow', 'aria-hidden': 'true' }),
     langToggle(), h('div', { class: 'auth-col' }, lg));
 
-  // one model per page: in the hero on phone/iPad, above the form on desktop (D_Login)
+  // one model per page: in the hero on phone/iPad, above the form on desktop (D_Login); Android keeps it in the hero
+  // under the clock on every size (A_Login / AT_Login, order set in auth.css)
   const desk = matchMedia('(min-width: 1280px)');
-  const placeSpk = () => { if (desk.matches) form.prepend(spk.el); else hero.prepend(spk.el); };
+  const android = isAndroid();
+  const placeSpk = () => { if (desk.matches && !android) form.prepend(spk.el); else hero.prepend(spk.el); };
   placeSpk();
   desk.addEventListener('change', placeSpk);
 

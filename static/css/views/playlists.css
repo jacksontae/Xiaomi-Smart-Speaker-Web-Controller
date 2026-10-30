@@ -60,3 +60,95 @@
   .pl-idx { display: block; }
   .pl-pane .pl-items { background: transparent; border-radius: 0; border-top: 1px solid var(--line); }
 }
+
+/* ======================= Android look (boards A_Playlists, A_PlaylistDetail, AT_Playlists, AT_PlaylistDetail) =======================
+   New playlist / Add item are FABs on phones (android-kit.css); Play all | Shuffle is a connected button group;
+   tablets in landscape (>= 960px) show list and detail side by side, the detail page on portrait tablets is two columns. */
+.pl-ic { display: none; }
+:root[data-os="android"] .pl-ic { display: block; }
+:root[data-os="android"] .tb-th.k-playlist { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+:root[data-os="android"] .pl-row { min-height: 80px; gap: 16px; padding: 12px 16px; }
+:root[data-os="android"] .pl-row .tb-th { width: 56px; height: 56px; border-radius: 16px; }
+:root[data-os="android"] .pl-row .tb-t { font-size: 16px; }
+:root[data-os="android"] .pl-row .tb-rb { width: 48px; height: 48px; transition: width var(--t-slow) var(--md-spring), border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease); }
+/* playing: the round play button morphs into a filled rounded square (M3 Expressive) */
+:root[data-os="android"] .pl-row.sel .tb-th, :root[data-os="android"] .pl-row.sel .tb-rb { background: var(--md-card); }
+:root[data-os="android"] .pl-row.on .tb-rb { width: 52px; border-radius: 14px; background: var(--md-primary); color: var(--md-on-primary); }
+
+/* detail */
+:root[data-os="android"] .pl-dv { gap: 12px; }
+:root[data-os="android"] .pl-cover { border-radius: 28px; background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+:root[data-os="android"] .pl-cover.dim { background: var(--md-surface-high); color: var(--md-outline); }
+:root[data-os="android"] .pl-name { font-size: 30px; line-height: 1.3; }
+:root[data-os="android"] .pl-meta { font-size: 15px; color: var(--md-on-surface-variant); }
+:root[data-os="android"] .pl-ctl { gap: 12px; }
+/* Play all | Shuffle: connected buttons, 2 px apart, outer corners round, inner 8 px; the pressed one widens */
+:root[data-os="android"] .pl-btns { gap: 2px; }
+:root[data-os="android"] .pl-btns .btn {
+  flex: 1 1 0; min-height: 56px; font-size: 16px;
+  transition: flex-grow var(--t-slow) var(--md-spring), border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .pl-play { border-radius: 28px 8px 8px 28px; }
+:root[data-os="android"] .pl-shuf { border-radius: 8px 28px 28px 8px; }
+:root[data-os="android"] .pl-btns .btn:active:not([disabled]) { flex-grow: 1.18; }
+:root[data-os="android"] .pl-play:active:not([disabled]) { border-radius: 18px 8px 8px 18px; }
+:root[data-os="android"] .pl-shuf:active:not([disabled]) { border-radius: 8px 18px 18px 8px; }
+:root[data-os="android"] .pl-rep { width: 56px; height: 56px; margin-left: 8px; }
+/* Add item / Reorder / Rename: small pill buttons on the surface */
+:root[data-os="android"] .pl-links { gap: 8px; }
+:root[data-os="android"] .pl-links > :first-child { margin-right: 0; }
+:root[data-os="android"] .pl-links .linkbtn {
+  min-height: 40px; gap: 8px; padding: 0 16px 0 12px; border-radius: 20px; background: var(--md-card); color: var(--md-on-surface);
+  font-size: 14px; font-weight: 600; transition: border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .pl-links .linkbtn > .icon { color: var(--md-primary); }
+:root[data-os="android"] .pl-links .linkbtn:hover { background: color-mix(in srgb, var(--md-state) 6%, var(--md-card)); color: var(--md-on-surface); }
+:root[data-os="android"] .pl-links .linkbtn:active { border-radius: 12px; }
+:root[data-os="android"] .pl-links .linkbtn[aria-pressed="true"] { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+:root[data-os="android"] .pl-it { min-height: 72px; padding: 10px 8px 10px 16px; }
+:root[data-os="android"] .pl-it.on .tb-th { background: var(--md-inverse-surface); color: var(--md-lamp); }
+:root[data-os="android"] .pl-dur { font-weight: 600; color: var(--md-on-surface-variant); }
+
+/* phones: the name is the One UI big title (no cover), like A_PlaylistDetail */
+@media (max-width: 743.98px) {
+  :root[data-os="android"] .pl-detail .pl-cover { display: none; }
+  :root[data-os="android"] .pl-detail .pl-hero { padding: 0 48px 0 8px; }
+  /* the header row only holds the More button: lay it beside the title instead of on a row of its own */
+  :root[data-os="android"] .pl-detail .pl-hd { position: relative; z-index: 1; height: 0; min-height: 0; margin: 0; padding: 0; }
+  :root[data-os="android"] .pl-detail .pl-hd .phd-r { position: absolute; top: 12px; right: 0; }
+  :root[data-os="android"] .pl-detail .pl-name { font-size: 34px; line-height: 44px; letter-spacing: -.2px; }
+}
+
+/* tablets, detail page (AT_PlaylistDetail): the name in the header, a card with cover + Play all | Shuffle on the left,
+   items on the right */
+@media (min-width: 744px) {
+  :root[data-os="android"] .pl-detail .pl-hd .pt { display: block; }
+  :root[data-os="android"] .pl-detail .pl-name { display: none; }
+  :root[data-os="android"] .pl-detail .pl-dv { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); align-items: start; gap: 12px 24px; }
+  :root[data-os="android"] .pl-detail .pl-dv > * { grid-column: 1; }
+  :root[data-os="android"] .pl-detail .pl-dv > .pl-hd { grid-column: 1 / -1; }
+  :root[data-os="android"] .pl-detail .pl-ctl { display: contents; }
+  :root[data-os="android"] .pl-detail .pl-dv > .pl-items { grid-column: 2; grid-row: 2 / span 4; }
+  :root[data-os="android"] .pl-detail .pl-hero { padding: 20px 20px 16px; border-radius: var(--r-lg) var(--r-lg) 0 0; background: var(--md-card); }
+  :root[data-os="android"] .pl-detail .pl-dv:not(:has(.pl-btns)) .pl-hero { border-radius: var(--r-lg); }
+  :root[data-os="android"] .pl-detail .pl-btns { margin-top: -12px; padding: 0 20px 20px; border-radius: 0 0 var(--r-lg) var(--r-lg); background: var(--md-card); }
+  :root[data-os="android"] .pl-detail .pl-btns .btn { gap: 6px; padding: 0 10px; font-size: 15px; white-space: nowrap; }
+  :root[data-os="android"] .pl-detail .pl-rep { width: 48px; height: 56px; margin-left: 6px; }
+  :root[data-os="android"] .pl-detail .pl-links .pl-add {
+    order: 9; flex: 1 0 100%; justify-content: center; min-height: 56px; border-radius: 28px;
+    background: var(--md-primary-container); color: var(--md-on-primary-container); font-size: 16px;
+  }
+  :root[data-os="android"] .pl-detail .pl-links .pl-add > .icon { color: inherit; }
+  :root[data-os="android"] .pl-detail .pl-links .pl-add:active { border-radius: 16px; }
+}
+
+/* tablets in landscape (two panes, AT_Playlists): list column | the open playlist without a card around it */
+:root[data-os="android"] .page.pl-desk { max-width: 1200px; }
+:root[data-os="android"] .pl-desk .pl-split { display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); gap: 24px; align-items: start; }
+:root[data-os="android"] .pl-desk .pl-listcol { position: sticky; top: 100px; }
+:root[data-os="android"] .pl-desk .pl-pane { min-height: 0; padding: 0; border-radius: 0; background: transparent; }
+:root[data-os="android"] .pl-desk .pl-pane > .pl-hint { padding: 24px 4px; }
+:root[data-os="android"] .pl-desk .pl-cover { width: 88px; height: 88px; }
+:root[data-os="android"] .pl-desk .pl-ctl { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+:root[data-os="android"] .pl-desk .pl-btns { flex: 1 1 340px; max-width: 560px; }
+:root[data-os="android"] .pl-desk .pl-pane .pl-items { border-top: 0; border-radius: var(--r-lg); background: var(--md-card); }
