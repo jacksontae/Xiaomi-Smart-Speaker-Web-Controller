@@ -144,6 +144,8 @@ function startApp() {
   applySpeakers();
   render(false);
   startPolling();
+  // passkey offer after a fresh sign-in / "passkey required" prompt (team C module; guards itself to once per load)
+  import('./c-passkey-offer.js').then((m) => m.maybePrompt({ api, user: state.user, fresh: !(state.auth && state.auth.user) })).catch(() => {});
 }
 
 async function signOut(path) {
