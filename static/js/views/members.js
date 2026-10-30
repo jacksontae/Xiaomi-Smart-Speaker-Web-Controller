@@ -44,6 +44,7 @@ register({
     'mem.methods': 'Sign-in methods', 'mem.methodsSub': 'Google, passkeys and passwords. Only owners change these.',
     'mem.pick': 'Pick a member on the left to edit.',
     'mem.empty': 'No members yet.',
+    'mem.yours': 'Your account', 'mem.others': 'Other people',
   },
   th: {
     'mem.add': 'เพิ่มสมาชิก', 'mem.addShort': 'เพิ่ม', 'mem.you': '(คุณ)', 'mem.list': 'รายชื่อสมาชิก',
@@ -76,6 +77,7 @@ register({
     'mem.methods': 'วิธีเข้าสู่ระบบ', 'mem.methodsSub': 'Google พาสคีย์ และรหัสผ่าน เฉพาะเจ้าของเปลี่ยนได้',
     'mem.pick': 'เลือกสมาชิกทางซ้ายเพื่อแก้ไข',
     'mem.empty': 'ยังไม่มีสมาชิก',
+    'mem.yours': 'บัญชีของคุณ', 'mem.others': 'คนอื่นในบ้าน',
   },
 });
 
@@ -103,7 +105,12 @@ export function render(ctx) {
   let users = [];
   let selected = null; // desktop: id shown in the pane
 
-  const list = h('div', { class: 'c-card m-list', role: 'list', 'aria-label': t('mem.list') });
+  const android = isAndroid();
+  const list = h('div', { class: 'c-card m-list', role: 'list', 'aria-label': t(android ? 'mem.others' : 'mem.list') });
+  // Android (A_Members / AT_Members): the signed-in user gets their own card, everyone else a second one
+  const mine = android ? h('div', { class: 'c-card m-mine', role: 'list', 'aria-label': t('mem.yours') }) : null;
+  const sl = (key) => h('h2', { class: 'm-sl' }, t(key));
+  const lists = android ? [sl('mem.yours'), mine, sl('mem.others'), list] : [list];
   const pane = h('section', { class: 'c-card m-pane', 'aria-label': t('mem.edit') }, h('p', { class: 'c-empty' }, t('mem.pick')));
   const plus = iconBtn('plus', t('mem.add'), () => addMember(), 'glassy c-phone-only');
   const actions = [
@@ -115,7 +122,7 @@ export function render(ctx) {
   methods.classList.add('m-methods');
   const node = h('div', { class: 'page m-page' },
     phoneBack(ctx.header({ title: t('nav.members'), back: { href: '#/account', label: t('nav.account') }, actions })),
-    h('div', { class: 'm-grid' }, h('div', { class: 'm-left' }, list, methods), pane));
+    h('div', { class: 'm-grid' }, h('div', { class: 'm-left' }, ...lists, methods), pane));
   fab(ctx, { icon: cIcon('user-plus'), label: t('mem.add'), onclick: () => addMember(), replaces: plus });
 
   function load() {
@@ -151,8 +158,18 @@ export function render(ctx) {
     return b;
   }
 
+  function paintList() {
+    const shown = android ? users.filter((u) => u.id !== me.id) : users;
+    list.replaceChildren(...(shown.length ? shown.map(rowOf) : [h('p', { class: 'c-empty' }, t('mem.empty'))]));
+    if (!android) return;
+    const self = users.find((u) => u.id === me.id);
+    mine.replaceChildren(...(self ? [rowOf(self)] : []));
+    mine.hidden = !self;
+    mine.previousElementSibling.hidden = !self;
+  }
+
   function fill() {
-    list.replaceChildren(...(users.length ? users.map(rowOf) : [h('p', { class: 'c-empty' }, t('mem.empty'))]));
+    paintList();
     const u = users.find((x) => x.id === selected);
     pane.replaceChildren(u ? editor(u, {}) : h('p', { class: 'c-empty' }, t('mem.pick')));
   }
@@ -234,7 +251,7 @@ export function render(ctx) {
           Object.assign(u, nu);
           sub.textContent = t(on ? 'mem.disableOn' : 'mem.disableOff');
           users = users.map((x) => (x.id === nu.id ? nu : x));
-          list.replaceChildren(...users.map(rowOf));
+          paintList();
         } catch (e) { sw.checked = !on; dErr.textContent = memErr(e, me); }
         sw.disabled = false;
       });

@@ -46,6 +46,9 @@
 /* ======================= Android look (boards A_Members, A_MemberEdit, AT_Members) =======================
    Phones: Add member is the FAB, the editor a full-screen dialog (android-kit.css). Tablets in landscape (>= 960px):
    list | editor, the editor's sections as cards on the surface (no outer card). */
+/* two cards, each under a section label: Your account (the signed-in user), Other people */
+:root[data-os="android"] .m-sl { margin: 4px 0 -8px; padding: 0 12px; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--md-primary); }
+:root[data-os="android"] .m-sl:first-child { margin-top: 0; }
 :root[data-os="android"] .m-row { gap: 16px; padding: 12px 16px; }
 :root[data-os="android"] .m-row .avatar { width: 48px; height: 48px; font-size: 18px; }
 :root[data-os="android"] .m-list > .m-row + .m-row { border-top: 0; }
