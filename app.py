@@ -44,7 +44,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 import talk
 from auth import (
@@ -74,7 +74,7 @@ from passkeys import (
 )
 from player import Queue
 from store import SESSION_TTL, Conflict, Store
-from transport import SPEAKER_ERRORS, TransportError, make_transport
+from transport import SPEAKER_ERRORS, UNREACHABLE_ERRORS, TransportError, make_transport
 
 ROOT = Path(__file__).parent
 CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", ROOT / "config.json"))
@@ -99,6 +99,8 @@ SCHEDULE_GRACE = timedelta(minutes=5)  # a schedule overdue by more than this (s
 SCHEDULE_NAME_MAX = 80
 YT_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
 GOOGLE_CLIENT_ID_RE = re.compile(r"[A-Za-z0-9.-]+\.apps\.googleusercontent\.com")
+HOST_LABEL_RE = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)")  # one DNS label (RFC 1123)
+SPEAKER_NAME_MAX = 64  # the settings page's input has the same maxLength
 TIME_RE = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 AUDIO_SUFFIXES = {".m4a", ".webm", ".mp3", ".opus", ".ogg", ".mp4", ".aac"}
@@ -177,6 +179,29 @@ class MqttSettings(BaseModel):
         return self
 
 
+def is_ip_or_hostname(value):
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        pass
+    host = value.removesuffix(".")
+    labels = host.split(".")
+    # An all-numeric last label is a mistyped IP address (999.1.1.1), not a hostname.
+    return (0 < len(host) <= 253 and all(HOST_LABEL_RE.fullmatch(label) for label in labels)
+            and not labels[-1].isdigit())
+
+
+def readable_errors(errors):
+    """Pydantic errors as one line the web UI can show: "speaker_ip: must be ...; port: ..."."""
+    messages = []
+    for err in errors:
+        where = ".".join(str(p) for p in err["loc"] if p not in ("body", "query", "path"))
+        msg = err["msg"].removeprefix("Value error, ")
+        messages.append(f"{where}: {msg}" if where and not msg.startswith(where) else msg)
+    return "; ".join(messages) or "Invalid request"
+
+
 class Settings(BaseModel):
     transport: Literal["cast", "mqtt"] = "cast"  # cast: speaker on this LAN; mqtt: through the ESP32 relay
     speaker_ip: str = "192.0.2.10"
@@ -198,6 +223,25 @@ class Settings(BaseModel):
     # Passkeys work only when public_base_url is https:// (or http://localhost); its host is the RP ID.
     passkey_signin: bool = True
     passkey_required_for_admins: bool = False  # admins who have a passkey can't sign in any other way
+
+    @field_validator("speaker_ip")
+    @classmethod
+    def check_speaker_ip(cls, v):
+        """The Cast transport connects to this address and media URLs are routed by it, so it can't be blank."""
+        v = v.strip()
+        if not is_ip_or_hostname(v):
+            raise ValueError("speaker_ip must be an IP address like 192.0.2.10 or a hostname like speaker.local")
+        return v
+
+    @field_validator("speaker_name")
+    @classmethod
+    def check_speaker_name(cls, v):
+        v = " ".join(v.split())  # also folds tabs and newlines
+        if not v:
+            raise ValueError("speaker_name can't be empty")
+        if len(v) > SPEAKER_NAME_MAX:
+            raise ValueError(f"speaker_name must be at most {SPEAKER_NAME_MAX} characters")
+        return v
 
     @field_validator("public_base_url")
     @classmethod
@@ -350,6 +394,7 @@ async def lifespan(_app):
         yield
     finally:
         runner.cancel()
+        reset_reachability()
         if _talk is not None:
             _talk.transcoder.kill()  # never leave an ffmpeg behind
         transport.close()
@@ -366,11 +411,7 @@ bearer = HTTPBearer(auto_error=False, description="The api_token from config.jso
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError):
     """Keep `detail` a readable string, like every other error."""
-    messages = []
-    for err in exc.errors():
-        where = ".".join(str(p) for p in err["loc"] if p not in ("body", "query", "path"))
-        messages.append(f"{where}: {err['msg']}" if where else err["msg"])
-    return JSONResponse({"detail": "; ".join(messages) or "Invalid request"}, status_code=422)
+    return JSONResponse({"detail": readable_errors(exc.errors())}, status_code=422)
 
 
 # --- Who is calling ---
@@ -563,15 +604,123 @@ async def _watch_and_resume(gen, tts_prefix):
                        live=track.get("live", False))
 
 
+# --- Speaker reachability ---
+# A connect attempt to a dead speaker takes ~10 s (Cast) or command_timeout (relay). Without a breaker every
+# command and every tab's /status poll would pay that in turn behind cast_lock, so after an unreachable error the
+# speaker counts as offline: calls fail at once with the last error while a background probe retries it.
+
+OFFLINE_HOLD = 30.0  # fail fast for this long after an unreachable error; each failed probe renews it
+PROBE_INTERVAL = 3.0  # pause between background attempts while the speaker is offline
+STATUS_TTL = 1.0  # /status polls this close together share one read of the speaker
+
+_offline = None  # {"until": loop time, "detail": message of the last unreachable error} while known offline
+_probe = None  # the background task retrying an offline speaker
+_status_cache = None  # (loop time, (ReceiverState, MediaState)) from the last /status read
+_status_flight = None  # the /status read in progress, awaited by every concurrent poll
+
+
+def speaker_error_detail(e):
+    if isinstance(e, TransportError):
+        return str(e)
+    return f"Speaker {settings.speaker_ip} is not responding ({type(e).__name__}); is it on the same network?"
+
+
+def fail_fast():
+    """Raise the last error at once while the speaker is known to be offline."""
+    if _offline is not None and asyncio.get_running_loop().time() < _offline["until"]:
+        raise HTTPException(503, _offline["detail"])
+
+
+def mark_offline(detail):
+    global _offline
+    _offline = {"until": asyncio.get_running_loop().time() + OFFLINE_HOLD, "detail": detail}
+    ensure_probe()
+
+
+def mark_online():
+    global _offline
+    if _offline is not None:
+        print("speaker reachable again")
+    _offline = None
+
+
+def reset_reachability():
+    """Forget what we knew about the speaker (the transport was replaced, or the app is shutting down)."""
+    global _offline, _status_cache, _probe
+    _offline = _status_cache = None
+    if _probe is not None:
+        _probe.cancel()
+        _probe = None
+
+
+def ensure_probe():
+    global _probe
+    if _probe is None or _probe.done():
+        _probe = spawn(probe_speaker())
+
+
+async def probe_speaker():
+    """Retry an offline speaker in the background so a recovery is noticed within ~PROBE_INTERVAL."""
+    while _offline is not None:
+        await asyncio.sleep(PROBE_INTERVAL)
+        async with cast_lock:
+            if _offline is None:
+                break  # a command got through meanwhile
+            try:
+                await call_speaker(transport.media)
+            except HTTPException:
+                pass  # still offline; call_speaker renewed the hold
+
+
+async def call_speaker(fn, *args, **kwargs):
+    """Run a blocking transport call in a worker thread and keep track of reachability. Hold cast_lock."""
+    try:
+        result = await asyncio.to_thread(fn, *args, **kwargs)
+    except SPEAKER_ERRORS as e:
+        detail = speaker_error_detail(e)
+        if isinstance(e, UNREACHABLE_ERRORS):
+            mark_offline(detail)
+        raise HTTPException(503, detail) from e
+    mark_online()
+    return result
+
+
 async def run_cast(fn, *args, **kwargs):
+    """Run a speaker command, one at a time. Fails at once (503) while the speaker is known to be offline."""
+    global _status_cache
+    fail_fast()
     async with cast_lock:
+        fail_fast()  # the call we queued behind may just have found it offline
         try:
-            return await asyncio.to_thread(fn, *args, **kwargs)
-        except TransportError as e:
-            raise HTTPException(503, str(e)) from e
-        except SPEAKER_ERRORS as e:
-            detail = f"Speaker {settings.speaker_ip} is not responding ({type(e).__name__}); is it on the same network?"
-            raise HTTPException(503, detail) from e
+            return await call_speaker(fn, *args, **kwargs)
+        finally:
+            _status_cache = None  # the command may have changed what /status shows
+
+
+async def speaker_state():
+    """(receiver, media) for /status. Polls from many tabs share one read in flight, and reuse it for STATUS_TTL
+    seconds, so they never queue up one connect timeout each in front of a user's command."""
+    global _status_flight
+    now = asyncio.get_running_loop().time()
+    if _status_cache is not None and now - _status_cache[0] < STATUS_TTL:
+        return _status_cache[1]
+    fail_fast()
+    if _status_flight is None:
+        _status_flight = asyncio.ensure_future(_read_speaker_state())
+        _status_flight.add_done_callback(lambda f: f.cancelled() or f.exception())  # never "unretrieved"
+    return await asyncio.shield(_status_flight)  # a poll that hangs up mustn't cancel the others' read
+
+
+async def _read_speaker_state():
+    global _status_cache, _status_flight
+    try:
+        async with cast_lock:
+            fail_fast()
+            state = await call_speaker(lambda: (transport.receiver(), transport.media()))
+            _status_cache = (asyncio.get_running_loop().time(), state)
+            return state
+    finally:
+        _status_flight = None
 
 
 def split_text(text, size=TTS_CHUNK):
@@ -1449,35 +1598,31 @@ async def delete_user(user_id: int, who: Who):
 @viewer_api.get("/status")
 async def status(who: Who):
     relay = transport.relay_status() if who.role == "admin" else None  # relay details are admin-only
-
-    def read():
-        r, m = transport.receiver(), transport.media()
-        return {
-            "speaker": r.name or settings.speaker_name,
-            "ip": r.ip,
-            "app": r.app,
-            "volume": round(r.volume, 2) if r.volume is not None else None,
-            "muted": r.muted,
-            "media": {
-                "title": m.title,
-                "state": m.player_state,
-                "duration": m.duration,
-                "position": round(m.adjusted_current_time, 1) if m.current_time is not None else None,
-                "thumbnail": thumbnail_for(m.content_id),
-            },
-            "resume_pending": _resume and _resume["title"],
-            "tts_lang": settings.tts_lang,
-            "queue": _queue.summary() if _queue is not None else None,
-            "talking": _talk.who.actor if _talk is not None else None,
-        }
-
     try:
-        result = await run_cast(read)
+        r, m = await speaker_state()
     except HTTPException as e:
         if relay is None:
             raise
         # Admins still get the relay's health while it (or the speaker behind it) is unreachable.
         return JSONResponse({"detail": e.detail, "relay": transport.relay_status()}, status_code=e.status_code)
+    result = {
+        "speaker": r.name or settings.speaker_name,
+        "ip": r.ip,
+        "app": r.app,
+        "volume": round(r.volume, 2) if r.volume is not None else None,
+        "muted": r.muted,
+        "media": {
+            "title": m.title,
+            "state": m.player_state,
+            "duration": m.duration,
+            "position": round(m.adjusted_current_time, 1) if m.current_time is not None else None,
+            "thumbnail": thumbnail_for(m.content_id),
+        },
+        "resume_pending": _resume and _resume["title"],
+        "tts_lang": settings.tts_lang,
+        "queue": _queue.summary() if _queue is not None else None,
+        "talking": _talk.who.actor if _talk is not None else None,
+    }
     if who.role == "admin":
         result["relay"] = relay
     return result
@@ -1586,6 +1731,8 @@ async def update_settings(changes: dict, background: BackgroundTasks, who: Who):
         raise HTTPException(400, "api_token can't be changed over the API; rotate it with ./speakerctl token --rotate")
     try:
         new = merge_settings(settings, changes)
+    except ValidationError as e:
+        raise HTTPException(422, readable_errors(e.errors())) from e
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     if new.passkey_required_for_admins and not settings.passkey_required_for_admins:
@@ -1601,8 +1748,13 @@ async def update_settings(changes: dict, background: BackgroundTasks, who: Who):
     if (new.transport, new.speaker_ip, new.speaker_name, new.mqtt) != (
         old.transport, old.speaker_ip, old.speaker_name, old.mqtt
     ):
-        old_transport, transport = transport, make_transport(new)
-        await run_cast(old_transport.close)
+        async with cast_lock:  # not run_cast: an offline old speaker mustn't block switching to a new one
+            old_transport, transport = transport, make_transport(new)
+            try:
+                await asyncio.to_thread(old_transport.close)
+            except SPEAKER_ERRORS as e:
+                print(f"closing the old transport failed: {e!r}")
+        reset_reachability()  # a new target starts with a clean slate
         transport.start()
     restart = new.port != old.port
     if restart:
