@@ -26,7 +26,8 @@ const can = (role) => !!state.user && RANK[state.user.role] >= RANK[role];
 // (Announce, Schedule, settings...) keeps the real speaker's /status, since those always play on the speaker.
 const LOCAL_ROUTES = new Set(['now', 'music', 'playlists']);
 let routeId = null;
-const deviceOutput = () => local.isDevice() && can('operator');
+// Any signed-in member may pick it, viewers too: it plays only in their own browser and never reaches the speaker.
+const deviceOutput = () => local.isDevice() && !!state.user;
 const routedApi = (path, opts) => (deviceOutput() && local.intercept(path, opts)) || api(path, opts);
 function viewStatus() {
   if (deviceOutput() && LOCAL_ROUTES.has(routeId)) return { status: local.status(state.status, state.lastSpeaker), error: null };
@@ -162,7 +163,6 @@ async function showScreen(load) {
 function startApp() {
   screenLoad = null;
   if (shell) shell.destroy();
-  if (local.isDevice() && !can('operator')) local.setOutput('speaker'); // viewers can't play anything
   shell = buildShell({ user: state.user, api, onSignOut: signOut, onPickSpeaker: pickOutput });
   appEl.replaceChildren(shell.el);
   applySpeakers();
@@ -175,7 +175,7 @@ function startApp() {
   import('./tour.js').then((m) => m.maybeStart({ user: state.user })).catch(() => {});
 }
 
-/** The speaker picker: the real speaker, or (operators) this device. Only this browser changes. */
+/** The speaker picker: the real speaker, or this device. Only this browser changes. */
 function pickOutput(s) {
   local.setOutput(s.id === 'device' ? 'device' : 'speaker');
   toast(s.id === 'device' ? t('out.nowDevice') : t('spk.switched', s.name), 'ok');
@@ -321,8 +321,8 @@ function applySpeakers() {
   const name = (s && s.speaker) || state.lastSpeaker || '';
   const here = deviceOutput();
   const list = [{ id: 'main', name, online: !state.statusErr && !!s, current: !here, checking: !s && !state.statusErr, selectable: here }];
-  // "This device" plays through /local/resolve (operator+), so viewers don't get the choice
-  if (can('operator')) list.push({ id: 'device', name: t('out.device'), sub: t('out.deviceSub'), icon: 'phone', online: true, current: here });
+  // "This device" plays through /local/resolve (viewer+): every member gets the choice
+  list.push({ id: 'device', name: t('out.device'), sub: t('out.deviceSub'), icon: 'phone', online: true, current: here });
   shell.setSpeakers(list);
 }
 

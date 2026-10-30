@@ -7,7 +7,7 @@ import { h, icon, iconBtn, tip, busy } from '../ui.js';
 import { register, t, fmtDur, fmtRel } from '../i18n.js';
 import { speaker3d } from '../speaker3d.js';
 import { aicon } from '../a-icons.js';
-import { seek } from '../local-player.js';
+import { seek, isDevice } from '../local-player.js';
 
 register({
   en: {
@@ -123,7 +123,9 @@ const kindIcon = (kind, cls) => (kind === 'tts' ? icon('announce', cls) : aicon(
 
 export async function render(ctx) {
   await Promise.all([ctx.css('speaker3d.css'), ctx.css('views/now.css')]); // styled before first paint
-  const op = ctx.can('operator');
+  const member = ctx.can('operator');
+  // playback controls: operators on the speaker, anyone on "This device" (it plays only in their browser)
+  const op = member || isDevice();
   const admin = ctx.can('admin');
   let st = null;          // latest /status (null while offline)
   let err = null;         // latest status error
@@ -217,8 +219,8 @@ export async function render(ctx) {
   /* ----- idle / offline actions ----- */
   const go = (href, ic, label, primary) => h('a', { class: `btn ${primary ? 'primary' : 'tonal'}`, href }, ic, label);
   const idleActs = h('div', { class: 'np-acts', hidden: true },
-    op ? [go('#/playlists', icon('playlists', 'sm'), t('now.goPlaylists'), true), go('#/music', icon('music', 'sm'), t('now.goMusic')),
-      go('#/announce', icon('announce', 'sm'), t('now.goAnnounce'))] : null);
+    op ? go('#/playlists', icon('playlists', 'sm'), t('now.goPlaylists'), true) : null,
+    member ? [go('#/music', icon('music', 'sm'), t('now.goMusic')), go('#/announce', icon('announce', 'sm'), t('now.goAnnounce'))] : null);
   const retryB = h('button', { type: 'button', class: 'btn primary', onclick: () => { retryB.disabled = true; ctx.refreshStatus(); setTimeout(() => { retryB.disabled = false; }, 1500); } }, icon('refresh', 'sm'), t('now.retry'));
   const offActs = h('div', { class: 'np-acts', hidden: true }, retryB, h('a', { class: 'btn tonal', href: '#/help/offline' }, icon('help', 'sm'), t('now.offHelp')));
 

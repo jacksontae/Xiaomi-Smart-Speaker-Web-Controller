@@ -2,7 +2,9 @@
 // Per browser: the choice lives in localStorage spk.output ('device' | 'speaker') and changes nothing anyone else
 // hears. Pages keep calling the same playback API (POST /youtube, /playlists/{id}/play, /queue/next, /volume, ...);
 // app.js offers each call to intercept() first, which answers it here while this device is the output. The server
-// only hands out playable links (POST /local/resolve) and never contacts the speaker for them.
+// only hands out playable links (POST /local/resolve) and never contacts the speaker for them. Every member may
+// use it, viewers too. What a person starts here is logged once (POST /local/played, see logStart), and radio a
+// browser can't fetch itself goes through the server's relay (proxy_url, see viaProxy).
 // Announcements, live talk and schedules never pass through here: they always play on the speaker.
 import { api, ApiError } from './api.js';
 import { register, t } from './i18n.js';
@@ -119,6 +121,7 @@ let gen = 0;          // bumped by every load so a slow resolve can't start a st
 let starting = false; // a load is waiting for play(): its failure is handled there, not by the error event
 let retried = false;  // one fresh link per item when a long pause outlived the signed one (6 h)
 const prefetched = new Map(); // item key -> resolve promise for the next queue item (YouTube downloads take a while)
+let toLog = null;     // { name } a play someone just started: logged when it first sounds (queue moves aren't)
 
 // Volume can't be set from a web page on iPhone/iPad (the hardware buttons do it): hide the slider there.
 const volumeWorks = (() => { try { const a = document.createElement('audio'); a.volume = 0.5; return a.volume === 0.5; } catch { return false; } })();
@@ -143,7 +146,7 @@ function el() {
   audio.hidden = true;
   const vol = parseFloat(read(VOL_KEY));
   if (volumeWorks && vol >= 0 && vol <= 1) audio.volume = vol;
-  audio.addEventListener('playing', () => { if (silent()) return; setPhase('PLAYING'); if (queue) queue.failures = 0; prefetchNext(); });
+  audio.addEventListener('playing', () => { if (silent()) return; setPhase('PLAYING'); if (queue) queue.failures = 0; logStart(); prefetchNext(); });
   audio.addEventListener('waiting', () => { if (!silent() && item) setPhase('BUFFERING'); });
   audio.addEventListener('pause', () => { if (!silent() && item && !audio.ended && phase !== 'BUFFERING') setPhase('PAUSED'); });
   audio.addEventListener('ended', () => { if (!silent()) finished(); });
@@ -190,6 +193,24 @@ function prefetchNext() {
   prefetched.set(itemKey(next), p);
 }
 
+/** Activity entry for a play someone started (playItem / playList), once, when it first makes sound. */
+function logStart() {
+  if (!toLog) return;
+  const title = toLog.name || (item && item.title) || t('out.untitled');
+  toLog = null;
+  api('/local/played', { body: { title } }).catch(() => {}); // the music matters more than the log line
+}
+
+/**
+ * Play the item's own link, or this server's relay of it when the browser can't fetch or decode it itself:
+ * an http:// stream on an https:// page (mixed content: iPhone Safari refuses it), or a type it doesn't know.
+ */
+function viaProxy(got) {
+  if (!got.proxy_url) return false;
+  if (location.protocol === 'https:' && /^http:/i.test(got.url)) return true;
+  return !!got.content_type && el().canPlayType(got.content_type) === '';
+}
+
 /** Load `it` and start it. Resolves once it is playing (or waiting for a tap); rejects when it can't be played. */
 async function load(it, at = 0) {
   const a = el();
@@ -201,22 +222,27 @@ async function load(it, at = 0) {
   try { got = await resolve(it); } catch (e) { if (g === gen) throw e; return; }
   if (g !== gen) return;
   item = { ...it, ...got, title: got.title || it.title || null, thumbnail: got.thumbnail || it.thumbnail || null };
-  a.src = got.url;
-  if (at) a.currentTime = at;
-  metadata();
-  starting = true;
-  const started = a.play();
-  started.catch(() => {});
-  try {
-    // a slow stream may take long to start: stop waiting after 15 s and let the element's events take over
-    await Promise.race([started, new Promise((ok) => { setTimeout(ok, 15000); })]);
-  } catch (e) {
-    if (g !== gen) return;
-    if (e && e.name === 'NotAllowedError') { setPhase('PAUSED'); toast(t('out.tapPlay'), 'info'); return; }
-    if (e && e.name === 'AbortError') return; // replaced by another load
-    throw Object.assign(new ApiError(415, t(it.kind === 'radio' ? 'out.cantStream' : 'out.cantPlay')), { local: true });
-  } finally {
-    if (g === gen) starting = false;
+  item.proxied = viaProxy(got);
+  for (;;) {
+    a.src = item.proxied ? got.proxy_url : got.url;
+    if (at) a.currentTime = at;
+    metadata();
+    starting = true;
+    const started = a.play();
+    started.catch(() => {});
+    try {
+      // a slow stream may take long to start: stop waiting after 15 s and let the element's events take over
+      await Promise.race([started, new Promise((ok) => { setTimeout(ok, 15000); })]);
+      return;
+    } catch (e) {
+      if (g !== gen) return;
+      if (e && e.name === 'NotAllowedError') { setPhase('PAUSED'); toast(t('out.tapPlay'), 'info'); return; }
+      if (e && e.name === 'AbortError') return; // replaced by another load
+      if (got.proxy_url && !item.proxied) { item.proxied = true; continue; } // try once more through the relay
+      throw Object.assign(new ApiError(415, t(it.kind === 'radio' ? 'out.cantStream' : 'out.cantPlay')), { local: true });
+    } finally {
+      if (g === gen) starting = false;
+    }
   }
 }
 /** Play the queue's current item, stepping past items that fail like the server does. */
@@ -237,6 +263,12 @@ function finished() {
 }
 function failed() {
   const pos = audio.currentTime;
+  if (item.proxy_url && !item.proxied && pos < 1) { // the direct link failed to start: try the relay once
+    item.proxied = true;
+    audio.src = item.proxy_url;
+    audio.play().catch(() => {});
+    return;
+  }
   if (!retried && pos > 1) { load(item, pos).catch(() => failed()); return; } // the signed link most likely expired
   if (queue && queue.failures + 1 < queue.items.length && queue.advance(false)) {
     queue.failures += 1;
@@ -249,6 +281,7 @@ function failed() {
 }
 function clear() {
   gen++;
+  toLog = null;
   queue = null;
   item = null;
   prefetched.clear();
@@ -287,6 +320,7 @@ function mediaSessionHandlers() {
 export function playItem(it) {
   unlock();
   queue = null;
+  toLog = {};
   const g = gen + 1;
   return load(it).catch((e) => { if (g === gen) clear(); throw e; });
 }
@@ -294,6 +328,7 @@ export function playList(items, opts) {
   if (!items.length) return Promise.reject(new ApiError(400, 'The playlist is empty'));
   unlock();
   queue = new LocalQueue(items, opts);
+  toLog = { name: opts && opts.name };
   return loadQueue().then(() => queue && queue.summary());
 }
 export function pause() { if (audio && item) { audio.pause(); setPhase('PAUSED'); } }
