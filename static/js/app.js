@@ -203,7 +203,7 @@ async function render(animate = true) {
     console.error(e);
     // The module never reached the server (Brave Shields and ad blockers block some script names), the network
     // dropped, or this tab predates an update (its versioned files are gone): say so on the page, with a retry.
-    if (seq !== renderSeq) return;
+    if (seq !== renderSeq || !shell) return;
     unmountView();
     shell.content.replaceChildren(h('div', { class: 'page' }, h('p', { class: 'lead' }, t('err.module')),
       h('button', { class: 'btn primary', type: 'button', onclick: () => retryRoute() }, icon('refresh', 'sm'), t('app.retry'))));
@@ -211,7 +211,8 @@ async function render(animate = true) {
   } finally {
     if (seq === renderSeq) done();
   }
-  if (!ok) return;
+  // a 401 while the page loaded signs out and tears the shell down
+  if (!ok || !shell || seq !== renderSeq) return;
   document.title = `${t(route.label)} · ${t('app.name')}`;
   shell.onScroll();
   const page = shell.content.firstElementChild;
