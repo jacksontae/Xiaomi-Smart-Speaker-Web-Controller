@@ -97,7 +97,7 @@ const ctrlText = (op) => (op && shown('.np-ctrls .np-transport, .np-ctrls .np-vo
 const PHONE = [
   { id: 'tabs', sel: ['.tabbar'], text: () => ['tour.tabsT', 'tour.tabsB'] },
   { id: 'now', sel: ['.np-hero'], pick: (op) => (op && shown('.np-ctrls .np-transport, .np-ctrls .np-volume') ? '.np-ctrls' : '.np-hero'), text: (info) => ctrlText(info.op) },
-  { id: 'device', since: 2, sel: ['.topbar [data-spk="chip"]'], text: () => ['tour.deviceT', 'tour.deviceB'] },
+  { id: 'device', since: 2, sel: ['.topbar [data-spk="chip"]', '#view .phd-r [data-spk="chip"]'], text: () => ['tour.deviceT', 'tour.deviceB'] },
   { id: 'announce', min: 'operator', sel: ['.tabbar [data-route="announce"]'], text: () => ['tour.annT', 'tour.annB'] },
   { id: 'music', min: 'operator', sel: ['.tabbar [data-route="music"]'], text: () => ['tour.musicT', 'tour.musicB'] },
   { id: 'account', sel: ['.me-btn'], text: () => ['tour.meT', 'tour.meB'] },

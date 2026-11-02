@@ -213,3 +213,17 @@ def test_tour_whats_new_after_an_older_tour(make_app, seeded):
     app.header()
     no_tour_after_wait(p)
     app.clean("tour whats new")
+
+
+def test_tour_this_device_step_on_android(make_app, seeded):
+    """On Android the speaker chip sits under the page title, not in the top bar."""
+    for device in ("android", "android-tablet"):
+        app = make_app("operator", device=device, tour=True, go=False)
+        uid = app.ctx.request.get(f"{BASE}/auth/state").json()["user"]["id"]
+        app.ctx.add_init_script(f"try {{ if (localStorage.getItem('spk.tour.{uid}') === null)"
+                                f" localStorage.setItem('spk.tour.{uid}', '1'); }} catch (e) {{}}")
+        app.go("")
+        p = app.page
+        card(p)
+        expect(p.locator(".tour")).to_have_attribute("data-step", "device")
+        in_view(p, CARD)
