@@ -8,7 +8,7 @@ import time
 from playwright.sync_api import expect
 
 from . import test_14_android_shell as shell
-from .e2ekit import VIEWER
+from .e2ekit import VIEWER, wait_for
 
 android_app = shell.android_app  # the fixture: Android user agent, mocked /status
 ANDROID_TABLET = shell.ANDROID_TABLET
@@ -75,6 +75,13 @@ def test_members_tablet_panes(android_app, seeded):
     expect(pane.locator(".m-ed-head .btn", has_text="Save")).to_be_visible()  # Save next to the name
     lb, pb = p.locator(".m-list").bounding_box(), pane.bounding_box()
     assert pb["x"] > lb["x"] + lb["width"], (lb, pb)
+    # AT_Members: Sign-in methods is a row of the Your account card, not a card of its own
+    row = p.locator(".m-mine a[href='#/auth']")
+    expect(row).to_be_visible()
+    expect(row).to_contain_text("Sign-in methods")
+    expect(p.locator(".m-methods")).to_be_hidden()
+    row.click()
+    wait_for(lambda: app.hash() == "#/auth", what="the sign-in methods page")
     app.clean("android members tablet")
 
 

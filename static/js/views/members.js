@@ -42,6 +42,7 @@ register({
     'mem.errSelfDel': 'You can\'t delete your own account.',
     'mem.errLastAdmin': 'This is the last owner who can sign in. Make someone else an owner first.',
     'mem.methods': 'Sign-in methods', 'mem.methodsSub': 'Google, passkeys and passwords. Only owners change these.',
+    'mem.methodsAll': 'Google, passkeys and password, for everyone here',
     'mem.pick': 'Pick a member on the left to edit.',
     'mem.empty': 'No members yet.',
     'mem.yours': 'Your account', 'mem.others': 'Other people',
@@ -75,6 +76,7 @@ register({
     'mem.errSelfDel': 'ลบบัญชีของตัวเองไม่ได้',
     'mem.errLastAdmin': 'นี่คือเจ้าของคนสุดท้ายที่เข้าระบบได้ ตั้งคนอื่นเป็นเจ้าของก่อน',
     'mem.methods': 'วิธีเข้าสู่ระบบ', 'mem.methodsSub': 'Google พาสคีย์ และรหัสผ่าน เฉพาะเจ้าของเปลี่ยนได้',
+    'mem.methodsAll': 'Google พาสคีย์ และรหัสผ่าน สำหรับทุกคนที่นี่',
     'mem.pick': 'เลือกสมาชิกทางซ้ายเพื่อแก้ไข',
     'mem.empty': 'ยังไม่มีสมาชิก',
     'mem.yours': 'บัญชีของคุณ', 'mem.others': 'คนอื่นในบ้าน',
@@ -120,6 +122,9 @@ export function render(ctx) {
   ];
   const methods = card(linkRow({ href: '#/auth', title: t('mem.methods'), sub: t('mem.methodsSub'), lead: tile(icon('lock'), 'plain') }));
   methods.classList.add('m-methods');
+  // Android tablets (AT_Members): the same link is a row of the Your account card; members.css picks one by width
+  const mineMethods = android ? h('div', { class: 'm-mine-methods', role: 'listitem' },
+    linkRow({ href: '#/auth', title: t('mem.methods'), sub: t('mem.methodsAll'), lead: tile(icon('lock'), 'plain') })) : null;
   const node = h('div', { class: 'page m-page' },
     phoneBack(ctx.header({ title: t('nav.members'), back: { href: '#/account', label: t('nav.account') }, actions })),
     h('div', { class: 'm-grid' }, h('div', { class: 'm-left' }, ...lists, methods), pane));
@@ -163,7 +168,7 @@ export function render(ctx) {
     list.replaceChildren(...(shown.length ? shown.map(rowOf) : [h('p', { class: 'c-empty' }, t('mem.empty'))]));
     if (!android) return;
     const self = users.find((u) => u.id === me.id);
-    mine.replaceChildren(...(self ? [rowOf(self)] : []));
+    mine.replaceChildren(...(self ? [rowOf(self), mineMethods] : []));
     mine.hidden = !self;
     mine.previousElementSibling.hidden = !self;
   }
