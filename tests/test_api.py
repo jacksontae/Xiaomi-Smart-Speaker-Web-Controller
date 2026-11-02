@@ -59,6 +59,24 @@ def test_tts_concatenates_chunks(anon, app, monkeypatch):
     assert len(calls) == 3
 
 
+def test_tts_answers_range_requests(anon, app, monkeypatch):
+    class Resp:
+        status_code = 200
+        content = b"0123456789"
+
+    async def fake_get(url, params=None):
+        return Resp()
+
+    monkeypatch.setattr(app.http, "get", fake_get)
+    url = path_of(app.media_url("/tts.mp3", text="hello", lang="en"))
+    assert anon.get(url).headers["accept-ranges"] == "bytes"
+    r = anon.get(url, headers={"Range": "bytes=4-"})
+    assert (r.status_code, r.content) == (206, b"456789")
+    assert r.headers["content-range"] == "bytes 4-9/10"
+    assert anon.get(url, headers={"Range": "bytes=2-3"}).content == b"23"
+    assert anon.get(url, headers={"Range": "bytes=99-"}).status_code == 200
+
+
 def test_youtube_plays_cached_file(client, fake_speaker, app, monkeypatch):
     path = app.CACHE_DIR / "abc123.m4a"
     path.write_bytes(b"audio")

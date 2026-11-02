@@ -3327,7 +3327,7 @@ async def talk_status():
 # --- Streams fetched by the speaker itself (signed URLs, no header) ---
 
 @app.get("/tts.mp3", dependencies=[Depends(verify_media)])
-async def tts(text: str, lang: str = "th"):
+async def tts(request: Request, text: str, lang: str = "th"):
     audio = b""
     for chunk in split_text(text):
         r = await http.get(
@@ -3337,7 +3337,14 @@ async def tts(text: str, lang: str = "th"):
         if r.status_code != 200:
             raise HTTPException(502, f"TTS failed: HTTP {r.status_code}")
         audio += r.content  # MP3 frames concatenate cleanly
-    return Response(audio, media_type="audio/mpeg")
+    # browsers only seek a file that answers Range requests ("This device")
+    headers = {"Accept-Ranges": "bytes"}
+    wanted = re.fullmatch(r"bytes=(\d+)-(\d*)", request.headers.get("range", ""))
+    if not wanted or int(wanted[1]) >= len(audio):
+        return Response(audio, media_type="audio/mpeg", headers=headers)
+    start, end = int(wanted[1]), min(int(wanted[2] or len(audio) - 1), len(audio) - 1)
+    headers["Content-Range"] = f"bytes {start}-{end}/{len(audio)}"
+    return Response(audio[start:end + 1], status_code=206, media_type="audio/mpeg", headers=headers)
 
 
 @app.get("/yt/{filename}", dependencies=[Depends(verify_media)])

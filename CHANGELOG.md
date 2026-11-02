@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- "This device" output: the speaker picker offers this phone/tablet/computer to operators. Now playing, Music and
+  Playlists then play in the browser (local queue with shuffle/repeat, seek, volume, lock-screen controls via the
+  Media Session API), per browser (`spk.output`), without changing what anyone else hears. `POST /local/resolve`
+  hands out the same signed media links without contacting the speaker. Announcements, live talk and schedules
+  still play on the speaker, and the Announce/Schedule pages say so.
+- "This device" for viewers too (it plays only on their own device); `POST /local/played` logs one "Played on
+  their device" Activity entry per play someone starts; `GET /local/stream` relays radio the browser can't fetch
+  itself (http:// on an https page, unknown types) through a signed, SSRF-checked, size/time-limited stream proxy.
+  The quick tour gains a "This device" step; people who finished the old tour see just that step once.
+- SponsorBlock (`yt_skip_segments`, default `interaction`, `selfpromo`, `sponsor`): sponsor reads inside YouTube
+  videos are cut out after download (needs ffmpeg); cache files carry a tag of the cut categories
+  (`<id>.sb-<hash>.<ext>`). Files cached before this play at once and are cut in the background from the local
+  copy (hash-prefix SponsorBlock lookup, niced ffmpeg, one job at a time), so nothing is downloaded again.
+  `POST /youtube` resolves the video first and plays a cached copy instead of downloading it again.
+
 ## [0.4.0] - 2026-11-02
 
 ### Added
@@ -36,15 +52,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   first-account setup, Now playing (queue, volume, relay health), Announce (quick phrases, live talk), Music
   (YouTube, radio, podcasts, my files), Playlists, Schedule, Members, Activity, Speaker settings, App settings,
   Account (Google link, passkeys), Sign-in methods and searchable Help. Offers a passkey after sign-in.
-- "This device" output: the speaker picker offers this phone/tablet/computer to operators. Now playing, Music and
-  Playlists then play in the browser (local queue with shuffle/repeat, seek, volume, lock-screen controls via the
-  Media Session API), per browser (`spk.output`), without changing what anyone else hears. `POST /local/resolve`
-  hands out the same signed media links without contacting the speaker. Announcements, live talk and schedules
-  still play on the speaker, and the Announce/Schedule pages say so.
-- "This device" for viewers too (it plays only on their own device); `POST /local/played` logs one "Played on
-  their device" Activity entry per play someone starts; `GET /local/stream` relays radio the browser can't fetch
-  itself (http:// on an https page, unknown types) through a signed, SSRF-checked, size/time-limited stream proxy.
-  The quick tour gains a "This device" step; people who finished the old tour see just that step once.
 - Scheduled announcements and playlists (`/schedules`), now working with both transports.
 - Nightly SQLite + config backups for the remote deployment (`backup` service), with restore.
 - Sign in with Google: members link their Google account (`POST/DELETE /me/google`) and then sign in with it
@@ -64,11 +71,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   stream at a signed `/talk/<id>/live` URL; music pauses and resumes afterwards, with an optional chime,
   a `talk_max_seconds` limit (default 120) and an activity entry "Talked live for m:ss". Needs ffmpeg
   (added to the Docker image).
-- SponsorBlock (`yt_skip_segments`, default `interaction`, `selfpromo`, `sponsor`): sponsor reads inside YouTube
-  videos are cut out after download (needs ffmpeg); cache files carry a tag of the cut categories
-  (`<id>.sb-<hash>.<ext>`). Files cached before this play at once and are cut in the background from the local
-  copy (hash-prefix SponsorBlock lookup, niced ffmpeg, one job at a time), so nothing is downloaded again.
-  `POST /youtube` resolves the video first and plays a cached copy instead of downloading it again.
 
 ## [0.2.0] - 2026-10-30
 
