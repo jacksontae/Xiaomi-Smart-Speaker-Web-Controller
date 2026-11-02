@@ -7,6 +7,7 @@ import { h, icon, toast } from './ui.js';
 import { openSheet, popover, closeAllSheets } from './sheet.js';
 import { buildShell } from './shell.js';
 import { RANK, ROUTES, parseHash } from './routes.js';
+import * as local from './local-player.js';
 
 const POLL_MS = 4000;
 const appEl = document.getElementById('app');
@@ -19,6 +20,25 @@ let pollTimer = 0;
 let renderSeq = 0;
 
 const can = (role) => !!state.user && RANK[state.user.role] >= RANK[role];
+
+/* ---------- "This device" output (local-player.js) ---------- */
+// Pages that play music see this device's player as their speaker while it is the output; every other page
+// (Announce, Schedule, settings...) keeps the real speaker's /status, since those always play on the speaker.
+const LOCAL_ROUTES = new Set(['now', 'music', 'playlists']);
+let routeId = null;
+// Any signed-in member may pick it, viewers too: it plays only in their own browser and never reaches the speaker.
+const deviceOutput = () => local.isDevice() && !!state.user;
+const routedApi = (path, opts) => (deviceOutput() && local.intercept(path, opts)) || api(path, opts);
+function viewStatus() {
+  if (deviceOutput() && LOCAL_ROUTES.has(routeId)) return { status: local.status(state.status, state.lastSpeaker), error: null };
+  return { status: state.status, error: state.statusErr };
+}
+local.onChange(() => {
+  if (!shell) return;
+  applySpeakers();
+  applyMood();
+  if (view && view.onStatus && LOCAL_ROUTES.has(routeId)) callStatus(view);
+});
 
 /* ---------- css loader for view-specific stylesheets ---------- */
 // Relative to this module, so stylesheets come from the same versioned /static/<build>/ folder (see app.py).
@@ -50,11 +70,12 @@ function makeCtx(params = [], route = null) {
   const cleanups = [];
   return {
     ctx: {
-      api, toast, fail, can, t, params, route,
+      api: routedApi, toast, fail, can, t, params, route,
       get user() { return state.user; },
       get auth() { return state.auth; },
-      get status() { return state.status; },
-      get statusError() { return state.statusErr; },
+      get status() { return viewStatus().status; },
+      get statusError() { return viewStatus().error; },
+      get output() { return deviceOutput() ? 'device' : 'speaker'; },
       signal: abort.signal,
       onCleanup: (fn) => cleanups.push(fn),
       header: (opts) => (shell ? shell.header(opts) : h('h1', {}, opts.title)),
@@ -104,11 +125,11 @@ async function mount(mod, host, made, seq, animate) {
       how = 'vt';
     } catch { if (v.node.parentNode !== host) swap(); }
   } else swap();
-  if (v.onStatus && (state.status || state.statusErr)) callStatus(v);
+  if (v.onStatus && (viewStatus().status || viewStatus().error)) callStatus(v);
   return how;
 }
 function callStatus(v) {
-  try { v.onStatus({ status: state.status, error: state.statusErr }); } catch (e) { console.error(e); }
+  try { v.onStatus(viewStatus()); } catch (e) { console.error(e); }
 }
 
 /* ---------- boot / auth gate ---------- */
@@ -157,7 +178,7 @@ async function showScreen(load) {
 function startApp() {
   screenLoad = null;
   if (shell) shell.destroy();
-  shell = buildShell({ user: state.user, api, onSignOut: signOut, onPickSpeaker: (s) => toast(t('spk.switched', s.name), 'ok'), onCommand: command });
+  shell = buildShell({ user: state.user, api, onSignOut: signOut, onPickSpeaker: pickOutput, onCommand: command });
   appEl.replaceChildren(shell.el);
   applySpeakers();
   shell.setStatus(state.status, state.statusErr);
@@ -170,7 +191,16 @@ function startApp() {
   import('./tour.js').then((m) => m.maybeStart({ user: state.user })).catch(() => {});
 }
 
+/** The speaker picker: the real speaker, or this device. Only this browser changes. */
+function pickOutput(s) {
+  local.setOutput(s.id === 'device' ? 'device' : 'speaker');
+  toast(s.id === 'device' ? t('out.nowDevice') : t('spk.switched', s.name), 'ok');
+  applySpeakers();
+  render(false); // pages word things by output (notes, "on this device"): build the current one again
+}
+
 async function signOut(path) {
+  local.stop(); // the output choice stays for this browser; the music stops with the session
   try { await api(path, { method: 'POST', allow401: true }); } catch (e) { if (e.status !== 401) { fail(e); throw e; } }
   state.user = null;
   state.status = null;
@@ -190,6 +220,7 @@ async function render(animate = true) {
     history.replaceState(null, '', '#/');
     return render(false);
   }
+  routeId = route.id;
   shell.markRoute(route, animate && !motionReduced());
   (route.css || []).forEach(loadCss); // fetch the page's stylesheets alongside its module, not after it
   const done = pending(route, seq);
@@ -311,13 +342,18 @@ function applySpeakers() {
   if (!shell) return;
   const s = state.status;
   const name = (s && s.speaker) || state.lastSpeaker || '';
-  shell.setSpeakers([{ id: 'main', name, online: !state.statusErr && !!s, current: true, checking: !s && !state.statusErr }]);
+  const here = deviceOutput();
+  const list = [{ id: 'main', name, online: !state.statusErr && !!s, current: !here, checking: !s && !state.statusErr, selectable: here }];
+  // "This device" plays through /local/resolve (viewer+): every member gets the choice
+  list.push({ id: 'device', name: t('out.device'), sub: t('out.deviceSub'), icon: 'phone', online: true, current: here });
+  shell.setSpeakers(list);
 }
 
 /** Ambient backdrop mood: idle | play (music) | say (announcement) | off (speaker unreachable). */
 function applyMood() {
   let mood = 'idle';
-  if (state.statusErr) mood = 'off';
+  if (local.playingHere()) mood = 'play';
+  else if (state.statusErr) mood = 'off';
   else if (state.status) {
     const m = state.status.media || {};
     if (['PLAYING', 'BUFFERING', 'PAUSED'].includes(m.state)) mood = m.title === 'Announcement' ? 'say' : 'play';

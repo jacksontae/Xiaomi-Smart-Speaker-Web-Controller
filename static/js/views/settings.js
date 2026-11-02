@@ -1,6 +1,6 @@
 // Speaker settings (boards Settings / T_Settings / D_Settings). Owner only. GET /settings, POST /settings (partial).
 // Speaker (name, address, find on the LAN for the direct/Cast connection), Sound (default volume, announcement
-// language, resume after announcements), Storage (YouTube cache), Connection (transport + relay health read-only,
+// language, resume after announcements), Storage (YouTube cache, SponsorBlock segment removal), Connection (transport + relay health read-only,
 // API token info, port). Language/appearance live in App settings (per device). One Save for the page.
 // The API token can't be changed over the API (the server refuses); the page says where to rotate it.
 import { h, icon, busy, segmented, toast } from '../ui.js';
@@ -36,6 +36,13 @@ register({
     'set.port': 'Port', 'set.portHelp': 'The service restarts by itself after a change.',
     'set.badPort': 'The port must be a number from 1024 to 65535.', 'set.badCache': 'Keep at least 1 track.',
     'set.badName': 'Give the speaker a name.', 'set.badIp': 'Enter an IP address like 192.0.2.10 or a hostname like speaker.example.com.',
+    'set.skip': 'Cut sponsor segments from YouTube videos',
+    'set.skipHelp': 'Ads that YouTube inserts never play here, because only the audio is downloaded. This also removes parts the creator reads out inside the video, using the public SponsorBlock database. It runs with ffmpeg after each download, so a new track takes a little longer to start. Tracks already saved stay as they are.',
+    'set.skipNoFfmpeg': 'Needs ffmpeg on the computer running the service. Until it is installed, videos play in full.',
+    'set.skipCats': 'Parts to cut',
+    'set.seg.sponsor': 'Paid sponsor reads', 'set.seg.selfpromo': 'Unpaid self-promotion', 'set.seg.interaction': 'Like and subscribe reminders',
+    'set.seg.intro': 'Intro animations', 'set.seg.outro': 'End cards and credits', 'set.seg.preview': 'Previews and recaps',
+    'set.seg.filler': 'Off-topic tangents', 'set.seg.music_offtopic': 'Talking in music videos', 'set.seg.hook': 'Hooks and greetings',
     'set.device': 'On this device', 'set.app': 'App settings', 'set.appHelp': 'Language and appearance are set per device, not on the speaker.',
     'set.saved': 'Speaker settings saved', 'set.restarting': (p) => `Saved. The service is restarting on port ${p}; open the app at the new port.`,
     'set.lang.th': 'ไทย', 'set.lang.en': 'English', 'set.lang.ja': '日本語',
@@ -67,6 +74,13 @@ register({
     'set.port': 'พอร์ต', 'set.portHelp': 'เปลี่ยนแล้ว service จะเริ่มใหม่เอง',
     'set.badPort': 'พอร์ตต้องเป็นตัวเลข 1024 ถึง 65535', 'set.badCache': 'ต้องเก็บอย่างน้อย 1 เพลง',
     'set.badName': 'ตั้งชื่อลำโพงก่อน', 'set.badIp': 'ใส่ IP เช่น 192.0.2.10 หรือชื่อโฮสต์ เช่น speaker.example.com',
+    'set.skip': 'ตัดช่วงสปอนเซอร์ออกจากวิดีโอ YouTube',
+    'set.skipHelp': 'โฆษณาที่ YouTube แทรกจะไม่เล่นอยู่แล้ว เพราะดาวน์โหลดแค่เสียง ตัวเลือกนี้ตัดช่วงที่ครีเอเตอร์พูดโฆษณาเองในวิดีโอด้วย โดยใช้ฐานข้อมูลสาธารณะของ SponsorBlock ทำงานด้วย ffmpeg หลังดาวน์โหลดเสร็จ เพลงใหม่จึงเริ่มช้าลงนิดหน่อย เพลงที่เก็บไว้แล้วไม่เปลี่ยน',
+    'set.skipNoFfmpeg': 'ต้องติดตั้ง ffmpeg บนเครื่องที่รัน service ก่อน ระหว่างนี้วิดีโอจะเล่นเต็มความยาว',
+    'set.skipCats': 'ช่วงที่จะตัด',
+    'set.seg.sponsor': 'ช่วงสปอนเซอร์ที่ได้รับเงิน', 'set.seg.selfpromo': 'โปรโมตตัวเอง', 'set.seg.interaction': 'ชวนกดไลก์ กดติดตาม',
+    'set.seg.intro': 'อินโทร', 'set.seg.outro': 'ช่วงท้ายและเครดิต', 'set.seg.preview': 'ตัวอย่างและสรุปย้อนหลัง',
+    'set.seg.filler': 'ช่วงนอกเรื่อง', 'set.seg.music_offtopic': 'ช่วงพูดในมิวสิกวิดีโอ', 'set.seg.hook': 'ช่วงเกริ่นและทักทาย',
     'set.device': 'บนอุปกรณ์นี้', 'set.app': 'ตั้งค่าแอป', 'set.appHelp': 'ภาษาและลักษณะของแอปตั้งแยกในแต่ละเครื่อง ไม่ได้ตั้งที่ลำโพง',
     'set.saved': 'บันทึกการตั้งค่าลำโพงแล้ว', 'set.restarting': (p) => `บันทึกแล้ว service กำลังเริ่มใหม่ที่พอร์ต ${p} เปิดแอปที่พอร์ตใหม่`,
     'set.lang.th': 'ไทย', 'set.lang.en': 'English', 'set.lang.ja': '日本語',
@@ -78,6 +92,9 @@ const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]
 const HOST = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
 /** IPv4 or a DNS hostname; an all-digits-and-dots value must be a real IPv4 address. */
 const validAddress = (v) => (/^[\d.]+$/.test(v) ? IPV4.test(v) : HOST.test(v));
+// SponsorBlock categories the server accepts (app.py YT_SEGMENT_CATEGORIES); the first three are the default.
+const SEGMENTS = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'preview', 'filler', 'music_offtopic', 'hook'];
+const SEG_DEFAULT = ['interaction', 'selfpromo', 'sponsor'];
 
 export function render(ctx) {
   ctx.css('views/c-common.css');
@@ -177,7 +194,7 @@ export function render(ctx) {
     /* storage */
     const cache = h('input', { class: 'input c-num', type: 'number', min: 1, max: 999, step: 1, value: val('cache_keep'), inputMode: 'numeric' });
     cache.addEventListener('input', () => set('cache_keep', parseInt(cache.value, 10)));
-    const storageCard = card(settingRow({ title: t('set.cache'), sub: t('set.cacheHelp'), control: cache }));
+    const storageCard = card(settingRow({ title: t('set.cache'), sub: t('set.cacheHelp'), control: cache }), skipBlock());
 
     /* connection */
     const port = h('input', { class: 'input c-num', type: 'number', min: 1024, max: 65535, step: 1, value: val('port'), inputMode: 'numeric' });
@@ -201,6 +218,30 @@ export function render(ctx) {
     left.replaceChildren(sec(1, caption(t('set.speaker')), speakerCard), sec(4, caption(t('set.conn')), connCard));
     right.replaceChildren(sec(2, caption(t('set.sound')), soundCard), sec(3, caption(t('set.storage')), storageCard), sec(5, caption(t('set.device')), appCard));
     paintStatus();
+  }
+
+  // SponsorBlock: a switch, then the categories to cut. Off (or nothing ticked) saves []; the server sorts the list.
+  function skipBlock() {
+    const chosen = new Set(val('yt_skip_segments') || []);
+    const boxes = new Map();
+    const list = h('fieldset', { class: 's-segs', hidden: !chosen.size }, h('legend', { class: 'c-title' }, t('set.skipCats')));
+    const sw = switchInput(chosen.size > 0, (on) => {
+      chosen.clear();
+      if (on) SEG_DEFAULT.forEach((c) => chosen.add(c));
+      boxes.forEach((box, c) => { box.checked = chosen.has(c); });
+      store();
+    });
+    function store() {
+      list.hidden = !chosen.size; sw.checked = chosen.size > 0;
+      set('yt_skip_segments', [...chosen].sort());
+    }
+    for (const c of SEGMENTS) {
+      const box = h('input', { type: 'checkbox', checked: chosen.has(c), onchange: () => { if (box.checked) chosen.add(c); else chosen.delete(c); store(); } });
+      boxes.set(c, box);
+      list.append(h('label', { class: 's-seg' }, box, h('span', {}, t(`set.seg.${c}`))));
+    }
+    const sub = h('span', {}, t('set.skipHelp'), ...(saved.yt_skip_available === false ? [h('br'), h('strong', {}, t('set.skipNoFfmpeg'))] : []));
+    return h('div', { class: 'c-stack' }, settingRow({ title: t('set.skip'), sub, control: sw }), list);
   }
 
   function paintStatus() {

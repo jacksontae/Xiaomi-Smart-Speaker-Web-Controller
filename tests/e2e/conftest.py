@@ -142,6 +142,7 @@ def pw():
 def browser(pw):
     b = pw.chromium.launch(headless=True, args=[
         "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--disable-gpu",
+        "--autoplay-policy=no-user-gesture-required",  # "This device" plays audio in the page (test_14)
     ])
     yield b
     b.close()

@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- "This device" output: the speaker picker offers this phone/tablet/computer to operators. Now playing, Music and
+  Playlists then play in the browser (local queue with shuffle/repeat, seek, volume, lock-screen controls via the
+  Media Session API), per browser (`spk.output`), without changing what anyone else hears. `POST /local/resolve`
+  hands out the same signed media links without contacting the speaker. Announcements, live talk and schedules
+  still play on the speaker, and the Announce/Schedule pages say so.
+- "This device" for viewers too (it plays only on their own device); `POST /local/played` logs one "Played on
+  their device" Activity entry per play someone starts; `GET /local/stream` relays radio the browser can't fetch
+  itself (http:// on an https page, unknown types) through a signed, SSRF-checked, size/time-limited stream proxy.
+  The quick tour gains a "This device" step; people who finished the old tour see just that step once.
+- SponsorBlock (`yt_skip_segments`, default `interaction`, `selfpromo`, `sponsor`): sponsor reads inside YouTube
+  videos are cut out after download (needs ffmpeg); cache files carry a tag of the cut categories
+  (`<id>.sb-<hash>.<ext>`). Files cached before this play at once and are cut in the background from the local
+  copy (hash-prefix SponsorBlock lookup, niced ffmpeg, one job at a time), so nothing is downloaded again.
+  `POST /youtube` resolves the video first and plays a cached copy instead of downloading it again.
+
 ## [0.4.0] - 2026-11-02
 
 ### Added

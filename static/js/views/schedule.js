@@ -16,6 +16,7 @@ import { kitCss, fab, fullDialog } from '../android-kit.js';
 
 register({
   en: {
+    'sched.outNote': 'Schedules always play on the speaker, even while this device plays your music.',
     'sched.title': 'Schedule',
     'sched.clock': (tm, zone) => `Speaker time now ${tm} (${zone})`, 'sched.new': 'New schedule', 'sched.edit': 'Edit schedule',
     'sched.list': 'Scheduled announcements', 'sched.none': 'Nothing scheduled yet.',
@@ -53,6 +54,7 @@ register({
     'sched.listSep': ', ',
   },
   th: {
+    'sched.outNote': 'ตารางเวลาออกที่ลำโพงเสมอ แม้อุปกรณ์นี้กำลังเล่นเพลงอยู่',
     'sched.title': 'ตั้งเวลา',
     'sched.clock': (tm, zone) => `เวลาของลำโพงตอนนี้ ${tm} น. (${zone})`, 'sched.new': 'ตั้งเวลาใหม่', 'sched.edit': 'แก้ไขเวลา',
     'sched.list': 'รายการตั้งเวลา', 'sched.none': 'ยังไม่มีรายการตั้งเวลา',
@@ -127,15 +129,17 @@ export async function render(ctx) {
   const newBtn = op ? h('button', { type: 'button', class: 'btn primary', onclick: () => openEditor(null) }, icon('plus', 'sm'), t('sched.new')) : null;
   const listEl = h('div', { class: 'sc-list', 'aria-label': t('sched.list') });
   const pane = h('div', { class: 'sc-pane glass' });
+  const outNote = ctx.output === 'device' ? h('p', { class: 'out-note small' }, icon('info', 'sm'), h('span', {}, t('sched.outNote'))) : null;
   if (newBtn) fab(ctx, { icon: 'plus', label: t('sched.new'), onclick: () => openEditor(null), replaces: newBtn });
   const bar = h('div', { class: 'sc-bar' }, clock, newBtn);
   // Android tablets (AT_Schedule): the mode switch and New schedule head the list column, the editor runs full height
   const node = desk && isAndroid()
     ? h('div', { class: 'page sc sc-desk' }, ctx.header({ title: t('nav.announce'), actions: sw.headActs }),
-      h('div', { class: 'sc-split' }, h('div', { class: 'sc-left' }, sw.slot, bar, listEl), pane))
+      h('div', { class: 'sc-split' }, h('div', { class: 'sc-left' }, sw.slot, outNote, bar, listEl), pane))
     : h('div', { class: `page sc${desk ? ' sc-desk' : ''}` },
       ctx.header({ title: t('nav.announce'), actions: sw.headActs }),
       sw.slot,
+      outNote,
       bar,
       desk ? h('div', { class: 'sc-split' }, listEl, pane) : listEl);
 
