@@ -46,8 +46,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
-from yt_dlp.postprocessor.sponsorblock import SponsorBlockPP
 from starlette.background import BackgroundTask
+from yt_dlp.postprocessor.sponsorblock import SponsorBlockPP
 
 import talk
 from auth import (
