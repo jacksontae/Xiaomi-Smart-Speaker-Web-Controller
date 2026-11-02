@@ -47,6 +47,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from yt_dlp.postprocessor.sponsorblock import SponsorBlockPP
+from starlette.background import BackgroundTask
 
 import talk
 from auth import (
@@ -127,6 +128,11 @@ FEED_MAX = 10 * 1024 * 1024  # bytes of RSS we read at most
 FEED_REDIRECTS = 5
 EPISODES_MAX = 200
 USER_AGENT = "speaker-service/0.2"  # radio-browser asks clients to identify themselves
+# "This device" stream proxy (/local/stream): for radio a browser can't fetch itself (http:// on an https page)
+STREAM_MAX_BYTES = 512 * 1024 * 1024  # one relayed stream ends after this much (about 9 h of 128 kbit/s radio)
+STREAM_MAX_SECONDS = 6 * 3600  # ... or after this long; the browser then asks for a fresh link
+STREAM_MAX_OPEN = 8  # relayed streams at once (all browsers together)
+STREAM_REDIRECTS = 5
 STATION_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 ITUNES_NS = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
 TALK_START_TIMEOUT = 10.0  # seconds a new /talk connection has to send its start message
@@ -423,6 +429,8 @@ app = FastAPI(title="Speaker Service", lifespan=lifespan)
 http = httpx.AsyncClient(timeout=30, follow_redirects=True)
 # For URLs users type in (podcast feeds): redirects are followed by hand so each hop is checked first.
 feed_http = httpx.AsyncClient(timeout=20, follow_redirects=False)
+# For the "This device" stream proxy: a stalled upstream (no bytes for 30 s) ends the relay.
+stream_http = httpx.AsyncClient(timeout=httpx.Timeout(10, read=30), follow_redirects=False)
 cast_lock = asyncio.Lock()
 bearer = HTTPBearer(auto_error=False, description="The api_token from config.json (`./speakerctl token`)")
 
@@ -519,12 +527,17 @@ def _media_sig(path, params):
     return hmac.new(settings.api_token.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
-def media_url(path, **params):
-    """A URL the speaker can fetch without a header: signed with the API token and time-limited."""
+def media_path(path, **params):
+    """Signed, time-limited path + query of a media link, relative to this server (a browser plays it as is)."""
     params = {k: str(v) for k, v in params.items()}
     params["exp"] = str(int(time.time()) + MEDIA_URL_TTL)
     params["sig"] = _media_sig(path, params)
-    return f"{base_url()}{path}?{urllib.parse.urlencode(params)}"
+    return f"{path}?{urllib.parse.urlencode(params)}"
+
+
+def media_url(path, **params):
+    """A URL the speaker can fetch without a header: signed with the API token and time-limited."""
+    return f"{base_url()}{media_path(path, **params)}"
 
 
 def verify_media(request: Request):
@@ -1135,20 +1148,21 @@ async def ensure_track(video_id):
     return (await asyncio.shield(task))["path"]
 
 
-async def queue_media(item):
-    """(url, content_type) the speaker loads for a queue item."""
+async def queue_media(item, sign=media_url):
+    """(url, content_type) the speaker loads for a queue item. `sign=media_path` gives this server's own links
+    relative, for a browser playing on "This device"."""
     nonce = next(_nonce)
     if item["kind"] == "youtube":
         path = await ensure_track(item["source"])
-        return media_url(f"/yt/{path.name}", n=nonce), content_type_for(path)
+        return sign(f"/yt/{path.name}", n=nonce), content_type_for(path)
     if item["kind"] == "tts":
         lang = item["lang"] or settings.tts_lang
-        return media_url("/tts.mp3", text=item["source"], lang=lang, n=nonce), "audio/mp3"
+        return sign("/tts.mp3", text=item["source"], lang=lang, n=nonce), "audio/mp3"
     if item["kind"] == "file":
         row = db.get_file(int(item["source"])) if item["source"].isdigit() else None
         if row is None or not (MEDIA_DIR / row["stored_name"]).is_file():
             raise HTTPException(404, "The uploaded file is gone")
-        return media_url(f"/media/{row['stored_name']}", n=nonce), row["content_type"]
+        return sign(f"/media/{row['stored_name']}", n=nonce), row["content_type"]
     # url, radio and podcast items are fetched by the speaker straight from their source.
     return item["source"], item.get("content_type") or guess_audio_type(item["source"])
 
@@ -2367,18 +2381,18 @@ def resolve_host(host):
     return {info[4][0] for info in socket.getaddrinfo(host, None)}
 
 
-def check_public_url(url):
-    """Refuse feed URLs that point into this machine's networks (the server fetches them, not the speaker)."""
+def check_public_url(url, what="feed"):
+    """Refuse URLs that point into this machine's networks (the server fetches them, not the speaker)."""
     host = urllib.parse.urlsplit(url).hostname
     if not host:
-        raise HTTPException(400, "feed must be an http(s) URL")
+        raise HTTPException(400, f"{what} must be an http(s) URL")
     try:
         addresses = resolve_host(host)
     except OSError as e:
         raise HTTPException(502, f"Can't resolve {host}") from e
     for address in addresses:
         if not ipaddress.ip_address(address.split("%")[0]).is_global:
-            raise HTTPException(400, "feed must be on the public internet")
+            raise HTTPException(400, f"{what} must be on the public internet")
 
 
 async def fetch_feed(url):
@@ -2630,6 +2644,167 @@ async def play_file(file_id: int, body: FilePlayBody, who: Who):
         raise HTTPException(410, "The file is missing from the server's disk")
     url = media_url(f"/media/{row['stored_name']}")
     return await play_source(url, row["content_type"], row["title"], body.volume, who, "file play")
+
+
+# --- This device: play in the browser instead of on the speaker ---
+
+async def local_item(body):
+    """A playlist-style item (kind, source, title, lang, thumbnail, duration, content_type) checked like
+    build_item, but without the metadata lookups a browser already has; YouTube words or URLs are looked up."""
+    title = body.title.strip()[:200] if body.title and body.title.strip() else None
+    item = {"kind": body.kind, "title": title, "duration": body.duration, "lang": None,
+            "thumbnail": optional_http_url(body.thumbnail), "content_type": audio_type(body.content_type)}
+    if body.kind == "youtube":
+        source = clean_text(body.source, "source", 500)
+        if not YT_ID_RE.fullmatch(source):
+            meta = await asyncio.to_thread(yt_info, source)
+            source, title = meta["video_id"], title or meta["title"]
+            item["duration"] = item["duration"] or meta["duration"]
+        return {**item, "source": source, "title": title, "thumbnail": yt_thumbnail(source)}
+    if body.kind == "tts":
+        text = clean_text(body.source, "source", TTS_TEXT_MAX)
+        return {**item, "source": text, "title": title or text[:60], "lang": (body.lang or settings.tts_lang)[:16]}
+    if body.kind == "file":
+        row = db.get_file(int(body.source)) if body.source.strip().isdigit() else None
+        if row is None:
+            raise HTTPException(404, "No such file")
+        return {**item, "source": str(row["id"]), "title": title or row["title"],
+                "duration": item["duration"] or row["duration"]}
+    if body.kind == "radio" and STATION_UUID_RE.fullmatch(body.source.strip()):
+        station = await radio_station(body.source.strip())
+        return {**item, "source": station["url"], "title": title or station["name"],
+                "thumbnail": item["thumbnail"] or station["favicon"], "content_type": station["content_type"]}
+    return {**item, "source": http_url(body.source, "source")}  # url, podcast, radio stream URL
+
+
+def local_proxy_path(item, url, content_type):
+    """A signed /local/stream link relaying `url` through this server, for streams a browser can't fetch itself
+    (http:// on an https page, a type it doesn't know). None for this server's own links and for HLS playlists,
+    whose segment links a relay of the playlist alone would break."""
+    if url.startswith("/") or "mpegurl" in (content_type or ""):
+        return None
+    return media_path("/local/stream", u=url, t=content_type or "", n=next(_nonce))
+
+
+@viewer_api.post("/local/resolve")
+async def local_resolve(body: ItemBody):
+    """A link this browser can play itself when "This device" is its output: the same signed media links the
+    speaker gets (relative to this server), or the item's own stream URL plus a relayed one (`proxy_url`).
+    The speaker is never contacted. Open to viewers: it plays only on their own device. Not logged here, since
+    a browser also asks ahead for the next track and again when a long pause outlived a link: POST /local/played."""
+    item = await local_item(body)
+    url, content_type = await queue_media(item, sign=media_path)
+    if item["kind"] == "youtube":
+        await asyncio.to_thread(prune_cache, {Path(urllib.parse.urlsplit(url).path).name})
+    return {"kind": item["kind"], "url": url, "content_type": content_type,
+            "proxy_url": local_proxy_path(item, url, content_type),
+            "title": item["title"], "duration": item["duration"], "thumbnail": item["thumbnail"],
+            "live": item["kind"] == "radio"}
+
+
+class LocalPlayedBody(BaseModel):
+    title: str = Field(min_length=1, max_length=500)
+
+
+@viewer_api.post("/local/played", status_code=204)
+async def local_played(body: LocalPlayedBody, who: Who):
+    """Activity entry for something a person started on "This device" (one per tap, not per track: the browser
+    calls this when a play it was asked for starts, never when its queue moves on by itself)."""
+    title = " ".join(body.title.split())[:200]
+    if not title:
+        raise HTTPException(400, "title is empty")
+    record(who, "device play", title)
+
+
+# Stream types the relay passes on (anything else, like an HTML error page, is refused: it would be served from
+# this origin) and the odd names some radio servers use for common ones.
+STREAM_TYPES = ("audio/", "application/ogg", "video/mp4", "video/webm")
+STREAM_TYPE_ALIASES = {"audio/aacp": "audio/aac", "audio/x-aac": "audio/aac", "audio/mp3": "audio/mpeg",
+                       "audio/x-mp3": "audio/mpeg", "audio/x-mpeg": "audio/mpeg", "audio/mpeg3": "audio/mpeg"}
+_streams_open = 0
+
+
+def stream_type(upstream, expected):
+    """The content type to send for a relayed stream, or None when it isn't audio."""
+    value = (upstream or "").split(";")[0].strip().lower()
+    if value in ("", "application/octet-stream"):
+        value = (expected or "").strip().lower() or "audio/mpeg"
+    value = STREAM_TYPE_ALIASES.get(value, value)
+    return value if value.startswith(STREAM_TYPES) else None
+
+
+async def open_stream(url, range_header):
+    """The upstream response (streaming, not read yet), following redirects by hand so each hop is checked."""
+    headers = {"User-Agent": USER_AGENT, "Accept": "audio/*, */*;q=0.5"}
+    if range_header:
+        headers["Range"] = range_header
+    for _ in range(STREAM_REDIRECTS + 1):
+        url = http_url(url, "stream")
+        await asyncio.to_thread(check_public_url, url, "stream")
+        try:
+            r = await stream_http.send(stream_http.build_request("GET", url, headers=headers), stream=True)
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"The stream is unreachable ({type(e).__name__})") from e
+        if not (r.is_redirect and r.headers.get("location")):
+            return r
+        await r.aclose()
+        url = urllib.parse.urljoin(url, r.headers["location"])
+    raise HTTPException(502, "The stream redirects too many times")
+
+
+@app.get("/local/stream", dependencies=[Depends(verify_media)])
+async def local_stream(request: Request, u: str, t: str = ""):
+    """Relay a radio stream or audio link for "This device" (signed link from POST /local/resolve, so only a
+    signed-in member gets one). Bytes are passed on as they arrive, never stored; only public http(s) hosts."""
+    global _streams_open
+    if _streams_open >= STREAM_MAX_OPEN:
+        raise HTTPException(503, "Too many streams are being relayed right now")
+    _streams_open += 1
+    try:
+        r = await open_stream(u, request.headers.get("range"))
+    except BaseException:
+        _streams_open -= 1
+        raise
+    content_type = stream_type(r.headers.get("content-type"), t)
+    if r.status_code not in (200, 206) or content_type is None:
+        await r.aclose()
+        _streams_open -= 1
+        if content_type is None and r.status_code in (200, 206):
+            raise HTTPException(502, "The link didn't send audio")
+        raise HTTPException(502, f"The stream failed: HTTP {r.status_code}")
+    headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+               "Content-Security-Policy": "sandbox"}
+    # passing the encoded length on would be wrong once httpx has decoded a compressed body
+    keep = ("content-range", "accept-ranges") if r.headers.get("content-encoding") else \
+        ("content-length", "content-range", "accept-ranges")
+    headers.update({k: r.headers[k] for k in keep if k in r.headers})
+
+    closed = False
+
+    async def close():
+        """Once, from the relay's end or after the response (a client gone before the first byte)."""
+        global _streams_open
+        nonlocal closed
+        if not closed:
+            closed = True
+            _streams_open -= 1
+            await r.aclose()
+
+    async def relay():
+        sent, ends = 0, time.monotonic() + STREAM_MAX_SECONDS
+        try:
+            async for chunk in r.aiter_bytes():
+                sent += len(chunk)
+                if sent > STREAM_MAX_BYTES or time.monotonic() > ends:
+                    break  # the browser sees the stream end and asks for a fresh link
+                yield chunk
+        except httpx.HTTPError:
+            pass  # the upstream stalled or dropped: end the relay
+        finally:
+            await close()
+
+    return StreamingResponse(relay(), status_code=r.status_code, media_type=content_type, headers=headers,
+                             background=BackgroundTask(close))
 
 
 # --- Quick phrases ---

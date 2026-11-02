@@ -1,6 +1,7 @@
 // First-run quick tour (boards Now / T_Now / D_Now): coach marks that spotlight the real controls on the Now page.
-// Opens by itself once per signed-in user per device/app install (localStorage spk.tour.<userId> = TOUR_VERSION;
-// bump TOUR_VERSION to show it again after a big change), and again from App settings or Help (replay()).
+// Opens by itself once per signed-in user per device/app install (localStorage spk.tour.<userId> = TOUR_VERSION),
+// and again from App settings or Help (replay()). New steps: mark them `since: <new version>` and bump
+// TOUR_VERSION; people who saw an older tour then get only the steps added since (a short "what's new").
 // Steps follow the screen (phone tab bar vs iPad/desktop sidebar) and the role; a step whose element isn't on
 // screen is left out. Only Skip, Esc or Done close it: taps outside the card do nothing.
 //
@@ -12,7 +13,7 @@ import { api } from './api.js';
 import { isPhone } from './sheet.js';
 import { RANK } from './routes.js';
 
-export const TOUR_VERSION = 1;
+export const TOUR_VERSION = 2; // 2: "This device"
 const KEY = 'spk.tour.';
 const WAIT_MS = 400;     // how often we look for "Now page shown, nothing else open"
 const SETTLE_MS = 1200;  // quiet time first, so the passkey offer (opened ~1 s after sign-in) goes first
@@ -36,6 +37,9 @@ register({
     'tour.annTalkT': 'Announce or talk live',
     'tour.annTalkB': 'Type a message for the speaker to read out, or pick Talk live and speak through it with your microphone.',
     'tour.musicT': 'Music', 'tour.musicB': 'Search YouTube, internet radio and podcasts, or play your own files.',
+    'tour.deviceT': 'Listen here instead',
+    'tour.deviceB': 'Tap the speaker name and pick This device to play music on this phone instead. Only you hear it. Announcements still go to the speaker.',
+    'tour.deviceLgB': 'Choose This device from the speaker menu to play music here instead. Only you hear it. Announcements still go to the speaker.',
     'tour.meT': 'Account and help',
     'tour.meB': 'Tap your picture for your account, app settings and the help guide. You can replay this tour from there.',
     'tour.helpT': 'Help is here',
@@ -57,6 +61,9 @@ register({
     'tour.annTalkT': 'ประกาศหรือพูดสด',
     'tour.annTalkB': 'พิมพ์ข้อความให้ลำโพงอ่าน หรือเลือก พูดสด แล้วพูดผ่านลำโพงด้วยไมโครโฟน',
     'tour.musicT': 'เพลง', 'tour.musicB': 'ค้นหาจาก YouTube วิทยุออนไลน์ และพอดแคสต์ หรือเล่นไฟล์ของคุณเอง',
+    'tour.deviceT': 'ฟังที่เครื่องนี้แทน',
+    'tour.deviceB': 'แตะชื่อลำโพงแล้วเลือก อุปกรณ์นี้ เพลงจะเล่นที่โทรศัพท์เครื่องนี้แทน ได้ยินแค่คุณคนเดียว ส่วนประกาศยังออกที่ลำโพง',
+    'tour.deviceLgB': 'เลือก อุปกรณ์นี้ ในเมนูลำโพง เพลงจะเล่นที่เครื่องนี้แทน ได้ยินแค่คุณคนเดียว ส่วนประกาศยังออกที่ลำโพง',
     'tour.meT': 'บัญชีและคู่มือ',
     'tour.meB': 'แตะรูปโปรไฟล์เพื่อดูบัญชี ตั้งค่าแอป และคู่มือการใช้งาน เปิดทัวร์นี้อีกครั้งได้จากตรงนั้น',
     'tour.helpT': 'คู่มืออยู่ตรงนี้',
@@ -76,17 +83,21 @@ const keyOf = (user) => KEY + (user.id != null ? user.id : user.username);
 function storable() {
   try { localStorage.setItem(`${KEY}probe`, '1'); localStorage.removeItem(`${KEY}probe`); return true; } catch { return false; }
 }
-function seen(user) {
-  try { return Number(localStorage.getItem(keyOf(user))) >= TOUR_VERSION; } catch { return true; }
+/** The tour version this user last finished on this device (0 = never). */
+function seenVersion(user) {
+  try { return Number(localStorage.getItem(keyOf(user))) || 0; } catch { return TOUR_VERSION; }
 }
+const seen = (user) => seenVersion(user) >= TOUR_VERSION;
 function markSeen(user) { try { localStorage.setItem(keyOf(user), String(TOUR_VERSION)); } catch { /* not remembered */ } }
 
 /* ---------- steps ---------- */
-// sel: candidates, first one on screen wins. min: lowest role that sees it. text(el, info) -> [title, body] keys.
+// sel: candidates, first one on screen wins. min: lowest role that sees it. since: the TOUR_VERSION that added it.
+// text(info) -> [title, body] keys.
 const ctrlText = (op) => (op && shown('.np-ctrls .np-transport, .np-ctrls .np-volume') ? ['tour.ctrlT', 'tour.ctrlB'] : ['tour.seeT', 'tour.seeB']);
 const PHONE = [
   { id: 'tabs', sel: ['.tabbar'], text: () => ['tour.tabsT', 'tour.tabsB'] },
   { id: 'now', sel: ['.np-hero'], pick: (op) => (op && shown('.np-ctrls .np-transport, .np-ctrls .np-volume') ? '.np-ctrls' : '.np-hero'), text: (info) => ctrlText(info.op) },
+  { id: 'device', since: 2, sel: ['.topbar [data-spk="chip"]'], text: () => ['tour.deviceT', 'tour.deviceB'] },
   { id: 'announce', min: 'operator', sel: ['.tabbar [data-route="announce"]'], text: () => ['tour.annT', 'tour.annB'] },
   { id: 'music', min: 'operator', sel: ['.tabbar [data-route="music"]'], text: () => ['tour.musicT', 'tour.musicB'] },
   { id: 'account', sel: ['.me-btn'], text: () => ['tour.meT', 'tour.meB'] },
@@ -94,6 +105,7 @@ const PHONE = [
 const LARGE = [
   { id: 'nav', sel: ['.sb'], text: (info) => ['tour.navT', info.admin ? 'tour.navAdminB' : 'tour.navB'] },
   { id: 'speaker', sel: ['#view .phd-r [data-spk="chip"]', '.sb-spk'], text: () => ['tour.spkT', 'tour.spkB'] },
+  { id: 'device', since: 2, sel: ['#view .phd-r [data-spk="chip"]', '.sb-spk'], text: () => ['tour.deviceT', 'tour.deviceLgB'] },
   { id: 'now', sel: ['.np-col'], text: (info) => ctrlText(info.op) },
   { id: 'announce', min: 'operator', sel: ['.sbn [data-route="announce"]'], text: (info) => (info.talk ? ['tour.annTalkT', 'tour.annTalkB'] : ['tour.annT', 'tour.annB']) },
   { id: 'help', sel: ['#view .phd-r .help-btn', '.uchip'], text: () => ['tour.helpT', 'tour.helpB'] },
@@ -136,7 +148,7 @@ function waitForNow(user, forced) {
     const ok = nowShown() && !blocked() && document.visibilityState === 'visible';
     if (!ok) quietSince = 0;
     else if (!quietSince) quietSince = Date.now();
-    if (ok && Date.now() - quietSince >= (forced ? 0 : SETTLE_MS)) { open(user); return; }
+    if (ok && Date.now() - quietSince >= (forced ? 0 : SETTLE_MS)) { open(user, forced); return; }
     waiter = setTimeout(tick, WAIT_MS);
   };
   waiter = setTimeout(tick, forced ? 60 : WAIT_MS);
@@ -156,13 +168,14 @@ function loadCss() {
   return cssReady;
 }
 
-async function open(user) {
+async function open(user, forced) {
   const info = { op: RANK[user.role] >= RANK.operator, admin: RANK[user.role] >= RANK.admin, talk: false };
   const phone = isPhone();
   const [, talk] = await Promise.all([loadCss(), info.op && !phone ? api('/talk/status').then((s) => !!(s && s.available), () => false) : false]);
   info.talk = talk;
   if (tour || lastUser !== user || !nowShown()) return;
-  const steps = (phone ? PHONE : LARGE).filter((s) => (!s.min || RANK[user.role] >= RANK[s.min]) && targetOf(s, info));
+  const after = forced ? 0 : seenVersion(user); // saw an older tour: only what's new since
+  const steps = (phone ? PHONE : LARGE).filter((s) => (!s.min || RANK[user.role] >= RANK[s.min]) && (s.since || 1) > after && targetOf(s, info));
   if (!steps.length) return;
   build(user, info, steps); // sets `tour`
 }
