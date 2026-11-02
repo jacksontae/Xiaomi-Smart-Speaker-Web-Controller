@@ -2,10 +2,14 @@
 // progress (ticks locally between polls), transport, volume and the queue with shuffle/repeat.
 // Idle, offline and announcing states come from /status; owners also see the ESP32 relay's health when the
 // server reports `relay` (mqtt transport). There is no seek endpoint, so the progress bar is display only.
+// The page marks its state in data-np (playing, paused, loading, announce, idle, off): Android tints the player card
+// with it and draws the wavy progress (a-wavy.js), whose wave only moves while playing.
 import { h, icon, iconBtn, tip, busy } from '../ui.js';
 import { register, t, fmtDur, fmtRel } from '../i18n.js';
 import { speaker3d } from '../speaker3d.js';
 import { aicon } from '../a-icons.js';
+import { isAndroid } from '../prefs.js';
+import { wavyTrack } from '../a-wavy.js';
 
 register({
   en: {
@@ -134,7 +138,9 @@ export async function render(ctx) {
 
   /* ----- progress (display only) ----- */
   const fill = h('span', { class: 'np-fill' });
-  const bar = h('div', { class: 'np-bar', role: 'progressbar', 'aria-label': t('now.progress'), 'aria-valuemin': '0' }, fill);
+  const android = isAndroid();
+  const bar = h('div', { class: `np-bar${android ? ' np-wavy' : ''}`, role: 'progressbar', 'aria-label': t('now.progress'), 'aria-valuemin': '0' },
+    fill, android ? wavyTrack() : null);
   const tPos = h('span'), tLeft = h('span');
   const prog = h('div', { class: 'np-prog', hidden: true }, bar, h('div', { class: 'np-times' }, tPos, tLeft));
   const liveTag = h('p', { class: 'np-livetag', hidden: true }, h('span', { 'aria-hidden': 'true' }), t('now.live'));
@@ -217,6 +223,7 @@ export async function render(ctx) {
     const label = t(playing ? 'now.pause' : 'now.play');
     playB.replaceChildren(aicon(playing ? 'pause' : 'play', 'lg'));
     playB.setAttribute('aria-label', label);
+    playB.dataset.on = String(playing); // Android: circle when paused, rounded square while playing
     tip(playB, label);
   }
   async function patchQueue(body) {
@@ -238,6 +245,7 @@ export async function render(ctx) {
 
   function showOffline(e) {
     spk.setState('spk-off');
+    node.dataset.np = 'off';
     kindEl.textContent = '';
     title.textContent = t('now.offTitle');
     line.textContent = e && e.status === 0 ? t('now.offServer') : t('now.offLine');
@@ -256,6 +264,7 @@ export async function render(ctx) {
     const announcing = active && m.title === 'Announcement';
     const cur = q && q.items[q.index];
 
+    node.dataset.np = !active ? 'idle' : announcing ? 'announce' : m.state === 'BUFFERING' ? 'loading' : m.state === 'PAUSED' ? 'paused' : 'playing';
     if (!active) {
       spk.setState('spk-idle spk-breathe');
       kindEl.textContent = '';
@@ -344,7 +353,7 @@ export async function render(ctx) {
       ? h('button', { type: 'button', class: 'linkbtn np-more', 'aria-expanded': String(showAll), onclick: () => { showAll = !showAll; queueKey = ''; renderQueue(q, m); } },
         showAll ? t('now.showNext') : t('now.showAll', q.items.length))
       : null;
-    queueBox.replaceChildren(head, list, more);
+    queueBox.replaceChildren(...[head, list, more].filter(Boolean)); // no "Show all" link: nothing, not the text "null"
   }
 
   function tick() {
@@ -354,6 +363,7 @@ export async function render(ctx) {
     if (m.state === 'PLAYING') pos += (performance.now() - statusAt) / 1000;
     pos = Math.min(pos, m.duration);
     fill.style.width = `${(pos / m.duration) * 100}%`;
+    bar.style.setProperty('--np-pos', `${(pos / m.duration) * 100}%`);
     tPos.textContent = fmtDur(pos);
     tLeft.textContent = `-${fmtDur(m.duration - pos)}`;
     bar.setAttribute('aria-valuemax', String(Math.round(m.duration)));

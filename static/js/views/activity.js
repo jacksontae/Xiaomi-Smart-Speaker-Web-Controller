@@ -1,8 +1,10 @@
 // Activity (boards Activity / T_Activity / D_Activity). Owner only. GET /activity?limit=&before_id= (newest first).
 // Filters (All / Playback / Account / Failed) apply to what is loaded; "Show older" pages back by id.
 // Phone/iPad: segmented filter on top; desktop: filter list on the left, time column on the left of each row.
+// Android (A_Activity / AT_Activity): filter chips on top and one centred column on every width.
 import { h, icon, segmented, busy } from '../ui.js';
 import { register, t, fmtClock } from '../i18n.js';
+import { isAndroid } from '../prefs.js';
 import { cIcon, tile, phoneBack, fmtDayHead, sameDay } from '../c-kit.js';
 
 register({
@@ -115,9 +117,14 @@ export function render(ctx) {
   let done = false;
   let loading = false;
 
-  const seg = segmented({ label: t('act.filter'), value: filter, options: FILTERS.map((f) => ({ value: f, label: label[f] })), onChange: (v) => setFilter(v), cls: 'a-seg' });
-  const side = h('div', { class: 'a-side', role: 'radiogroup', 'aria-label': t('act.filter') },
-    FILTERS.map((f) => h('button', { type: 'button', role: 'radio', 'aria-checked': String(f === filter), dataset: { f }, onclick: () => setFilter(f) }, label[f])));
+  const radios = (cls, kid) => h('div', { class: cls, role: 'radiogroup', 'aria-label': t('act.filter') },
+    FILTERS.map((f) => h('button', { type: 'button', role: 'radio', 'aria-checked': String(f === filter), dataset: { f }, onclick: () => setFilter(f) }, kid && kid(), label[f])));
+  // one filter control per platform: Android filter chips (with a check when chosen), else segmented + desktop list
+  const android = isAndroid();
+  const seg = android
+    ? radios('a-chips', () => icon('check', 'xs a-chk'))
+    : segmented({ label: t('act.filter'), value: filter, options: FILTERS.map((f) => ({ value: f, label: label[f] })), onChange: (v) => setFilter(v), cls: 'a-seg' });
+  const side = android ? null : radios('a-side');
   const feed = h('div', { class: 'a-feed', 'aria-live': 'polite' });
   const more = h('button', { type: 'button', class: 'btn tonal big a-more', onclick: () => loadMore(more) }, t('act.older'));
   const endNote = h('p', { class: 'small a-end', hidden: true }, t('act.noOlder'));
@@ -127,8 +134,11 @@ export function render(ctx) {
 
   function setFilter(f) {
     filter = f;
-    seg.setValue(f);
-    side.querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.f === f)));
+    for (const box of [seg, side]) {
+      if (!box) continue;
+      if (box.setValue) box.setValue(f);
+      else box.querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.f === f)));
+    }
     draw();
   }
 

@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-02
+
+### Added
+- Android look for the web app, chosen from the device's OS (no setting), in Material 3 style with the lagoon
+  colours in light and dark. Phones get a floating nav pill with slide-to-select and filled active icons;
+  tablets get a side rail with Help under the admin items. Page titles stay pinned under the top bar. Also a Now
+  Bar, snackbars, blurred-scrim sheets, full-screen dialogs and floating action buttons, and the back button
+  closes sheets and dialogs. iPhone, iPad and desktop look the same as before.
+- Android layouts for Now playing, Announce, Music, Playlists, Schedule, Members, Activity, Settings, Account,
+  Help, sign-in and first-account setup, with two panes from 960 px wide. Members splits into "Your account" and
+  "Other people".
+
+### Fixed
+- The Now playing queue could show the word "null".
+
 ## [0.3.1] - 2026-10-30
 
 ### Fixed

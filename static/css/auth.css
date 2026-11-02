@@ -104,3 +104,71 @@ body:has(.auth) .ambient::before, body:has(.auth) .ambient::after { opacity: 0; 
 @keyframes auth-rise { from { opacity: 0; transform: translateY(22px); } }
 @keyframes auth-shake { 0%, 100% { translate: 0; } 20% { translate: -10px; } 40% { translate: 9px; } 60% { translate: -6px; } 80% { translate: 3px; } }
 /* the breathing backdrop is ambience, not information: it simply stops under reduced motion (base.css switch) */
+
+/* ================= Android look (boards A_Login / AT_Login / A_Setup / AT_Setup; tokens in css/android.css) =========
+   One UI lock screen: date over a huge thin clock, centred, the 3D speaker under it in a soft lagoon glow, then the
+   form on the page (no card): rounded filled fields and a 56 px full-width button whose corners tighten on press.
+   Motion stays what it is everywhere: the one-shot entry, the backdrop breathing three times, the model resting
+   after 8 s (js/speaker3d.js); nothing new loops. */
+:root[data-os="android"] .auth-bloom::before { background: radial-gradient(85% 42% at 50% 30%, color-mix(in srgb, var(--md-primary-container) 60%, transparent) 0%, transparent 72%); }
+:root[data-os="android"] .auth-bloom::after, :root[data-os="android"] .auth-glow { display: none; }
+:root[data-os="android"][data-theme="dark"] .auth-bloom::before { background: radial-gradient(85% 42% at 50% 30%, color-mix(in srgb, var(--md-primary-container) 70%, transparent) 0%, transparent 72%); }
+:root[data-os="android"] .lang-toggle button[aria-pressed="true"] { color: var(--md-primary); font-weight: 700; }
+
+:root[data-os="android"] .auth-col { padding-top: calc(var(--safe-t) + 52px); }
+:root[data-os="android"] .auth-top-gap { flex: .2 1 0; }
+:root[data-os="android"] .auth-mid-gap { flex: .6 1 0; min-height: 16px; }
+:root[data-os="android"] .auth-hero { display: flex; flex-direction: column; align-items: center; min-height: 0; text-align: center; }
+:root[data-os="android"] .auth-date { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--md-on-surface-variant); }
+:root[data-os="android"] .auth-clock { margin: 0; font-size: 96px; line-height: 1.08; font-weight: 300; letter-spacing: -2px; color: var(--md-on-surface); font-variant-numeric: tabular-nums; }
+:root[data-os="android"] .auth-hero .spk-stage { position: relative; right: auto; top: auto; order: 3; margin-top: 4px; --spk-size: clamp(140px, 40vw, 180px); }
+
+:root[data-os="android"] .auth-form { gap: 14px; }
+:root[data-os="android"] .auth-form h1, :root[data-os="android"] .setup-col h1 { font-size: 24px; line-height: 32px; font-weight: 700; }
+:root[data-os="android"] :is(.auth-form, .setup-col) .input { border-color: var(--md-outline-variant); background: var(--md-card); }
+:root[data-os="android"] :is(.auth-form, .setup-col) .input:focus { border-color: var(--md-primary); }
+:root[data-os="android"] :is(.auth-form, .setup-col) .input[aria-invalid="true"] { border-color: var(--md-error); }
+:root[data-os="android"] .auth-or { color: var(--md-on-surface-variant); }
+:root[data-os="android"] .auth-or::before, :root[data-os="android"] .auth-or::after { background: var(--md-outline-variant); }
+:root[data-os="android"] .alt-btn {
+  height: 56px; border: 1px solid var(--md-outline-variant); border-radius: 28px; background: transparent; color: var(--md-on-surface);
+  transition: border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .alt-btn:hover { background: color-mix(in srgb, var(--md-state) 6%, transparent); }
+:root[data-os="android"] .alt-btn:active { border-radius: 16px; }
+:root[data-os="android"] .alt-btn .icon.pk { color: var(--md-primary); }
+:root[data-os="android"] .forgot-help { color: var(--md-on-surface-variant); }
+
+/* setup: the same date and clock above the form (js/views/setup.js adds them on Android only) */
+:root[data-os="android"] .setup-hero { margin: 4px 0 20px; }
+:root[data-os="android"] .setup-hero .auth-clock { font-size: 80px; }
+:root[data-os="android"] .setup-col .intro { font-size: 15px; color: var(--md-on-surface-variant); }
+:root[data-os="android"] .setup-err { border-radius: 16px; background: var(--md-error-container); color: var(--md-on-error-container); }
+:root[data-os="android"] .setup-foot { color: var(--md-on-surface-variant); }
+:root[data-os="android"] .setup-foot .linkbtn { color: var(--md-primary); font-weight: 700; text-decoration: none; }
+
+/* tablet portrait (AT_ boards, 800 px): one centred column; landscape: clock and speaker left, form right */
+@media (min-width: 744px) {
+  :root[data-os="android"] .auth-hero .spk-stage { margin: 8px 0 0; --spk-size: clamp(180px, 22vh, 240px); }
+  :root[data-os="android"] .auth-date { margin-top: 0; font-size: 20px; line-height: 28px; }
+  :root[data-os="android"] .auth-clock { margin: 0; font-size: 128px; letter-spacing: -3px; }
+  :root[data-os="android"] .auth-lg { flex: 0 0 auto; } /* centred in the column (margin: auto), not stretched */
+  :root[data-os="android"] .auth-form { margin-top: 48px; }
+  :root[data-os="android"] .auth-form h1 { font-size: 28px; line-height: 36px; margin-bottom: 4px; }
+  :root[data-os="android"] .setup-col { justify-content: center; }
+  :root[data-os="android"] .setup-hero .auth-clock { font-size: 96px; }
+}
+@media (min-width: 960px) and (orientation: landscape) {
+  :root[data-os="android"] .auth-lg { max-width: 1100px; gap: 48px; }
+  :root[data-os="android"] .auth-lg { width: 100%; }
+  :root[data-os="android"] .auth-hero { flex: 1 1 0; min-width: 0; }
+  :root[data-os="android"] .auth-form { margin-top: 0; flex: 0 1 440px; }
+}
+@media (min-width: 1280px) {
+  :root[data-os="android"] .auth-bloom::before { background: radial-gradient(40% 70% at 30% 50%, color-mix(in srgb, var(--md-primary-container) 60%, transparent) 0%, transparent 72%); }
+  :root[data-os="android"] .auth-lg { width: 100%; max-width: 1120px; margin: 0 auto; gap: 48px; align-items: center; }
+  :root[data-os="android"] .auth-hero { flex: 1 1 0; min-width: 0; padding: 48px 0; }
+  :root[data-os="android"] .auth-form { flex: 0 1 440px; margin: 0; padding: 48px 0; }
+  :root[data-os="android"] .auth-clock { font-size: 136px; }
+  :root[data-os="android"] .auth-form h1 { font-size: 28px; }
+}

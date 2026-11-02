@@ -25,3 +25,33 @@
   .a-more { align-self: flex-start; }
   .a-end { text-align: left; }
 }
+
+/* ======================= Android look (boards A_Activity, AT_Activity) =======================
+   Filter chips (no segmented control, no side list) and one centred column with the time on the right. */
+:root[data-os="android"] .a-chips { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px; padding: 2px 16px; scrollbar-width: none; }
+:root[data-os="android"] .a-chips::-webkit-scrollbar { display: none; }
+:root[data-os="android"] .a-chips > button {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 16px; border: 0; border-radius: 20px;
+  background: var(--md-card); color: var(--md-on-surface-variant); font-size: 14px; font-weight: 600; white-space: nowrap;
+  transition: border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .a-chips > button:hover { background: color-mix(in srgb, var(--md-state) 6%, var(--md-card)); }
+:root[data-os="android"] .a-chips > button:active { border-radius: 12px; }
+:root[data-os="android"] .a-chips > button[aria-checked="true"] { padding-left: 12px; background: var(--md-primary); color: var(--md-on-primary); }
+:root[data-os="android"] .a-chk { display: none; }
+:root[data-os="android"] [aria-checked="true"] > .a-chk { display: block; }
+:root[data-os="android"] .a-day { gap: 8px; }
+:root[data-os="android"] .a-day > .c-cap { margin: 0; padding: 0 12px; }
+:root[data-os="android"] .a-row { gap: 16px; padding: 14px 16px; }
+:root[data-os="android"] .a-row .c-tile { width: 40px; height: 40px; }
+:root[data-os="android"] .a-title { font-weight: 500; font-size: 16px; }
+:root[data-os="android"] .a-time { font-size: 13px; font-weight: 700; color: var(--md-on-surface); }
+:root[data-os="android"] .a-row.fail .a-title { color: var(--md-error); }
+@media (min-width: 744px) {
+  :root[data-os="android"] .a-page { max-width: 680px; }
+  :root[data-os="android"] .a-chips { margin: 0; padding: 2px 0; }
+  :root[data-os="android"] .a-grid { display: block; }
+  :root[data-os="android"] .a-row { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "ic tx time"; padding: 14px 20px; }
+  :root[data-os="android"] .a-more { align-self: center; }
+  :root[data-os="android"] .a-end { text-align: center; }
+}

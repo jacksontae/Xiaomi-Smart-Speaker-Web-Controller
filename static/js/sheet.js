@@ -2,12 +2,52 @@
 //   openSheet(): phone = bottom sheet you can drag down to dismiss; iPad/desktop = centred dialog (same content).
 //   popover():   anchored menu/list for large screens (speaker picker, account menu). On phones use openSheet.
 // Both: Esc closes, focus moves in and returns to the opener, background is inert (<dialog>.showModal for sheets).
+// Android look: the system back gesture/button closes the top sheet or popover instead of leaving the page.
 import { h, iconBtn, rehomeToasts } from './ui.js';
 import { t } from './i18n.js';
-import { motionReduced } from './prefs.js';
+import { motionReduced, isAndroid } from './prefs.js';
 
 export const isPhone = () => !matchMedia('(min-width: 744px)').matches;
 const open = [];
+
+/* ---------- Android back: one same-address history entry per open overlay ----------
+   Opening pushes an entry (no hashchange: the address doesn't change). History back pops it: popstate closes every
+   overlay above the entry history landed on. Closing any other way (X, scrim, drag, Esc) takes the entry back off
+   with history.back(), unless the page moved on meanwhile (a link inside the sheet), when it is left alone.
+   The glass look (iOS/desktop) keeps today's behaviour: back leaves the page. */
+const backStack = []; // { id, close }
+let backSeq = 0;
+let backing = null;   // { done } while our own history.back() is on its way (pushes wait for it)
+function backCloses(close) {
+  if (!isAndroid()) return () => {};
+  const entry = { id: ++backSeq, close };
+  backStack.push(entry);
+  const push = () => {
+    if (!backStack.includes(entry)) return; // closed before the entry went in
+    try { history.pushState({ ...(history.state || {}), spkOv: entry.id }, ''); } catch { /* no history: back leaves */ }
+  };
+  if (backing) backing.wait.then(push); else push();
+  return () => {
+    const i = backStack.indexOf(entry);
+    if (i < 0) return; // closed by history back
+    backStack.splice(i, 1);
+    if (!history.state || history.state.spkOv !== entry.id) return;
+    let done;
+    backing = { wait: new Promise((r) => { done = r; }) };
+    backing.done = () => { backing = null; done(); };
+    const b = backing;
+    setTimeout(() => { if (backing === b) b.done(); }, 600); // never stall later pushes
+    history.back();
+  };
+}
+addEventListener('popstate', (e) => {
+  if (backing) { backing.done(); return; } // our own back after a close
+  const at = (e.state && e.state.spkOv) || 0;
+  for (let i = backStack.length - 1; i >= 0; i--) {
+    const en = backStack[i];
+    if (en.id > at) { backStack.splice(i, 1); en.close(); }
+  }
+});
 
 /**
  * openSheet({ title, build(body, sheet), onClose, label })
@@ -33,10 +73,12 @@ export function openSheet({ title, build, onClose, label }) {
   const first = body.querySelector('input:not([type=hidden]),textarea,select');
   (first && !matchMedia('(pointer: coarse)').matches ? first : closeBtn).focus({ preventScroll: true });
   dragToDismiss(grab, panel, scrim, close);
+  const releaseBack = backCloses(close);
 
   function close() {
     if (closed) return;
     closed = true;
+    releaseBack();
     open.splice(open.indexOf(api), 1);
     dlg.classList.add('closing');
     rehomeToasts(dlg);
@@ -114,7 +156,7 @@ export function popover({ anchor, build, place = 'below', label, className = '' 
   anchor.setAttribute('aria-expanded', 'true');
   const onDown = (e) => { if (!el.contains(e.target) && !anchor.contains(e.target)) closePopover(); };
   const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); closePopover(true); } };
-  const me = { el, anchor, onDown, onKey };
+  const me = { el, anchor, onDown, onKey, releaseBack: backCloses(() => { if (pop === me) closePopover(); }) };
   // armed a tick later so the opening click doesn't close it; skip if it was closed in between (else the listener
   // leaks and the next pointerdown anywhere, even inside the next popover, closes that one)
   setTimeout(() => { if (pop === me) document.addEventListener('pointerdown', onDown, true); });
@@ -126,8 +168,9 @@ export function popover({ anchor, build, place = 'below', label, className = '' 
 }
 export function closePopover(refocus = false) {
   if (!pop) return;
-  const { el, anchor, onDown, onKey } = pop;
+  const { el, anchor, onDown, onKey, releaseBack } = pop;
   pop = null;
+  releaseBack();
   document.removeEventListener('pointerdown', onDown, true);
   document.removeEventListener('keydown', onKey, true);
   anchor.setAttribute('aria-expanded', 'false');

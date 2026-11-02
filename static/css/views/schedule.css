@@ -50,3 +50,48 @@
   .sc-ph h2 { margin-bottom: 14px; font-size: 18px; font-weight: 700; }
 }
 .sc-nextday { color: var(--ink-2); }
+
+/* ======================= Android look (boards A_Schedule, AT_Schedule) =======================
+   Phones: New schedule is the FAB and the editor a full-screen dialog (android-kit.css). Tablets in landscape
+   (>= 960px): list column (mode switch, New schedule, clock, list) | editor panel. */
+:root[data-os="android"] .sc-gh { padding: 0 12px; font-size: 13px; color: var(--md-primary); }
+:root[data-os="android"] .sc-row { padding: 12px 16px; gap: 16px; }
+:root[data-os="android"] .sc-time { font-size: 26px; letter-spacing: -.3px; }
+:root[data-os="android"] .sc-clock { padding: 0 12px; }
+:root[data-os="android"] .sc-fail { background: transparent; padding: 0; color: var(--md-error); }
+:root[data-os="android"] .sc-empty { background: var(--md-card); color: var(--md-primary); }
+
+/* editor (full-screen dialog, tablet dialog, side panel) */
+:root[data-os="android"] .sc-form > .field > span:first-child, :root[data-os="android"] .sc-what > .field > span:first-child { padding: 0 12px; font-size: 13px; font-weight: 600; color: var(--md-primary); }
+:root[data-os="android"] .sc-swrow, :root[data-os="android"] .sc-timerow { min-height: 64px; padding: 8px 12px 8px 16px; border: 0; border-radius: 16px; background: var(--md-card); }
+:root[data-os="android"] .sc-timein { width: 176px; height: 48px; border: 0; background: var(--md-surface-container); font-size: 26px; color: var(--md-on-surface); }
+:root[data-os="android"] .sc-timein:focus { padding: 0 8px; border: 2px solid var(--md-primary); }
+/* days: circles; a chosen day is a filled rounded square (shape morph) */
+:root[data-os="android"] .sc-days { gap: 4px; }
+:root[data-os="android"] .sc-day {
+  aspect-ratio: 1; min-height: 44px; border: 1px solid var(--md-outline-variant); border-radius: 999px; background: var(--md-card); color: var(--md-on-surface);
+  transition: border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease);
+}
+:root[data-os="android"] .sc-day[aria-pressed="true"] { border-color: transparent; border-radius: 14px; background: var(--md-primary); color: var(--md-on-primary); }
+:root[data-os="android"] .sc-summary { padding: 0 12px; }
+:root[data-os="android"] .sc-volbox .small, :root[data-os="android"] .sc-info { padding: 0 12px; }
+:root[data-os="android"] .sc-info { gap: 4px; }
+:root[data-os="android"] .sc-test { min-height: 52px; }
+:root[data-os="android"] .ak-full .sc-form { gap: 20px; }
+
+/* tablets in landscape: list column | editor panel (surface container, full height, sticky) */
+:root[data-os="android"] .page.sc-desk { max-width: 1200px; }
+:root[data-os="android"] .sc-desk .sc-split { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 24px; align-items: start; }
+:root[data-os="android"] .sc-left { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+:root[data-os="android"] .sc-left .sc-bar { flex-direction: column-reverse; align-items: stretch; gap: 12px; }
+:root[data-os="android"] .sc-bar .btn {
+  min-height: 56px; --btn-r: 28px; --btn-r-press: 16px; background: var(--md-primary-container); color: var(--md-on-primary-container); font-size: 16px;
+}
+:root[data-os="android"] .sc-bar .btn:hover { background: color-mix(in srgb, var(--md-on-primary-container) 8%, var(--md-primary-container)); color: var(--md-on-primary-container); }
+:root[data-os="android"] .sc-desk .sc-pane {
+  position: sticky; top: 100px; max-height: calc(100vh - 124px); overflow-y: auto; scrollbar-width: none;
+  padding: 24px 24px 28px; border-radius: 28px; background: var(--md-surface-container);
+}
+:root[data-os="android"][data-nowbar] .sc-desk .sc-pane { max-height: calc(100vh - 180px); } /* ends above the Now Bar */
+:root[data-os="android"] .sc-desk .sc-ph h2 { margin-bottom: 16px; font-size: 22px; line-height: 28px; font-weight: 700; }
+:root[data-os="android"] .sc-days { grid-template-columns: repeat(7, minmax(0, 52px)); }

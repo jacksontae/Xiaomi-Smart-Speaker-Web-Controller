@@ -157,9 +157,10 @@ async function showScreen(load) {
 function startApp() {
   screenLoad = null;
   if (shell) shell.destroy();
-  shell = buildShell({ user: state.user, api, onSignOut: signOut, onPickSpeaker: (s) => toast(t('spk.switched', s.name), 'ok') });
+  shell = buildShell({ user: state.user, api, onSignOut: signOut, onPickSpeaker: (s) => toast(t('spk.switched', s.name), 'ok'), onCommand: command });
   appEl.replaceChildren(shell.el);
   applySpeakers();
+  shell.setStatus(state.status, state.statusErr);
   render(false);
   startPolling();
   prefetchRoutes();
@@ -283,7 +284,13 @@ async function refreshStatus() {
   }
   applyMood();
   applySpeakers();
+  if (shell) shell.setStatus(state.status, state.statusErr);
   if (view && view.onStatus) callStatus(view);
+}
+/** A speaker command from the shell (the Android Now Bar's play/pause): errors as toasts, then poll right away. */
+async function command(path) {
+  try { await api(path, { method: 'POST' }); } catch (e) { fail(e); }
+  await refreshStatus();
 }
 function startPolling() {
   stopPolling();

@@ -107,3 +107,37 @@
   .tb-grid > .tb-row:nth-child(n+3) { border-top: 1px solid var(--line); }
   .tb-grid > .tb-row:nth-child(2n) { border-left: 1px solid var(--line); }
 }
+
+/* ======================= Android look (boards A_YouTube, A_AddItem, AT_YouTube) ======================= */
+/* search: one rounded field with a search icon, a clear button and the submit inside (teamb-common androidSearch) */
+:root[data-os="android"] .tb-search-a { align-items: center; gap: 0; min-height: 56px; padding: 0 4px 0 16px; border-radius: 28px; background: var(--md-card); }
+:root[data-os="android"] .tb-search-a:focus-within { box-shadow: inset 0 0 0 2px var(--md-primary); }
+:root[data-os="android"] .tb-sic { flex: 0 0 auto; margin-right: 12px; color: var(--md-on-surface-variant); }
+:root[data-os="android"] .tb-search-a .input, :root[data-os="android"] .tb-search-a .input:focus {
+  height: 54px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none;
+}
+:root[data-os="android"] .tb-search-a .input::-webkit-search-cancel-button { display: none; -webkit-appearance: none; }
+:root[data-os="android"] .tb-clear { flex: 0 0 auto; width: 44px; height: 44px; }
+:root[data-os="android"] .tb-clear[hidden] { display: none; }
+:root[data-os="android"] .tb-search-a .btn { flex: 0 0 auto; width: 48px; min-height: 48px; margin-left: 2px; padding: 0; border-radius: 24px; font-size: 15px; }
+:root[data-os="android"] .tb-search-a .btn:active:not([disabled]) { border-radius: 14px; }
+:root[data-os="android"] .tb-go-l { display: none; }
+@media (min-width: 744px) {
+  :root[data-os="android"] .tb-search-a .btn { width: auto; padding: 0 22px; }
+  :root[data-os="android"] .tb-go-l { display: inline; }
+  :root[data-os="android"] .tb-go-ic { display: none; }
+}
+:root[data-os="android"] .tb-cap { padding: 0 12px; color: var(--md-primary); font-weight: 600; }
+
+/* round buttons: a chosen toggle (added, repeat on) is a filled rounded square (the fill is .tb-rb.soft.on above) */
+:root[data-os="android"] .tb-rb.soft.on, :root[data-os="android"] .tb-rb.soft[aria-pressed="true"] { border-radius: 14px; }
+:root[data-os="android"] .tb-th.wide { width: 96px; height: 56px; border-radius: 12px; }
+
+/* Add item sheet: the count and Done float as a dark capsule at the bottom (A_AddItem) */
+:root[data-os="android"] .tb-addfoot {
+  bottom: calc(8px + var(--safe-b)); margin: 0 -8px 8px; padding: 6px 6px 6px 20px; border: 0; border-radius: 30px;
+  background: var(--md-inverse-surface); color: var(--md-inverse-on); box-shadow: 0 6px 18px rgba(0, 20, 22, .25);
+}
+:root[data-os="android"] .tb-addfoot .tb-count { color: inherit; font-weight: 600; }
+:root[data-os="android"] .tb-addfoot .btn { min-height: 48px; --btn-r: 24px; background: var(--md-primary-container); color: var(--md-on-primary-container); }
+:root[data-os="android"] .tb-addfoot .btn:hover { background: color-mix(in srgb, var(--md-on-primary-container) 8%, var(--md-primary-container)); color: var(--md-on-primary-container); }

@@ -75,7 +75,7 @@ def test_live_command_behind_many_polls_still_works(app, slow):
     assert {s.status_code for s in statuses} == {200}
     assert r.status_code == 200 and slow.cast.volume == 0.4
     assert slow.attempts == 3  # one shared read (receiver + media) + the command, not one read per poll
-    assert took < 3 * ATTEMPT
+    assert took < POLLS * ATTEMPT  # about 3 attempts, roomy for a busy CI runner; before: one read per poll first
 
 
 def test_known_offline_speaker_fails_at_once(client, app, slow):

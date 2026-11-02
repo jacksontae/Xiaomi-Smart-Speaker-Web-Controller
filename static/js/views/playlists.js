@@ -4,10 +4,14 @@
 // Operators: create, rename, delete (with Undo), add items of every kind, reorder (drag the handle; on touch also
 // Reorder mode with up/down), item menu (play from here, move to top, remove with Undo), play / shuffle / repeat.
 // Viewers see the same lists read-only.
+// Android look: New playlist and Add item are extended FABs on phones (android-kit.js), Play all | Shuffle a connected
+// button group, and tablets (>= 960px) get the list-detail two-pane layout of the AT_ boards.
 import { h, icon, field, busy, tip, append } from '../ui.js';
 import { register, t, fmtDur } from '../i18n.js';
 import { errorText } from '../api.js';
 import { isPhone } from '../sheet.js';
+import { isAndroid } from '../prefs.js';
+import { kitCss, fab, replacedByFab } from '../android-kit.js';
 import { bicon } from '../teamb-icons.js';
 import {
   thumb, roundBtn, setRound, errBox, note, spinnerLine, playlistMeta, kindSub, addItemSheet, mediaActive,
@@ -56,11 +60,12 @@ register({
 const REPEATS = ['off', 'all', 'one'];
 const repeatPref = new Map(); // playlist id -> repeat mode for the next Play all (this tab only)
 const listeners = new Set(); // repaint functions of mounted lists (Undo of a playlist delete)
-const isDesk = () => matchMedia('(min-width: 1280px)').matches;
+// list and detail side by side: desktop, and Android tablets in landscape (AT_Playlists)
+const isDesk = () => matchMedia(isAndroid() ? '(min-width: 960px)' : '(min-width: 1280px)').matches;
 const canOp = (ctx) => ctx.can('operator');
 
 export async function render(ctx) {
-  await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/playlists.css')]);
+  await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/playlists.css'), kitCss(ctx)]);
   const id = parseInt(ctx.params[0], 10) || null;
   if (id && !isDesk()) return detailPage(ctx, id);
   return listPage(ctx, id);
@@ -76,6 +81,7 @@ function listPage(ctx, selected) {
   const newBtn = canOp(ctx) ? h('button', { type: 'button', class: 'btn primary', onclick: () => createPlaylist(ctx, (p) => {
     if (desk) { selected = p.id; history.replaceState(null, '', `#/playlists/${p.id}`); load(); } else ctx.go(`#/playlists/${p.id}`);
   }) }, icon('plus', 'sm'), h('span', { class: 'pl-new-l' }, t('pl.new')), h('span', { class: 'pl-new-s' }, t('pl.newShort'))) : null;
+  if (newBtn) fab(ctx, { icon: 'plus', label: t('pl.new'), onclick: () => newBtn.click(), replaces: newBtn });
   const node = h('div', { class: `page pl${desk ? ' pl-desk' : ''}` }, ctx.header({ title: t('nav.playlists'), actions: newBtn }),
     desk ? h('div', { class: 'pl-split' }, box, pane) : box);
 
@@ -228,6 +234,9 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
   let p = null, status = ctx.status, reorder = false, dragging = false;
   const ac = new AbortController();
   const changed = () => { if (onChanged) onChanged(); };
+  const addItems = () => addItemSheet(ctx, p, () => { reloadItems(); changed(); });
+  // Android phones: Add item is the FAB (the board's A_PlaylistDetail); the link below stays for tablets
+  const addFab = op && !embedded ? fab(ctx, { icon: 'plus', label: t('pl.addItem'), onclick: () => { if (p) addItems(); } }) : null;
 
   async function load() {
     try {
@@ -262,14 +271,15 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
       playBtn = h('button', { type: 'button', class: 'btn primary big pl-play', onclick: () => playAll() });
       shufBtn = h('button', { type: 'button', class: 'btn tonal big pl-shuf', onclick: () => shuffle() }, bicon('shuffle', 'sm'), t('pl.shuffle'));
       repBtn = h('button', { type: 'button', class: 'tb-rb soft pl-rep', onclick: () => cycleRepeat() });
-      reorderBtn = h('button', { type: 'button', class: 'linkbtn', 'aria-pressed': 'false', onclick: () => setReorder(!reorder) }, t('pl.reorder'));
+      reorderBtn = h('button', { type: 'button', class: 'linkbtn pl-reo', 'aria-pressed': 'false', onclick: () => setReorder(!reorder) });
       kids.push(h('div', { class: 'pl-ctl' },
         h('div', { class: 'pl-btns' }, playBtn, shufBtn, repBtn),
         h('div', { class: 'pl-links' },
-          h('button', { type: 'button', class: 'linkbtn', onclick: () => addItemSheet(ctx, p, () => { reloadItems(); changed(); }) }, icon('plus', 'sm'), t('pl.addItem')),
+          (addFab ? replacedByFab : (x) => x)(h('button', { type: 'button', class: 'linkbtn pl-add', onclick: addItems }, icon('plus', 'sm'), t('pl.addItem'))),
           reorderBtn,
-          h('button', { type: 'button', class: 'linkbtn', onclick: () => rename() }, t('pl.rename')))));
+          h('button', { type: 'button', class: 'linkbtn pl-ren', onclick: () => rename() }, bicon('pencil', 'sm pl-ic'), t('pl.rename')))));
     }
+    if (reorderBtn) reorderBtn.replaceChildren(bicon('swap-vert', 'sm pl-ic'), t('pl.reorder'));
     kids.push(itemsEl, live);
     node.replaceChildren(...kids);
     paintItems();
@@ -361,7 +371,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
     const list = items();
     if (!list.length) {
       itemsEl.replaceChildren(h('div', { class: 'pl-empty' }, note(t('pl.emptyList')),
-        op ? h('button', { type: 'button', class: 'btn tonal', onclick: () => addItemSheet(ctx, p, () => { reloadItems(); changed(); }) }, icon('plus', 'sm'), t('pl.addItem')) : null));
+        op ? h('button', { type: 'button', class: 'btn tonal', onclick: addItems }, icon('plus', 'sm'), t('pl.addItem')) : null));
       return;
     }
     itemsEl.classList.toggle('reorder', reorder);
@@ -406,7 +416,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
   }
   function setReorder(on) {
     reorder = on;
-    reorderBtn.textContent = t(on ? 'pl.done' : 'pl.reorder');
+    reorderBtn.replaceChildren(bicon(on ? 'check' : 'swap-vert', 'sm pl-ic'), t(on ? 'pl.done' : 'pl.reorder'));
     reorderBtn.setAttribute('aria-pressed', String(on));
     paintItems();
   }

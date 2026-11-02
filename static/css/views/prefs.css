@@ -13,3 +13,15 @@
 .ca-pks > * + * { border-top: 1px solid var(--line); }
 .p-lead { margin: -4px 4px 0; }
 .gsi-slot { min-height: 52px; display: flex; justify-content: center; }
+
+/* ======================= Android look (boards A_Account, A_Prefs, AT_Prefs) ======================= */
+/* who you are: a card at the top, big avatar */
+:root[data-os="android"] .acc-head { padding: 20px; border-radius: var(--r-lg); background: var(--md-card); gap: 16px; }
+:root[data-os="android"] .acc-head .avatar { width: 64px; height: 64px; font-size: 26px; }
+:root[data-os="android"] .ca-name { font-size: 22px; }
+:root[data-os="android"] .ca-namefield { border-top: 0; }
+:root[data-os="android"] .ca-add .c-title { color: var(--md-primary); font-weight: 600; }
+:root[data-os="android"] .ca-add .c-tile { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+:root[data-os="android"] .ca-pks > * + * { border-top: 0; }
+:root[data-os="android"] .ca-danger { border: 0; color: var(--md-error); }
+:root[data-os="android"] .p-lead { margin: -4px 12px 0; }
