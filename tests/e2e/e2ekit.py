@@ -33,6 +33,12 @@ VIEWPORTS = {
     "ipad": {"viewport": {"width": 820, "height": 1180}, "has_touch": True},
     "desktop": {"viewport": {"width": 1440, "height": 900}},
 }
+VIEWPORTS["android"] = {"viewport": {"width": 412, "height": 915}, "is_mobile": True, "has_touch": True,
+                        "user_agent": "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) "
+                                      "Chrome/130.0.0.0 Mobile Safari/537.36"}
+VIEWPORTS["android-tablet"] = {"viewport": {"width": 1280, "height": 800}, "has_touch": True,
+                               "user_agent": "Mozilla/5.0 (Linux; Android 15; Pixel Tablet) AppleWebKit/537.36 "
+                                             "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"}
 SPEAKER_WAIT = 90_000  # ms: the unreachable speaker answers 503 after its ~10 s connect timeout
 # console noise that is expected with an offline speaker (the browser logs every non-2xx fetch)
 IGNORED_CONSOLE = re.compile(r"Failed to load resource|status of (4\d\d|50\d)")
