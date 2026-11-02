@@ -19,7 +19,15 @@
 :root[data-os="android"] .acc-head { padding: 20px; border-radius: var(--r-lg); background: var(--md-card); gap: 16px; }
 :root[data-os="android"] .acc-head .avatar { width: 64px; height: 64px; font-size: 26px; }
 :root[data-os="android"] .ca-name { font-size: 22px; }
-:root[data-os="android"] .ca-namefield { border-top: 0; }
+:root[data-os="android"] .ca-namefield { position: relative; border-top: 0; }
+/* the label floats inside the outlined field (AT_Prefs), as on every other Android text field; Save stays beside it */
+:root[data-os="android"] .ca-namefield > label:first-child {
+  position: absolute; z-index: 1; top: 21px; left: 17px; right: 120px; font-size: 12px; line-height: 16px; font-weight: 600;
+  color: var(--md-on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+:root[data-os="android"] .ca-namefield:focus-within > label:first-child { color: var(--md-primary); }
+:root[data-os="android"] .ca-namefield:has([aria-invalid="true"]) > label:first-child { color: var(--md-error); }
+:root[data-os="android"] .ca-namefield .input { height: 60px; padding-top: 18px; }
 :root[data-os="android"] .ca-add .c-title { color: var(--md-primary); font-weight: 600; }
 :root[data-os="android"] .ca-add .c-tile { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
 :root[data-os="android"] .ca-pks > * + * { border-top: 0; }

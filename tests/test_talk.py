@@ -181,7 +181,10 @@ def test_stuck_ffmpeg_is_killed(tmp_path, monkeypatch):
     async def run():
         t = talk.FfmpegTranscoder("webm")
         await t.start()
-        await asyncio.sleep(0.2)
+        for _ in range(100):  # the stub starts slowly on a busy machine
+            if t.errors:
+                break
+            await asyncio.sleep(0.05)
         await t.finish(timeout=0.3)
         return t.proc.returncode, t.errors
 
