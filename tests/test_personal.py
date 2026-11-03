@@ -225,9 +225,11 @@ def test_deleting_member_removes_personal_items(people, app, client):
     shop = new_playlist(ops, "Shop")["id"]
     tts(ops, shop)
     stored = app.db.get_file(mine["id"])["stored_name"]
-    sched = root.post("/schedules", json={"name": "Ann's", "action": "playlist", "playlist_id": pid,
+    sched = root.post("/schedules", json={"name": "Shop", "action": "playlist", "playlist_id": shop,
                                           "time": "12:00", "days": EVERY_DAY})
     assert sched.status_code == 200, sched.text
+    with app.db.tx() as db:  # schedules only take shared playlists now; one from before points at Ann's
+        db.execute("UPDATE schedules SET playlist_id = ? WHERE id = ?", (pid, sched.json()["id"]))
 
     assert root.delete(f"/users/{ann.user['id']}").status_code == 204
     assert app.db.get_playlist(pid) is None and app.db.get_file(mine["id"]) is None
@@ -260,18 +262,20 @@ def test_store_delete_user_returns_files(app):
 
 # --- Schedules can't reach someone else's personal playlist ---
 
-def test_schedule_needs_a_visible_playlist(people):
+def test_schedules_take_shared_playlists_only(people):
     ann, ops, root = people["ann"], people["ops"], people["root"]
     pid = new_playlist(ann)["id"]
     body = {"name": "x", "action": "playlist", "playlist_id": pid, "time": "12:00", "days": EVERY_DAY}
     r = ops.post("/schedules", json=body)
     assert r.status_code == 400 and r.json()["detail"] == "Unknown playlist"
-    made = root.post("/schedules", json=body)
+    r = root.post("/schedules", json=body)  # an owner sees it, but a member's playlist can't be scheduled
+    assert r.status_code == 400 and r.json()["detail"] == "Schedules play shared playlists only"
+    shared = new_playlist(ops, "Shop")["id"]
+    made = root.post("/schedules", json=body | {"playlist_id": shared})
     assert made.status_code == 200
     sid = made.json()["id"]
-    assert ops.patch(f"/schedules/{sid}", json={"name": "Renamed"}).status_code == 200  # playlist unchanged
-    other = new_playlist(people["ben"], "Ben's")["id"]
-    assert ops.patch(f"/schedules/{sid}", json={"playlist_id": other}).status_code == 400
+    assert ops.patch(f"/schedules/{sid}", json={"name": "Renamed"}).status_code == 200
+    assert root.patch(f"/schedules/{sid}", json={"playlist_id": pid}).status_code == 400
 
 
 # --- Viewers and the speaker's queue ---

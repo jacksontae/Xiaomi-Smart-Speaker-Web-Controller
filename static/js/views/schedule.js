@@ -147,7 +147,7 @@ export async function render(ctx) {
     try {
       const [s, pls] = await Promise.all([ctx.api('/schedules', { signal: ctx.signal }), ctx.api('/playlists', { signal: ctx.signal }).catch(() => [])]);
       data = s;
-      playlists = pls;
+      playlists = pls.filter((p) => p.owner_id == null); // schedules play shared playlists only (app.py)
       offset = Date.parse(s.now) - Date.now();
     } catch (e) {
       if (e.name !== 'AbortError') listEl.replaceChildren(errBox(errorText(e, ctx.user), load));

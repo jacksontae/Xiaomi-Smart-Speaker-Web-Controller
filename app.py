@@ -2956,6 +2956,8 @@ def validate_schedule(fields, now, who=None):
         playlist = db.get_playlist(fields["playlist_id"])
         if playlist is None or (who is not None and not can_see(playlist, who)):
             raise HTTPException(400, "Unknown playlist")
+        if playlist["owner_id"] is not None:  # it would go, and the schedule stop, when its member is deleted
+            raise HTTPException(400, "Schedules play shared playlists only")
         out["playlist_id"], out["shuffle"] = fields["playlist_id"], bool(fields.get("shuffle"))
         out["text"] = out["lang"] = None
     volume = fields.get("volume")
