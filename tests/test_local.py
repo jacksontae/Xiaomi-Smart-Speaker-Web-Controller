@@ -52,14 +52,11 @@ def test_tts(client, anon, app, net, no_speaker):  # noqa: F811
     assert no_speaker.media_controller.loads == [] and app.db.activity() == []
 
 
-def test_viewers_only_get_cached_youtube(as_role, app, downloads, no_speaker):  # noqa: F811
-    """A viewer never starts a download (disk and bandwidth); a track already in the cache plays."""
-    viewer = as_role("viewer")
-    r = resolve(viewer, kind="youtube", source=VID)
-    assert r.status_code == 403 and "operator" in r.json()["detail"]
-    assert resolve(viewer, kind="youtube", source="some song words").status_code == 403
-    assert resolve(as_role("operator"), kind="youtube", source=VID).status_code == 200  # downloads it
-    assert resolve(viewer, kind="youtube", source=VID).status_code == 200
+def test_viewers_may_download_youtube(as_role, app, downloads, no_speaker):  # noqa: F811
+    """A viewer's This device plays a YouTube track the server hasn't saved yet: it downloads it like for anyone."""
+    r = resolve(as_role("viewer"), kind="youtube", source=VID)
+    assert r.status_code == 200, r.text
+    assert r.json()["url"].startswith(f"/yt/{VID}.m4a?") and downloads.calls == [VID]
 
 
 def test_youtube_by_id_uses_the_cache(client, anon, app, downloads, no_speaker):  # noqa: F811
@@ -97,6 +94,17 @@ def test_file(client, anon, app, no_speaker):
     assert resolve(client, kind="file", source="999").status_code == 404
     (app.MEDIA_DIR / stored).unlink()
     assert resolve(client, kind="file", source=str(f["id"])).status_code == 404
+
+
+def test_file_must_be_visible(as_role, no_speaker):
+    """Someone else's personal file is 404 (as if missing); shared files and your own play; admins play any."""
+    alice, bob, op, admin = as_role("viewer", "alice"), as_role("viewer", "bob"), as_role("operator"), as_role("admin")
+    mine = upload(alice).json()
+    shared = upload(op).json()
+    assert mine["owner_id"] is not None and shared["owner_id"] is None
+    for c, f, code in [(alice, mine, 200), (bob, mine, 404), (op, mine, 404), (admin, mine, 200),
+                       (alice, shared, 200), (bob, shared, 200)]:
+        assert resolve(c, kind="file", source=str(f["id"])).status_code == code, (f, code)
 
 
 def test_radio_station_and_stream_url(client, net, no_speaker):  # noqa: F811
