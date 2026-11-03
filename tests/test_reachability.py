@@ -173,6 +173,26 @@ def test_changing_the_speaker_clears_offline_state(client, app, slow):
     assert r.status_code == 200 and app._offline is None
 
 
+def test_saving_a_new_speaker_does_not_wait_for_the_old_one(app, slow, monkeypatch):
+    """A /status read still connecting to the offline old speaker neither delays the save nor marks the new
+    speaker offline when it fails."""
+    monkeypatch.setattr(app, "make_transport", lambda s: SimpleNamespace(start=lambda: None, close=lambda: None))
+
+    async def run():
+        async with api(app) as c:
+            poll = asyncio.create_task(c.get("/status"))
+            await asyncio.sleep(0.05)  # the read is in flight, holding the speaker lock
+            started = time.monotonic()
+            r = await c.post("/settings", json={"speaker_ip": "192.0.2.11"})
+            took = time.monotonic() - started
+            return r, took, await poll
+
+    r, took, poll = asyncio.run(run())
+    assert r.status_code == 200 and took < ATTEMPT / 2
+    assert poll.status_code == 503  # the old speaker's answer
+    assert app._offline is None  # ...which says nothing about the new one
+
+
 # --- MQTT relay ---
 
 @pytest.fixture

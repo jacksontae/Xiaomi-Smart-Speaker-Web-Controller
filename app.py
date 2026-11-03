@@ -649,6 +649,7 @@ _offline = None  # {"until": loop time, "detail": message of the last unreachabl
 _probe = None  # the background task retrying an offline speaker
 _status_cache = None  # (loop time, (ReceiverState, MediaState)) from the last /status read
 _status_flight = None  # the /status read in progress, awaited by every concurrent poll
+_transport_gen = 0  # bumped when settings replace the transport: a call still on the old one changes nothing
 
 
 def speaker_error_detail(e):
@@ -706,14 +707,16 @@ async def probe_speaker():
 
 async def call_speaker(fn, *args, **kwargs):
     """Run a blocking transport call in a worker thread and keep track of reachability. Hold cast_lock."""
+    gen = _transport_gen
     try:
         result = await asyncio.to_thread(fn, *args, **kwargs)
     except SPEAKER_ERRORS as e:
         detail = speaker_error_detail(e)
-        if isinstance(e, UNREACHABLE_ERRORS):
+        if isinstance(e, UNREACHABLE_ERRORS) and gen == _transport_gen:
             mark_offline(detail)
         raise HTTPException(503, detail) from e
-    mark_online()
+    if gen == _transport_gen:
+        mark_online()
     return result
 
 
@@ -748,8 +751,10 @@ async def _read_speaker_state():
     try:
         async with cast_lock:
             fail_fast()
+            gen = _transport_gen
             state = await call_speaker(lambda: (transport.receiver(), transport.media()))
-            _status_cache = (asyncio.get_running_loop().time(), state)
+            if gen == _transport_gen:
+                _status_cache = (asyncio.get_running_loop().time(), state)
             return state
     finally:
         _status_flight = None
@@ -1982,10 +1987,18 @@ async def get_settings():
     return public_settings(settings)
 
 
+async def close_transport(old):
+    async with cast_lock:
+        try:
+            await asyncio.to_thread(old.close)
+        except SPEAKER_ERRORS as e:
+            print(f"closing the old transport failed: {e!r}")
+
+
 @admin_api.post("/settings")
 async def update_settings(changes: dict, background: BackgroundTasks, who: Who):
     """Partial update. Changing the port restarts the process; launchd brings it back up."""
-    global settings, transport
+    global settings, transport, _transport_gen
     if "api_token" in changes:
         raise HTTPException(400, "api_token can't be changed over the API; rotate it with ./speakerctl token --rotate")
     try:
@@ -2007,14 +2020,13 @@ async def update_settings(changes: dict, background: BackgroundTasks, who: Who):
     if (new.transport, new.speaker_ip, new.speaker_name, new.mqtt) != (
         old.transport, old.speaker_ip, old.speaker_name, old.mqtt
     ):
-        async with cast_lock:  # not run_cast: an offline old speaker mustn't block switching to a new one
-            old_transport, transport = transport, make_transport(new)
-            try:
-                await asyncio.to_thread(old_transport.close)
-            except SPEAKER_ERRORS as e:
-                print(f"closing the old transport failed: {e!r}")
+        # Swap at once: a call still waiting on an offline old speaker (up to ~10 s) mustn't hold up the save.
+        # The old transport closes behind that call, and _transport_gen keeps its result out of the new state.
+        old_transport, transport = transport, make_transport(new)
+        _transport_gen += 1
         reset_reachability()  # a new target starts with a clean slate
         transport.start()
+        spawn(close_transport(old_transport))
     restart = new.port != old.port
     if restart:
         background.add_task(lambda: os._exit(0))
