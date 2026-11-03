@@ -1,5 +1,7 @@
 # Xiaomi-Smart-Speaker-Web-Controller
 
+[English](README.en.md) | ภาษาไทย
+
 [![CI](https://github.com/jacksontae/Xiaomi-Smart-Speaker-Web-Controller/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jacksontae/Xiaomi-Smart-Speaker-Web-Controller/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
