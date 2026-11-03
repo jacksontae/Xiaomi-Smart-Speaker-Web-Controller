@@ -2687,11 +2687,17 @@ def local_proxy_path(item, url, content_type):
 
 
 @viewer_api.post("/local/resolve")
-async def local_resolve(body: ItemBody):
+async def local_resolve(body: ItemBody, who: Who):
     """A link this browser can play itself when "This device" is its output: the same signed media links the
     speaker gets (relative to this server), or the item's own stream URL plus a relayed one (`proxy_url`).
     The speaker is never contacted. Open to viewers: it plays only on their own device. Not logged here, since
-    a browser also asks ahead for the next track and again when a long pause outlived a link: POST /local/played."""
+    a browser also asks ahead for the next track and again when a long pause outlived a link: POST /local/played.
+    Viewers only get YouTube tracks the server already has: a download costs its disk and bandwidth."""
+    if body.kind == "youtube" and ROLE_RANK[who.role] < ROLE_RANK["operator"]:
+        source = body.source.strip()
+        if not (YT_ID_RE.fullmatch(source) and cached_track(source)):
+            raise HTTPException(403, "This YouTube track isn't saved on the server yet; "
+                                     "ask an operator to play it once")
     item = await local_item(body)
     url, content_type = await queue_media(item, sign=media_path)
     if item["kind"] == "youtube":
