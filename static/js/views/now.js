@@ -128,7 +128,8 @@ const kindIcon = (kind, cls) => (kind === 'tts' ? icon('announce', cls) : aicon(
 export async function render(ctx) {
   await Promise.all([ctx.css('speaker3d.css'), ctx.css('views/now.css')]); // styled before first paint
   const member = ctx.can('operator');
-  // playback controls: operators on the speaker, anyone on "This device" (it plays only in their browser)
+  // playback controls: operators on the speaker, anyone on "This device" (it plays only in their browser).
+  // Previous / next / a tap on a queue row work for everyone: viewers may move the speaker's queue too.
   const op = member || isDevice();
   const admin = ctx.can('admin');
   let st = null;          // latest /status (null while offline)
@@ -197,6 +198,7 @@ export async function render(ctx) {
   const nextB = ctl('next', t('now.next'), () => act('/queue/next', undefined, { 409: t('now.lastItem') }));
   const stopB = ctl('stop', t('now.stopTip'), () => act('/stop'));
   const transport = h('div', { class: 'np-transport glass', hidden: true }, prevB, playB, nextB, stopB);
+  playB.hidden = stopB.hidden = !op;
 
   /* ----- volume (operators drag; viewers see the level) ----- */
   const volOut = h('output', { class: 'np-volout' });
@@ -226,7 +228,8 @@ export async function render(ctx) {
   const go = (href, ic, label, primary) => h('a', { class: `btn ${primary ? 'primary' : 'tonal'}`, href }, ic, label);
   const idleActs = h('div', { class: 'np-acts', hidden: true },
     op ? go('#/playlists', icon('playlists', 'sm'), t('now.goPlaylists'), true) : null,
-    member ? [go('#/music', icon('music', 'sm'), t('now.goMusic')), go('#/announce', icon('announce', 'sm'), t('now.goAnnounce'))] : null);
+    op ? go('#/music', icon('music', 'sm'), t('now.goMusic')) : null,
+    member ? go('#/announce', icon('announce', 'sm'), t('now.goAnnounce')) : null);
   const retryB = h('button', { type: 'button', class: 'btn primary', onclick: () => { retryB.disabled = true; ctx.refreshStatus(); setTimeout(() => { retryB.disabled = false; }, 1500); } }, icon('refresh', 'sm'), t('now.retry'));
   const offActs = h('div', { class: 'np-acts', hidden: true }, retryB, h('a', { class: 'btn tonal', href: '#/help/offline' }, icon('help', 'sm'), t('now.offHelp')));
 
@@ -321,7 +324,7 @@ export async function render(ctx) {
       title.textContent = announcing ? t('now.announcement') : (m.title || (cur && cur.title) || t('now.kind.url'));
       line.textContent = statusLine(m, q, announcing);
       setArt(announcing ? null : m.thumbnail || (cur && cur.thumbnail));
-      transport.hidden = !op;
+      transport.hidden = !op && !q; // viewers on the speaker: only previous / next, so nothing without a queue
       prevB.hidden = nextB.hidden = !q;
       setPlayIcon(m.state !== 'PAUSED');
       prog.hidden = !m.duration;
@@ -389,7 +392,7 @@ export async function render(ctx) {
         : h('span', { class: 'np-thumb' }, kindIcon(it.kind, 'sm'));
       const inner = [thumb, h('span', { class: 'np-rtx' }, h('span', { class: 'np-rt' }, it.title), h('span', { class: 'np-rs' }, sub))];
       const cls = `np-row${isCur ? ' cur' : ''}`;
-      return h('li', {}, op && !isCur
+      return h('li', {}, !isCur
         ? h('button', { type: 'button', class: cls, 'aria-label': t('now.playItem', it.title), onclick: () => act('/queue/jump', { index: i }) }, inner)
         : h('div', { class: cls, 'aria-current': isCur ? 'true' : null }, inner));
     }));

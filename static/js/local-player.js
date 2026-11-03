@@ -17,7 +17,6 @@ register({
     'out.nowDevice': 'Music now plays on this device. Announcements still go to the speaker',
     'out.tapPlay': 'Tap play to start on this device',
     'out.cantPlay': 'This device can\'t play that item',
-    'out.ytNotSaved': 'That YouTube track isn\'t saved on the server yet. Ask someone who can control the speaker to play it once.',
     'out.cantStream': 'This device can\'t play that stream. Some radio links only work on the speaker',
     'out.skipped': (x) => `Couldn't play ${x}; skipped to the next item`,
     'out.queueFailed': 'None of the remaining items could be played on this device',
@@ -29,7 +28,6 @@ register({
     'out.nowDevice': 'ตอนนี้เพลงเล่นที่อุปกรณ์นี้ ส่วนประกาศยังออกที่ลำโพง',
     'out.tapPlay': 'แตะเล่นเพื่อเริ่มเล่นที่อุปกรณ์นี้',
     'out.cantPlay': 'อุปกรณ์นี้เล่นรายการนี้ไม่ได้',
-    'out.ytNotSaved': 'เพลง YouTube นี้ยังไม่ได้เก็บไว้ที่ server ให้คนที่ควบคุมลำโพงได้เปิดเล่นสักครั้งก่อน',
     'out.cantStream': 'อุปกรณ์นี้เล่นสตรีมนี้ไม่ได้ ลิงก์วิทยุบางสถานีเล่นได้เฉพาะที่ลำโพง',
     'out.skipped': (x) => `เล่น ${x} ไม่ได้ ข้ามไปรายการถัดไปแล้ว`,
     'out.queueFailed': 'อุปกรณ์นี้เล่นรายการที่เหลือไม่ได้เลย',
@@ -221,12 +219,7 @@ async function load(it, at = 0) {
   retried = at > 0;
   setPhase('BUFFERING');
   let got;
-  try { got = await resolve(it); } catch (e) {
-    if (g !== gen) return;
-    // viewers only get YouTube tracks the server already saved (app.py local_resolve)
-    if (e && e.status === 403 && it.kind === 'youtube') throw Object.assign(new ApiError(403, t('out.ytNotSaved')), { local: true });
-    throw e;
-  }
+  try { got = await resolve(it); } catch (e) { if (g !== gen) return; throw e; } // a newer load won: stay quiet
   if (g !== gen) return;
   item = { ...it, ...got, title: got.title || it.title || null, thumbnail: got.thumbnail || it.thumbnail || null };
   item.proxied = viaProxy(got);

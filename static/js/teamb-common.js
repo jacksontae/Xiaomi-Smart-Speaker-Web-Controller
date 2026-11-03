@@ -15,7 +15,7 @@ register({
     'tb.kind.podcast': 'Podcast episode', 'tb.kind.file': 'My file', 'tb.kind.tts': (l) => `Announcement in ${l}`,
     'tb.lang.th': 'Thai', 'tb.lang.en': 'English', 'tb.lang.ja': 'Japanese',
     'tb.items': (n, m) => (n === 1 ? `1 item${m ? `, ${m} min` : ''}` : `${n} items${m ? `, ${m} min` : ''}`),
-    'tb.empty': 'Empty',
+    'tb.empty': 'Empty', 'tb.ownedBy': (meta, x) => `${meta}, by ${x}`,
     'tb.playOn': (x) => `Play ${x} on the speaker`, 'tb.stopX': (x) => `Stop ${x}`, 'tb.loadingX': (x) => `Loading ${x}`,
     'tb.loading': 'Loading on the speaker…', 'tb.playing': 'Playing on the speaker', 'tb.live': 'Live on the speaker',
     'tb.stopped': 'Speaker stopped', 'tb.nowPlaying': (x) => `Speaker is playing ${x}`,
@@ -61,7 +61,7 @@ register({
     'tb.kind.podcast': 'ตอนพอดแคสต์', 'tb.kind.file': 'ไฟล์ของฉัน', 'tb.kind.tts': (l) => `ประกาศ ${l}`,
     'tb.lang.th': 'ภาษาไทย', 'tb.lang.en': 'ภาษาอังกฤษ', 'tb.lang.ja': 'ภาษาญี่ปุ่น',
     'tb.items': (n, m) => `${n} รายการ${m ? ` รวม ${m} นาที` : ''}`,
-    'tb.empty': 'ยังว่าง',
+    'tb.empty': 'ยังว่าง', 'tb.ownedBy': (meta, x) => `${meta} ของ ${x}`,
     'tb.playOn': (x) => `เล่น ${x} ที่ลำโพง`, 'tb.stopX': (x) => `หยุดเล่น ${x}`, 'tb.loadingX': (x) => `กำลังโหลด ${x}`,
     'tb.loading': 'กำลังโหลดลงลำโพง…', 'tb.playing': 'กำลังเล่นที่ลำโพง', 'tb.live': 'กำลังถ่ายทอดสดที่ลำโพง',
     'tb.stopped': 'ลำโพงหยุดเล่นแล้ว', 'tb.nowPlaying': (x) => `ลำโพงกำลังเล่น ${x}`,
@@ -115,6 +115,10 @@ export function playlistMeta(p) {
   const total = p.total_duration ?? (p.items || []).reduce((s, i) => s + (i.duration || 0), 0);
   // always "items": the list summary doesn't know the kinds, and list row and detail must read the same
   return t('tb.items', n, minutes(total));
+}
+/** playlistMeta, plus the owner's name on another member's personal playlist (owners see those). */
+export function ownerMeta(p) {
+  return p.owner_id != null && !p.mine && p.owner_name ? t('tb.ownedBy', playlistMeta(p), p.owner_name) : playlistMeta(p);
 }
 export function kindSub(item) {
   return item.kind === 'tts' ? t('tb.kind.tts', langName(item.lang)) : t(`tb.kind.${item.kind}`);
@@ -376,7 +380,8 @@ export function pickPlaylist(ctx, item) {
       }, field(t('tb.newPl'), name), create);
       body.append(form);
       list.append(spinnerLine(''));
-      ctx.api('/playlists').then((pls) => {
+      ctx.api('/playlists').then((all) => {
+        const pls = all.filter((p) => p.can_edit); // only playlists this member may add to
         list.replaceChildren();
         if (!pls.length) { list.replaceWith(note(t('tb.noPl'))); return; }
         for (const p of pls) {
@@ -389,7 +394,7 @@ export function pickPlaylist(ctx, item) {
                 ctx.toast(t('tb.addedTo', p.name), 'ok');
               } catch (e) { err.textContent = itemError(e, ctx.user); }
             }),
-          }, thumb('playlist'), h('span', { class: 'tb-tx' }, h('span', { class: 'tb-t' }, p.name), h('span', { class: 'tb-s' }, playlistMeta(p))), icon('plus', 'sm tb-pick-ic'));
+          }, thumb('playlist'), h('span', { class: 'tb-tx' }, h('span', { class: 'tb-t' }, p.name), h('span', { class: 'tb-s' }, ownerMeta(p))), icon('plus', 'sm tb-pick-ic'));
           list.append(row);
         }
       }).catch((e) => list.replaceWith(errBox(errorText(e, ctx.user))));

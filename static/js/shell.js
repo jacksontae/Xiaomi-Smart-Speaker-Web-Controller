@@ -70,15 +70,16 @@ function dragToSelect(bar, axis) {
 const RAIL_LABEL = { settings: 'rail.settings', activity: 'rail.activity', help: 'rail.help' };
 
 /**
- * buildShell({ user, api, onSignOut, onPickSpeaker, onCommand }) -> shell
+ * buildShell({ user, api, allowed, onSignOut, onPickSpeaker, onCommand }) -> shell
+ * allowed(route): may this member open it now (app.js: role, and the output for Music); the nav lists those.
  * shell.el, shell.content (the <main>), shell.markRoute(route), shell.setSpeakers(list), shell.setStatus(status, err),
  * shell.header(opts), shell.accountItems(close) (menu rows reused by the phone Account page), shell.destroy()
  * onCommand(path): POST a speaker command (Now Bar play/pause) and refresh /status; resolves when done.
  */
-export function buildShell({ user, api, onSignOut, onPickSpeaker, onCommand }) {
+export function buildShell({ user, api, allowed, onSignOut, onPickSpeaker, onCommand }) {
   const android = isAndroid();
   const can = (role) => RANK[user.role] >= RANK[role];
-  const routes = ROUTES.filter((r) => can(r.min));
+  const routes = ROUTES.filter((r) => (allowed ? allowed(r) : can(r.min)));
   const main = routes.filter((r) => r.section === 'main');
   const admin = routes.filter((r) => r.section === 'admin');
   let speakers = [];

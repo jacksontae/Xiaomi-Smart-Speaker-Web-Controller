@@ -23,6 +23,8 @@
 //   ctx.fail(err, overrides)   shows a plain-language error toast; returns the text. Use errorText() for inline errors.
 //   ctx.toast(msg, kind, opts) toasts: only when the effect happens elsewhere (on the speaker).
 //   ctx.user / ctx.can(role)   signed-in user; can('operator') etc. Hide what the role can't do.
+//   ctx.allowed(route)         may this member open the route now (role, and the output for `device` routes)?
+//   ctx.output                 'speaker' | 'device' (this browser's output; switching it renders the page again).
 //   ctx.auth                   GET /auth/state result (methods: { password, google, passkey }, google_client_id).
 //   ctx.status / ctx.statusError  latest /status (may be null: the speaker can be offline; render that gracefully).
 //   ctx.params                 hash segments after the route id (#/playlists/12 -> ['12']).
@@ -44,11 +46,12 @@ export const RANK = { viewer: 0, operator: 1, admin: 2 };
 
 // section: 'main' = tab bar (phone) + top group of the sidebar; 'admin' = lower sidebar group (phone: Account page);
 // 'none' = reachable by link only. tab: the label in the phone tab bar. parent: the nav item to highlight instead.
+// device: the lowest role while "This device" is this browser's output (Music: viewers play only in their browser).
 // css: the stylesheets the view loads with ctx.css(); the router fetches them alongside the module (keep in sync).
 export const ROUTES = [
   { id: 'now', label: 'nav.now', tab: 'tab.now', icon: 'now', min: 'viewer', section: 'main', chip: true, css: ['speaker3d.css', 'views/now.css'], load: () => import('./views/now.js') },
   { id: 'announce', label: 'nav.announce', tab: 'nav.announce', icon: 'announce', min: 'viewer', section: 'main', css: ['views/announce.css', 'views/a-modeswitch.css'], load: () => import('./views/announce.js') },
-  { id: 'music', label: 'nav.music', tab: 'nav.music', icon: 'music', min: 'operator', section: 'main', css: ['views/teamb.css', 'views/music.css'], load: () => import('./views/music.js') },
+  { id: 'music', label: 'nav.music', tab: 'nav.music', icon: 'music', min: 'operator', device: 'viewer', section: 'main', css: ['views/teamb.css', 'views/music.css'], load: () => import('./views/music.js') },
   { id: 'playlists', label: 'nav.playlists', tab: 'nav.playlists', icon: 'playlists', min: 'viewer', section: 'main', css: ['views/teamb.css', 'views/playlists.css'], load: () => import('./views/playlists.js') },
   { id: 'schedule', label: 'sched.title', icon: 'announce', min: 'viewer', section: 'none', parent: 'announce', css: ['views/teamb.css', 'views/schedule.css', 'views/a-modeswitch.css'], load: () => import('./views/schedule.js') },
   { id: 'members', label: 'nav.members', icon: 'members', min: 'admin', section: 'admin', css: ['views/c-common.css', 'views/members.css'], load: () => import('./views/members.js') },

@@ -28,6 +28,8 @@ const LOCAL_ROUTES = new Set(['now', 'music', 'playlists']);
 let routeId = null;
 // Any signed-in member may pick it, viewers too: it plays only in their own browser and never reaches the speaker.
 const deviceOutput = () => local.isDevice() && !!state.user;
+// a route's `device` role applies while this device is the output (Music opens to viewers then, see routes.js)
+const allowed = (r) => can(r.device && deviceOutput() ? r.device : r.min);
 const routedApi = (path, opts) => (deviceOutput() && local.intercept(path, opts)) || api(path, opts);
 function viewStatus() {
   if (deviceOutput() && LOCAL_ROUTES.has(routeId)) return { status: local.status(state.status, state.lastSpeaker), error: null };
@@ -70,7 +72,7 @@ function makeCtx(params = [], route = null) {
   const cleanups = [];
   return {
     ctx: {
-      api: routedApi, toast, fail, can, t, params, route,
+      api: routedApi, toast, fail, can, allowed, t, params, route,
       get user() { return state.user; },
       get auth() { return state.auth; },
       get status() { return viewStatus().status; },
@@ -177,11 +179,7 @@ async function showScreen(load) {
 
 function startApp() {
   screenLoad = null;
-  if (shell) shell.destroy();
-  shell = buildShell({ user: state.user, api, onSignOut: signOut, onPickSpeaker: pickOutput, onCommand: command });
-  appEl.replaceChildren(shell.el);
-  applySpeakers();
-  shell.setStatus(state.status, state.statusErr);
+  mountShell();
   render(false);
   startPolling();
   prefetchRoutes();
@@ -191,10 +189,25 @@ function startApp() {
   import('./tour.js').then((m) => m.maybeStart({ user: state.user })).catch(() => {});
 }
 
+function mountShell() {
+  if (shell) shell.destroy();
+  shell = buildShell({ user: state.user, api, allowed, onSignOut: signOut, onPickSpeaker: pickOutput, onCommand: command });
+  appEl.replaceChildren(shell.el);
+  applySpeakers();
+  shell.setStatus(state.status, state.statusErr);
+}
+const navKey = () => ROUTES.filter(allowed).map((r) => r.id).join();
+
 /** The speaker picker: the real speaker, or this device. Only this browser changes. */
 function pickOutput(s) {
+  const nav = navKey();
   local.setOutput(s.id === 'device' ? 'device' : 'speaker');
   toast(s.id === 'device' ? t('out.nowDevice') : t('spk.switched', s.name), 'ok');
+  if (navKey() !== nav) {
+    // the nav changed (a viewer gains or loses Music): rebuild it, and leave a page this output doesn't offer
+    if (!allowed(parseHash().route)) history.replaceState(null, '', '#/');
+    mountShell();
+  }
   applySpeakers();
   render(false); // pages word things by output (notes, "on this device"): build the current one again
 }
@@ -215,7 +228,7 @@ async function render(animate = true) {
   if (!state.user || !shell) return;
   const seq = ++renderSeq;
   const { route, params, unknown } = parseHash();
-  if (unknown || !can(route.min)) {
+  if (unknown || !allowed(route)) {
     if (!unknown) toast(t('route.forbidden', roleLabel(route.min)), 'err');
     history.replaceState(null, '', '#/');
     return render(false);
@@ -286,7 +299,7 @@ async function retryRoute() {
 function prefetchRoutes() {
   const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500));
   const todo = parseHash().route;
-  const queue = ROUTES.filter((r) => r !== todo && can(r.min));
+  const queue = ROUTES.filter((r) => r !== todo && allowed(r));
   const next = () => {
     const r = queue.shift();
     if (r && state.user) warmRoute(r).finally(() => idle(next, { timeout: 2000 }));
