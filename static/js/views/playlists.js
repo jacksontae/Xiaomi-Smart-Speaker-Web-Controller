@@ -3,7 +3,9 @@
 // shows list and detail side by side and switches the selection in place.
 // Operators: create, rename, delete (with Undo), add items of every kind, reorder (drag the handle; on touch also
 // Reorder mode with up/down), item menu (play from here, move to top, remove with Undo), play / shuffle / repeat.
-// Viewers see the same lists read-only, and may play them when "This device" is their output (local-player.js).
+// Viewers see shared playlists read-only, and with "This device" as their output (local-player.js) may play them and
+// make and edit playlists of their own ("My playlists": personal, seen only by them and owners). Owners also see other
+// members' personal playlists in their own group. Edit controls follow the server's `can_edit`.
 // Android look: New playlist and Add item are extended FABs on phones (android-kit.js), Play all | Shuffle a connected
 // button group, and tablets (>= 960px) get the list-detail two-pane layout of the AT_ boards.
 import { h, icon, field, busy, tip, append } from '../ui.js';
@@ -15,7 +17,7 @@ import { kitCss, fab, replacedByFab } from '../android-kit.js';
 import { isDevice } from '../local-player.js';
 import { bicon } from '../teamb-icons.js';
 import {
-  thumb, roundBtn, setRound, errBox, note, spinnerLine, playlistMeta, kindSub, addItemSheet, mediaActive,
+  thumb, roundBtn, setRound, errBox, note, spinnerLine, sectionLabel, ownerMeta, kindSub, addItemSheet, mediaActive,
   deleteLater, isPending, undoDelete, flushDeletes, ibtn, here,
 } from '../teamb-common.js';
 
@@ -38,6 +40,8 @@ register({
     'pl.repeatHint': 'Tap to change. Used the next time you press Play all.',
     'pl.nowPlaying': (x) => `Speaker is playing ${x}`,
     'pl.nowPlaying.here': (x) => `Playing ${x} on this device`, 'pl.shuffling.here': (x) => `Shuffling ${x} on this device`,
+    'pl.mine': 'My playlists', 'pl.shared': 'Shared', 'pl.members': 'Members’ playlists',
+    'pl.mineNone': 'None yet. Playlists you make are private: only you and the owner can see them.',
   },
   th: {
     'pl.new': 'สร้างเพลย์ลิสต์', 'pl.newShort': 'สร้าง', 'pl.createPl': 'สร้างเพลย์ลิสต์', 'pl.name': 'ชื่อเพลย์ลิสต์',
@@ -57,6 +61,8 @@ register({
     'pl.repeatHint': 'แตะเพื่อเปลี่ยน ใช้ตอนกด เล่นทั้งหมด ครั้งถัดไป',
     'pl.nowPlaying': (x) => `ลำโพงกำลังเล่น ${x}`,
     'pl.nowPlaying.here': (x) => `กำลังเล่น ${x} ที่อุปกรณ์นี้`, 'pl.shuffling.here': (x) => `สุ่มเล่น ${x} ที่อุปกรณ์นี้`,
+    'pl.mine': 'เพลย์ลิสต์ของฉัน', 'pl.shared': 'เพลย์ลิสต์ที่แชร์', 'pl.members': 'เพลย์ลิสต์ของสมาชิก',
+    'pl.mineNone': 'ยังไม่มี เพลย์ลิสต์ที่คุณสร้างเป็นแบบส่วนตัว เห็นได้แค่คุณกับเจ้าของ',
   },
 });
 
@@ -68,6 +74,11 @@ const isDesk = () => matchMedia(isAndroid() ? '(min-width: 960px)' : '(min-width
 const canOp = (ctx) => ctx.can('operator');
 // play / shuffle / repeat: operators on the speaker; anyone on "This device" (it plays only in their browser)
 const canPlay = (ctx) => canOp(ctx) || isDevice();
+// viewers have personal playlists only while this device is their output (the speaker's page stays shared-only)
+const viewerHere = (ctx) => !canOp(ctx) && isDevice();
+const canEdit = (ctx, p) => !!p.can_edit && canPlay(ctx);
+const GROUPS = { mine: 'pl.mine', shared: 'pl.shared', members: 'pl.members' };
+const groupOf = (p) => (p.owner_id == null ? 'shared' : p.mine ? 'mine' : 'members');
 
 export async function render(ctx) {
   await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/playlists.css'), kitCss(ctx)]);
@@ -83,7 +94,7 @@ function listPage(ctx, selected) {
   const box = h('div', { class: 'pl-listcol' }, listEl);
   const pane = h('div', { class: 'pl-pane glass' });
   let playlists = null, status = ctx.status, detail = null;
-  const newBtn = canOp(ctx) ? h('button', { type: 'button', class: 'btn primary', onclick: () => createPlaylist(ctx, (p) => {
+  const newBtn = canPlay(ctx) ? h('button', { type: 'button', class: 'btn primary', onclick: () => createPlaylist(ctx, (p) => {
     if (desk) { selected = p.id; history.replaceState(null, '', `#/playlists/${p.id}`); load(); } else ctx.go(`#/playlists/${p.id}`);
   }) }, icon('plus', 'sm'), h('span', { class: 'pl-new-l' }, t('pl.new')), h('span', { class: 'pl-new-s' }, t('pl.newShort'))) : null;
   if (newBtn) fab(ctx, { icon: 'plus', label: t('pl.new'), onclick: () => newBtn.click(), replaces: newBtn });
@@ -99,21 +110,36 @@ function listPage(ctx, selected) {
     }
     paint();
   }
-  function visible() { return (playlists || []).filter((p) => !isPending(`pl:${p.id}`)); }
+  function visible() {
+    return (playlists || []).filter((p) => !isPending(`pl:${p.id}`) && (canPlay(ctx) || p.owner_id == null));
+  }
+  /** [group, playlists] in page order: My playlists (always for viewers here), Shared, Members' (owners). */
+  function grouped(list) {
+    return Object.keys(GROUPS).map((g) => [g, list.filter((p) => groupOf(p) === g)])
+      .filter(([g, l]) => l.length || (g === 'mine' && viewerHere(ctx)));
+  }
   function paint() {
+    box.replaceChildren(listEl);
     if (!playlists) { listEl.replaceChildren(spinnerLine('')); return; }
-    const list = visible();
-    if (!list.length) {
+    const groups = grouped(visible());
+    const list = groups.flatMap(([, l]) => l);
+    if (!groups.length) {
       listEl.replaceChildren(h('div', { class: 'pl-empty' }, note(t(canOp(ctx) ? 'pl.noneOp' : 'pl.none'))));
       if (desk) { pane.replaceChildren(); detail = null; }
       return;
     }
-    if (desk && (!selected || !list.some((p) => p.id === selected))) selected = list[0].id;
-    listEl.replaceChildren(...list.map(listRow));
-    if (desk && (!detail || detail.id !== selected)) openDetail(selected);
+    if (desk && list.length && (!selected || !list.some((p) => p.id === selected))) selected = list[0].id;
+    if (groups.length === 1 && groups[0][0] === 'shared') listEl.replaceChildren(...list.map(listRow)); // as before
+    else {
+      box.replaceChildren(...groups.flatMap(([g, l]) => [sectionLabel(t(GROUPS[g])), l.length
+        ? h('div', { class: 'list tb-list pl-list', role: 'list', dataset: { group: g } }, l.map(listRow))
+        : h('div', { class: 'pl-empty pl-none', dataset: { group: g } }, note(t('pl.mineNone')))]));
+    }
+    if (desk && !list.length) { pane.replaceChildren(); detail = null; }
+    else if (desk && (!detail || detail.id !== selected)) openDetail(selected);
   }
   function listRow(p) {
-    const meta = playlistMeta(p);
+    const meta = ownerMeta(p);
     const sub = h('span', { class: 'tb-s' }, meta);
     const link = h('a', {
       class: 'tb-stretch', href: `#/playlists/${p.id}`, 'aria-label': t('pl.open', p.name),
@@ -123,7 +149,7 @@ function listPage(ctx, selected) {
     const row = h('div', { class: `tb-row pl-row${desk && p.id === selected ? ' sel' : ''}`, role: 'listitem' }, link,
       thumb('playlist'), h('span', { class: 'tb-tx' }, h('span', { class: 'tb-t' }, p.name), sub));
     if (!p.item_count) row.querySelector('.tb-th').classList.add('dim');
-    if (canPlay(ctx) && (p.item_count || canOp(ctx))) {
+    if (canPlay(ctx) && (p.item_count || canEdit(ctx, p))) {
       const act = h('span', { class: 'tb-act' });
       if (p.item_count) {
         const btn = roundBtn('play', here('tb.playOn', p.name), async () => {
@@ -178,7 +204,7 @@ function listPage(ctx, selected) {
     node,
     onStatus(s) {
       status = s.status;
-      listEl.querySelectorAll('.tb-rb').forEach((b) => b.upd && b.upd());
+      box.querySelectorAll('.tb-rb').forEach((b) => b.upd && b.upd());
       if (detail) detail.onStatus(s);
     },
   };
@@ -232,7 +258,7 @@ function detailPage(ctx, id) {
 }
 
 function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
-  const op = canOp(ctx);
+  let op = false; // may edit this playlist: set from its can_edit once loaded
   const play = canPlay(ctx);
   const node = h('div', { class: 'pl-dv' });
   const itemsEl = h('div', { class: 'list tb-list pl-items', role: 'list', 'aria-label': t('pl.items') });
@@ -242,7 +268,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
   const changed = () => { if (onChanged) onChanged(); };
   const addItems = () => addItemSheet(ctx, p, () => { reloadItems(); changed(); });
   // Android phones: Add item is the FAB (the board's A_PlaylistDetail); the link below stays for tablets
-  const addFab = op && !embedded ? fab(ctx, { icon: 'plus', label: t('pl.addItem'), onclick: () => { if (p) addItems(); } }) : null;
+  let addFab = null;
 
   async function load() {
     try {
@@ -252,6 +278,8 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
       node.replaceChildren(header ? header('', null) : '', errBox(errorText(e, ctx.user), load));
       return;
     }
+    op = canEdit(ctx, p);
+    if (op && !embedded) addFab = fab(ctx, { icon: 'plus', label: t('pl.addItem'), onclick: () => { if (p) addItems(); } });
     build();
   }
   const items = () => p.items.filter((it) => !isPending(`it:${id}:${it.id}`));
@@ -301,7 +329,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
   const queue = () => (status && status.queue && status.queue.playlist_id === id ? status.queue : null);
   function paintControls() {
     const list = items();
-    metaEl.textContent = playlistMeta({ ...p, items: list, item_count: list.length, total_duration: undefined });
+    metaEl.textContent = ownerMeta({ ...p, items: list, item_count: list.length, total_duration: undefined });
     if (!play) return;
     const q = queue();
     const playing = !!q && mediaActive(status);

@@ -171,12 +171,12 @@ const TOPICS = [
     en: { title: 'Members and roles', where: 'Members', steps: [
       'Open Members.',
       'Add a member with a name, a username and a starting password.',
-      'Pick a role. Viewers can only look. Operators can announce, talk live, play music and schedule. The owner can do everything, including managing members.',
+      'Pick a role. Viewers can look and skip tracks; on their own device they can also play music and keep private playlists. Operators can announce, talk live, play music and schedule. The owner can do everything, including managing members.',
       'When someone leaves, disable their account. They can’t sign in from then on.'] },
     th: { title: 'สมาชิกและสิทธิ์', where: 'หน้าสมาชิก', steps: [
       'เปิดหน้าสมาชิก',
       'เพิ่มสมาชิก ใส่ชื่อ ชื่อผู้ใช้ และรหัสผ่านเริ่มต้น',
-      'เลือกบทบาท ผู้ชมดูได้อย่างเดียว ผู้ควบคุมประกาศ พูดสด เล่นเพลง และตั้งเวลาได้ เจ้าของทำได้ทุกอย่างรวมถึงจัดการสมาชิก',
+      'เลือกบทบาท ผู้ชมดูและข้ามเพลงได้ ฟังเพลงและทำเพลย์ลิสต์ส่วนตัวที่เครื่องตัวเองได้ด้วย ผู้ควบคุมประกาศ พูดสด เล่นเพลง และตั้งเวลาได้ เจ้าของทำได้ทุกอย่างรวมถึงจัดการสมาชิก',
       'ถ้ามีคนลาออก ให้ปิดใช้งานบัญชีนั้น จะเข้าระบบไม่ได้ทันที'] } },
   { group: 'admin', id: 'settings', alias: ['set'], ic: ['settings', 'sprite'], route: ['settings'], kw: 'settings speaker volume language resume lan relay ตั้งค่า ลำโพง ระดับเสียง ภาษา เล่นต่อ',
     en: { title: 'Speaker settings', where: 'Speaker settings', steps: [
@@ -256,7 +256,7 @@ export async function render(ctx) {
     if (!tp.route) return false;
     const r = ROUTES.find((x) => x.id === tp.route[0]);
     // routes not in the table yet (e.g. schedule, built by another page) still link: the router is the judge
-    return r ? ctx.can(r.min) : ctx.can(tp.min || 'viewer');
+    return r ? ctx.allowed(r) : ctx.can(tp.min || 'viewer');
   };
 
   const input = h('input', { class: 'input hp-input', type: 'search', placeholder: t('help.searchPh'), 'aria-label': t('help.search'), value: query, autocomplete: 'off', spellcheck: false });

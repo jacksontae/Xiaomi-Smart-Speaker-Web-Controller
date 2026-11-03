@@ -73,7 +73,10 @@ def test_api_role_gating(make_app, seeded):
     viewer = make_app("viewer", device="desktop")
     r = viewer.ctx.request
     assert r.post("/say", headers=hdr, data={"text": "x"}).status == 403
-    assert r.post("/playlists", headers=hdr, data={"name": "x"}).status == 403
+    assert r.post("/queue/clear", headers=hdr).status == 403
+    own = r.post("/playlists", headers=hdr, data={"name": "x"})  # a viewer's playlist is their own
+    assert own.status == 200 and own.json()["mine"] is True
+    assert r.delete(f"/playlists/{own.json()['id']}", headers=hdr).status == 204
     assert r.get("/users").status == 403
     assert r.get("/talk/status").status == 403
     op = make_app("operator", device="desktop")

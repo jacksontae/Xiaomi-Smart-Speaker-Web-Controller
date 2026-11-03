@@ -40,6 +40,8 @@ register({
     'music.noRoom': 'There isn’t enough space left on the server. Delete some files first.',
     'music.rename': (x) => `Rename ${x}`, 'music.del': (x) => `Delete ${x}`, 'music.deleted': (x) => `${x} deleted`,
     'music.fileName': 'File name', 'music.nameErr': 'Give it a name first.', 'music.byOwner': (n) => `by ${n}`,
+    'music.filesMine': 'Your files', 'music.filesShared': 'Shared files', 'music.filesMembers': 'Members’ files',
+    'music.filesPrivate': 'Files you upload are private: only you and the owner can see them.',
   },
   th: {
     'music.sources': 'แหล่งเพลง',
@@ -67,6 +69,8 @@ register({
     'music.noRoom': 'พื้นที่บนเซิร์ฟเวอร์เหลือไม่พอ ลบไฟล์เก่าออกก่อน',
     'music.rename': (x) => `เปลี่ยนชื่อ ${x}`, 'music.del': (x) => `ลบ ${x}`, 'music.deleted': (x) => `ลบ ${x} แล้ว`,
     'music.fileName': 'ชื่อไฟล์', 'music.nameErr': 'ตั้งชื่อก่อน', 'music.byOwner': (n) => `โดย ${n}`,
+    'music.filesMine': 'ไฟล์ของคุณ', 'music.filesShared': 'ไฟล์ที่แชร์', 'music.filesMembers': 'ไฟล์ของสมาชิก',
+    'music.filesPrivate': 'ไฟล์ที่คุณอัปโหลดเป็นแบบส่วนตัว เห็นได้แค่คุณกับเจ้าของ',
   },
 });
 
@@ -175,7 +179,8 @@ function radioPane(ctx, tracker) {
   const stationRow = (s, isFav) => {
     const sub = [s.tags && s.tags.split(',').slice(0, 2).join(', '), s.country].filter(Boolean).join(', ');
     const row = mediaRow({ th: thumb('radio', { img: s.favicon }), title: s.name, sub });
-    const heart = h('button', { type: 'button', class: 'iconbtn mu-heart' });
+    // favourites are shared: viewers play them but don't add or remove
+    const heart = ctx.can('operator') ? h('button', { type: 'button', class: 'iconbtn mu-heart' }) : null;
     const paintHeart = () => {
       const f = favOf(s);
       heart.setAttribute('aria-pressed', String(!!f));
@@ -183,7 +188,7 @@ function radioPane(ctx, tracker) {
       heart.dataset.tip = heart.getAttribute('aria-label');
       heart.replaceChildren(bicon(f ? 'heart-on' : 'heart'));
     };
-    heart.addEventListener('click', () => busy(heart, async () => {
+    if (heart) heart.addEventListener('click', () => busy(heart, async () => {
       try {
         const f = favOf(s);
         if (f) await ctx.api(`/radio/favorites/${f.id}`, { method: 'DELETE' });
@@ -192,12 +197,12 @@ function radioPane(ctx, tracker) {
       } catch (e) { ctx.fail(e); }
       if (heart.isConnected) { paintHeart(); heart.focus({ preventScroll: true }); }
     }));
-    paintHeart();
+    if (heart) paintHeart();
     // url/name/favicon ride along for "This device" (local-player.js), which plays the stream without asking the server
     const stream = { url: s.url, name: s.name, content_type: s.content_type, favicon: s.favicon };
     const body = isFav ? { favorite_id: s.id, ...stream } : s.uuid ? { uuid: s.uuid, ...stream } : stream;
     const play = playButton(ctx, tracker, `radio:${s.uuid || s.url}`, s.name, () => ctx.api('/radio/play', { body }), row, sub, true);
-    row.querySelector('.tb-act').append(heart, play);
+    row.querySelector('.tb-act').append(...[heart, play].filter(Boolean));
     return row;
   };
 
@@ -329,7 +334,9 @@ function filesPane(ctx, tracker) {
   const upBtn = h('button', { type: 'button', class: 'btn primary', onclick: () => { if (upload) { err.replaceChildren(errBox(t('music.oneAtATime'))); return; } picker.click(); } }, bicon('upload', 'sm'), t('music.upload'));
   let data = null, editing = false;
   const me = ctx.user;
-  const canEdit = (f) => ctx.can('admin') || (me && f.owner_id === me.id);
+  const canEdit = (f) => f.can_edit;
+  // personal files: the member's own first, then shared ones; owners also see other members' in their own group
+  const groupOf = (f) => (f.owner_id == null ? 'shared' : f.mine ? 'mine' : 'members');
   const typeList = () => (data ? data.types.map((x) => x.replace('.', '')).join(', ') : 'mp3, m4a');
 
   async function load() {
@@ -352,9 +359,14 @@ function filesPane(ctx, tracker) {
     const editBtn = editable ? h('button', { type: 'button', class: 'btn quiet', 'aria-pressed': String(editing), onclick: () => { editing = !editing; paint(); listBox.querySelector('.mu-edit')?.focus(); } }, t(editing ? 'music.done' : 'music.edit')) : null;
     if (editBtn) editBtn.classList.add('mu-edit');
     if (!items.length) { listBox.replaceChildren(note(t('music.noFiles'))); return; }
-    listBox.replaceChildren(sectionLabel(t('music.filesTitle'), editBtn), h('div', { class: 'list tb-list tb-grid' }, items.map((f) => {
-      const mine = me && f.owner_id === me.id;
-      const sub = [fileMeta(f), !mine && f.owner ? t('music.byOwner', f.owner) : null].filter(Boolean).join(lang() === 'th' ? ' ' : ', ');
+    const groups = ['mine', 'shared', 'members'].map((g) => [g, items.filter((f) => groupOf(f) === g)]).filter(([, l]) => l.length);
+    const label = (g) => (groups.length > 1 || g !== 'shared' ? t(`music.files${g[0].toUpperCase()}${g.slice(1)}`) : t('music.filesTitle'));
+    listBox.replaceChildren(...groups.flatMap(([g, list], i) => [sectionLabel(label(g), i ? null : editBtn), fileList(list)]));
+  }
+  function fileList(list) {
+    return h('div', { class: 'list tb-list tb-grid' }, list.map((f) => {
+      const by = f.owner_id != null ? (f.mine ? null : f.owner_name) : f.uploader_id !== (me && me.id) ? f.uploader : null;
+      const sub = [fileMeta(f), by ? t('music.byOwner', by) : null].filter(Boolean).join(lang() === 'th' ? ' ' : ', ');
       const row = mediaRow({ th: thumb('file'), title: f.title, sub });
       const act = row.querySelector('.tb-act');
       if (editing) {
@@ -364,7 +376,7 @@ function filesPane(ctx, tracker) {
         act.append(play, roundBtn(ADD_IC(), t('tb.addX', f.title), () => pickPlaylist(ctx, { kind: 'file', source: String(f.id) })));
       }
       return row;
-    })));
+    }));
   }
   function rename(f) {
     ctx.sheet({
@@ -445,7 +457,8 @@ function filesPane(ctx, tracker) {
   load();
   paintProgress();
   return h('div', { class: 'mu-pane' },
-    h('div', { class: 'mu-fhead' }, h('div', {}, info, used), upBtn), picker, err, progress, listBox);
+    h('div', { class: 'mu-fhead' }, h('div', {}, info, ctx.can('operator') ? null : h('p', { class: 'tb-note mu-fnote' }, t('music.filesPrivate')), used), upBtn),
+    picker, err, progress, listBox);
 }
 
 /** Length of an audio file as the browser reads it (seconds), or null. Never blocks the upload for long. */
