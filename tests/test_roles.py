@@ -85,6 +85,7 @@ ROLE_TABLE = {
     ("GET", "/talk/chime.wav"): "signed",
     ("GET", "/talk/{talk_id}/live"): "signed",
     ("GET", "/local/stream"): "signed",
+    ("GET", "/local/hls"): "signed",
     ("GET", "/"): None,
     ("GET", "/manifest.webmanifest"): None,
     ("GET", "/apple-touch-icon.png"): None,

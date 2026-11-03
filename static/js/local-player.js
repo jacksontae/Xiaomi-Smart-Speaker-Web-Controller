@@ -4,7 +4,8 @@
 // app.js offers each call to intercept() first, which answers it here while this device is the output. The server
 // only hands out playable links (POST /local/resolve) and never contacts the speaker for them. Every member may
 // use it, viewers too. What a person starts here is logged once (POST /local/played, see logStart), and radio a
-// browser can't fetch itself goes through the server's relay (proxy_url, see viaProxy).
+// browser can't fetch itself goes through the server's relay (proxy_url, see viaProxy). A live stream that ends
+// or drops (the relay stops one after 6 h) reconnects by itself with a fresh link (see reconnect).
 // Announcements, live talk and schedules never pass through here: they always play on the speaker.
 import { api, ApiError } from './api.js';
 import { register, t } from './i18n.js';
@@ -19,6 +20,7 @@ register({
     'out.cantPlay': 'This device can\'t play that item',
     'out.ytNotSaved': 'That YouTube track isn\'t saved on the server yet. Ask someone who can control the speaker to play it once.',
     'out.cantStream': 'This device can\'t play that stream. Some radio links only work on the speaker',
+    'out.noHls': 'This station streams in HLS, which this browser can\'t play. It plays on the speaker, or in Safari or a recent Chrome',
     'out.skipped': (x) => `Couldn't play ${x}; skipped to the next item`,
     'out.queueFailed': 'None of the remaining items could be played on this device',
     'out.untitled': 'Audio',
@@ -31,6 +33,7 @@ register({
     'out.cantPlay': 'อุปกรณ์นี้เล่นรายการนี้ไม่ได้',
     'out.ytNotSaved': 'เพลง YouTube นี้ยังไม่ได้เก็บไว้ที่ server ให้คนที่ควบคุมลำโพงได้เปิดเล่นสักครั้งก่อน',
     'out.cantStream': 'อุปกรณ์นี้เล่นสตรีมนี้ไม่ได้ ลิงก์วิทยุบางสถานีเล่นได้เฉพาะที่ลำโพง',
+    'out.noHls': 'สถานีนี้ส่งสัญญาณแบบ HLS ซึ่งเบราว์เซอร์นี้เล่นไม่ได้ เปิดที่ลำโพง หรือใช้ Safari หรือ Chrome รุ่นใหม่แทน',
     'out.skipped': (x) => `เล่น ${x} ไม่ได้ ข้ามไปรายการถัดไปแล้ว`,
     'out.queueFailed': 'อุปกรณ์นี้เล่นรายการที่เหลือไม่ได้เลย',
     'out.untitled': 'เสียง',
@@ -124,6 +127,12 @@ let starting = false; // a load is waiting for play(): its failure is handled th
 let retried = false;  // one fresh link per item when a long pause outlived the signed one (6 h)
 const prefetched = new Map(); // item key -> resolve promise for the next queue item (YouTube downloads take a while)
 let toLog = null;     // { name } a play someone just started: logged when it first sounds (queue moves aren't)
+// Live streams reconnect when they end or drop: after 1, 2, 4, 8, 16 s, at most RECONNECT_MAX times in a row. A
+// connection that then plays for RECONNECT_OK resets the count, so one that keeps dying soon after starting gives up.
+const RECONNECT_MAX = 5;
+const RECONNECT_OK = 60000;
+let reconnects = 0;   // reconnects in a row for the loaded live item
+let liveSince = 0;    // when the live item's current connection first played (ms), 0 before
 
 // Volume can't be set from a web page on iPhone/iPad (the hardware buttons do it): hide the slider there.
 const volumeWorks = (() => { try { const a = document.createElement('audio'); a.volume = 0.5; return a.volume === 0.5; } catch { return false; } })();
@@ -148,7 +157,14 @@ function el() {
   audio.hidden = true;
   const vol = parseFloat(read(VOL_KEY));
   if (volumeWorks && vol >= 0 && vol <= 1) audio.volume = vol;
-  audio.addEventListener('playing', () => { if (silent()) return; setPhase('PLAYING'); if (queue) queue.failures = 0; logStart(); prefetchNext(); });
+  audio.addEventListener('playing', () => {
+    if (silent()) return;
+    setPhase('PLAYING');
+    if (queue) queue.failures = 0;
+    if (!liveSince) liveSince = Date.now();
+    logStart();
+    prefetchNext();
+  });
   audio.addEventListener('waiting', () => { if (!silent() && item) setPhase('BUFFERING'); });
   audio.addEventListener('pause', () => { if (!silent() && item && !audio.ended && phase !== 'BUFFERING') setPhase('PAUSED'); });
   audio.addEventListener('ended', () => { if (!silent()) finished(); });
@@ -212,13 +228,21 @@ function viaProxy(got) {
   if (location.protocol === 'https:' && /^http:/i.test(got.url)) return true;
   return !!got.content_type && el().canPlayType(got.content_type) === '';
 }
+/** An HLS playlist (.m3u8): Safari and recent Chrome play it, older browsers don't (no JS player is bundled here). */
+const isHls = (got) => /mpegurl/i.test(got.content_type || '') || /\.m3u8(\?|$)/i.test(got.url || '');
+const canHls = () => el().canPlayType('application/vnd.apple.mpegurl') !== '' || el().canPlayType('application/x-mpegurl') !== '';
 
-/** Load `it` and start it. Resolves once it is playing (or waiting for a tap); rejects when it can't be played. */
-async function load(it, at = 0) {
+/**
+ * Load `it` and start it. Resolves once it is playing (or waiting for a tap); rejects when it can't be played.
+ * `again`: a live stream reconnecting (keeps its reconnect count).
+ */
+async function load(it, at = 0, again = false) {
   const a = el();
   const g = ++gen;
   item = { ...it };
   retried = at > 0;
+  liveSince = 0;
+  if (!again) reconnects = 0;
   setPhase('BUFFERING');
   let got;
   try { got = await resolve(it); } catch (e) {
@@ -229,6 +253,7 @@ async function load(it, at = 0) {
   }
   if (g !== gen) return;
   item = { ...it, ...got, title: got.title || it.title || null, thumbnail: got.thumbnail || it.thumbnail || null };
+  if (isHls(got) && !canHls()) throw Object.assign(new ApiError(415, t('out.noHls')), { local: true });
   item.proxied = viaProxy(got);
   for (;;) {
     a.src = item.proxied ? got.proxy_url : got.url;
@@ -265,10 +290,35 @@ async function loadQueue() {
   }
 }
 function finished() {
+  if (item && item.live) { if (!reconnect()) failed(); return; } // a live stream has no natural end
   if (queue && queue.advance(true)) { loadQueue().catch(() => toast(t('out.queueFailed'), 'err')); return; }
   clear();
 }
+/**
+ * The loaded live item's stream ended or dropped: fetch a fresh link and play it again after a backoff.
+ * False when it has failed RECONNECT_MAX times in a row (the caller gives up as for any failed item).
+ */
+function reconnect() {
+  if (liveSince && Date.now() - liveSince >= RECONNECT_OK) reconnects = 0;
+  liveSince = 0;
+  if (reconnects >= RECONNECT_MAX) return false;
+  const it = item;
+  const g = gen;
+  setTimeout(() => {
+    if (g !== gen || item !== it || phase === 'PAUSED') return; // stopped, paused, or something else started
+    const mine = gen + 1;
+    load(it, 0, true).catch((e) => {
+      if (mine !== gen) return;
+      if (e && e.status === 401) { clear(); return; } // signed out: nothing to reconnect with
+      if (!reconnect()) failed();
+    });
+  }, 1000 * 2 ** reconnects);
+  reconnects += 1;
+  setPhase('BUFFERING');
+  return true;
+}
 function failed() {
+  if (!item) return;
   const pos = audio.currentTime;
   if (item.proxy_url && !item.proxied && pos < 1) { // the direct link failed to start: try the relay once
     item.proxied = true;
@@ -276,7 +326,8 @@ function failed() {
     audio.play().catch(() => {});
     return;
   }
-  if (!retried && pos > 1) { load(item, pos).catch(() => failed()); return; } // the signed link most likely expired
+  if (item.live && (liveSince || reconnects) && reconnect()) return; // it played (or is reconnecting), then dropped
+  if (!item.live && !retried && pos > 1) { load(item, pos).catch(() => failed()); return; } // the signed link most likely expired
   if (queue && queue.failures + 1 < queue.items.length && queue.advance(false)) {
     queue.failures += 1;
     toast(t('out.skipped', item.title || ''), 'err');
@@ -341,6 +392,11 @@ export function playList(items, opts) {
 export function pause() { if (audio && item) { audio.pause(); setPhase('PAUSED'); } }
 export function resume() {
   if (!audio || !item) return;
+  if (item.live && (audio.ended || audio.error)) { // paused while it was reconnecting: connect now
+    const mine = gen + 1;
+    load(item, 0, true).catch(() => { if (mine === gen) failed(); });
+    return;
+  }
   audio.play().catch((e) => { if (e && e.name === 'NotAllowedError') toast(t('out.tapPlay'), 'info'); });
 }
 export function stop() { if (item || queue) clear(); }

@@ -5,6 +5,7 @@ import io
 import math
 import re
 import struct
+import time
 import wave
 from urllib.parse import urlsplit
 
@@ -175,3 +176,63 @@ def test_stream_the_browser_cant_play_goes_through_the_relay(make_app, seeded):
     device_plays(p)
     assert relayed and "sig=" in relayed[0] and not direct
     app.clean("relay")
+
+
+PLAY_RADIO = """async ([url, type]) => {
+  const src = document.querySelector('script[src*="app.js"]').src;
+  const m = await import(src.replace('app.js', 'local-player.js'));
+  window.__lp = m;
+  try { await m.playItem({ kind: 'radio', source: url, title: 'Test FM', content_type: type }); return null; }
+  catch (e) { return e.message; }
+}"""
+
+
+def test_live_stream_reconnects_when_it_ends(make_app, seeded):
+    """The relay ends a live stream after 6 h (or it drops): the player fetches a fresh link and goes on by
+    itself, with a backoff (1 s, 2 s, ...). Here each relayed "stream" is a 1 s clip, so it ends at once."""
+    app = make_app("operator", "desktop")
+    p = app.page
+    wav = tone_wav(seconds=1)
+    relayed = []
+    p.route(re.compile(r".*/local/stream\?.*"), lambda r: (relayed.append(r.request.url),
+                                                         r.fulfill(status=200, content_type="audio/wav", body=wav)))
+    pick(app, "device")
+    assert p.evaluate(PLAY_RADIO, ["https://radio.example.com/live", "audio/x-not-a-real-codec"]) is None
+    p.wait_for_function("() => window.__lp.status(null).media.state === 'PLAYING'", timeout=15_000)
+    deadline = time.time() + 15
+    while len({urlsplit(u).query for u in relayed}) < 3 and time.time() < deadline:
+        p.wait_for_timeout(250)
+    links = {urlsplit(u).query for u in relayed}
+    assert len(links) >= 3, relayed  # two reconnects, each with a fresh signed link
+    assert p.evaluate("() => window.__lp.status(null).media.state") in ("PLAYING", "BUFFERING")
+    # stopping ends it for good: no reconnect after
+    p.evaluate("() => window.__lp.stop()")
+    count = len(relayed)
+    p.wait_for_timeout(5000)
+    assert len(relayed) == count and p.evaluate("() => window.__lp.status(null).media.state") == "IDLE"
+    app.clean("reconnect")
+
+
+def test_hls_station_on_this_device(make_app, seeded):
+    """HLS (.m3u8): a browser that plays it itself (Safari, recent Chrome) tries the station's link, then the
+    server's playlist relay (/local/hls). One that doesn't (stubbed here) is told so plainly, without trying."""
+    app = make_app("operator", "desktop")
+    p = app.page
+    fetched = []
+    p.route(re.compile(r".*(/local/hls\?|radio\.example\.com).*"), lambda r: (fetched.append(r.request.url), r.abort()))
+    pick(app, "device")
+    hls = ["https://radio.example.com/live.m3u8", "application/vnd.apple.mpegurl"]
+    if p.evaluate("() => document.createElement('audio').canPlayType('application/vnd.apple.mpegurl')"):
+        assert "HLS" not in (p.evaluate(PLAY_RADIO, hls) or "")
+        assert any("radio.example.com/live.m3u8" in u for u in fetched), fetched
+        assert any("/local/hls?" in u and "sig=" in u for u in fetched), fetched
+        fetched.clear()
+    p.evaluate("""() => {
+      const own = HTMLMediaElement.prototype.canPlayType;
+      HTMLMediaElement.prototype.canPlayType = function (type) {
+        return /mpegurl/i.test(type) ? '' : own.call(this, type);
+      };
+    }""")
+    message = p.evaluate(PLAY_RADIO, hls)
+    assert message and "HLS" in message and not fetched
+    app.clean("hls")
