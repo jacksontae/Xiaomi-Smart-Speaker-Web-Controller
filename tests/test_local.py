@@ -52,6 +52,16 @@ def test_tts(client, anon, app, net, no_speaker):  # noqa: F811
     assert no_speaker.media_controller.loads == [] and app.db.activity() == []
 
 
+def test_viewers_only_get_cached_youtube(as_role, app, downloads, no_speaker):  # noqa: F811
+    """A viewer never starts a download (disk and bandwidth); a track already in the cache plays."""
+    viewer = as_role("viewer")
+    r = resolve(viewer, kind="youtube", source=VID)
+    assert r.status_code == 403 and "operator" in r.json()["detail"]
+    assert resolve(viewer, kind="youtube", source="some song words").status_code == 403
+    assert resolve(as_role("operator"), kind="youtube", source=VID).status_code == 200  # downloads it
+    assert resolve(viewer, kind="youtube", source=VID).status_code == 200
+
+
 def test_youtube_by_id_uses_the_cache(client, anon, app, downloads, no_speaker):  # noqa: F811
     r = resolve(client, kind="youtube", source=VID, title="Song A", duration=100)
     assert r.status_code == 200, r.text
