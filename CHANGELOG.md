@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
 ### Added
 - "This device" output: the speaker picker offers this phone/tablet/computer to operators. Now playing, Music and
   Playlists then play in the browser (local queue with shuffle/repeat, seek, volume, lock-screen controls via the
@@ -21,6 +23,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   (`<id>.sb-<hash>.<ext>`). Files cached before this play at once and are cut in the background from the local
   copy (hash-prefix SponsorBlock lookup, niced ffmpeg, one job at a time), so nothing is downloaded again.
   `POST /youtube` resolves the video first and plays a cached copy instead of downloading it again.
+
+### Fixed
+- Android tablets: Sign-in methods is a row of the "Your account" card on Members, and the display-name label
+  sits inside its field on Account.
+- The quick tour skipped its This device step on Android phones.
+- `/tts.mp3` answers Range requests, so announcements played on This device can be sought.
 
 ## [0.4.0] - 2026-11-02
 
