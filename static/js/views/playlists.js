@@ -3,7 +3,7 @@
 // shows list and detail side by side and switches the selection in place.
 // Operators: create, rename, delete (with Undo), add items of every kind, reorder (drag the handle; on touch also
 // Reorder mode with up/down), item menu (play from here, move to top, remove with Undo), play / shuffle / repeat.
-// Viewers see the same lists read-only.
+// Viewers see the same lists read-only, and may play them when "This device" is their output (local-player.js).
 // Android look: New playlist and Add item are extended FABs on phones (android-kit.js), Play all | Shuffle a connected
 // button group, and tablets (>= 960px) get the list-detail two-pane layout of the AT_ boards.
 import { h, icon, field, busy, tip, append } from '../ui.js';
@@ -12,10 +12,11 @@ import { errorText } from '../api.js';
 import { isPhone } from '../sheet.js';
 import { isAndroid } from '../prefs.js';
 import { kitCss, fab, replacedByFab } from '../android-kit.js';
+import { isDevice } from '../local-player.js';
 import { bicon } from '../teamb-icons.js';
 import {
   thumb, roundBtn, setRound, errBox, note, spinnerLine, playlistMeta, kindSub, addItemSheet, mediaActive,
-  deleteLater, isPending, undoDelete, flushDeletes, ibtn,
+  deleteLater, isPending, undoDelete, flushDeletes, ibtn, here,
 } from '../teamb-common.js';
 
 register({
@@ -36,6 +37,7 @@ register({
     'pl.repeat.off': 'Repeat: off', 'pl.repeat.all': 'Repeat: whole playlist', 'pl.repeat.one': 'Repeat: one item',
     'pl.repeatHint': 'Tap to change. Used the next time you press Play all.',
     'pl.nowPlaying': (x) => `Speaker is playing ${x}`,
+    'pl.nowPlaying.here': (x) => `Playing ${x} on this device`, 'pl.shuffling.here': (x) => `Shuffling ${x} on this device`,
   },
   th: {
     'pl.new': 'สร้างเพลย์ลิสต์', 'pl.newShort': 'สร้าง', 'pl.createPl': 'สร้างเพลย์ลิสต์', 'pl.name': 'ชื่อเพลย์ลิสต์',
@@ -54,6 +56,7 @@ register({
     'pl.repeat.off': 'เล่นซ้ำ: ปิด', 'pl.repeat.all': 'เล่นซ้ำ: ทั้งเพลย์ลิสต์', 'pl.repeat.one': 'เล่นซ้ำ: รายการเดียว',
     'pl.repeatHint': 'แตะเพื่อเปลี่ยน ใช้ตอนกด เล่นทั้งหมด ครั้งถัดไป',
     'pl.nowPlaying': (x) => `ลำโพงกำลังเล่น ${x}`,
+    'pl.nowPlaying.here': (x) => `กำลังเล่น ${x} ที่อุปกรณ์นี้`, 'pl.shuffling.here': (x) => `สุ่มเล่น ${x} ที่อุปกรณ์นี้`,
   },
 });
 
@@ -63,6 +66,8 @@ const listeners = new Set(); // repaint functions of mounted lists (Undo of a pl
 // list and detail side by side: desktop, and Android tablets in landscape (AT_Playlists)
 const isDesk = () => matchMedia(isAndroid() ? '(min-width: 960px)' : '(min-width: 1280px)').matches;
 const canOp = (ctx) => ctx.can('operator');
+// play / shuffle / repeat: operators on the speaker; anyone on "This device" (it plays only in their browser)
+const canPlay = (ctx) => canOp(ctx) || isDevice();
 
 export async function render(ctx) {
   await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/playlists.css'), kitCss(ctx)]);
@@ -118,16 +123,16 @@ function listPage(ctx, selected) {
     const row = h('div', { class: `tb-row pl-row${desk && p.id === selected ? ' sel' : ''}`, role: 'listitem' }, link,
       thumb('playlist'), h('span', { class: 'tb-tx' }, h('span', { class: 'tb-t' }, p.name), sub));
     if (!p.item_count) row.querySelector('.tb-th').classList.add('dim');
-    if (canOp(ctx)) {
+    if (canPlay(ctx) && (p.item_count || canOp(ctx))) {
       const act = h('span', { class: 'tb-act' });
       if (p.item_count) {
-        const btn = roundBtn('play', t('tb.playOn', p.name), async () => {
+        const btn = roundBtn('play', here('tb.playOn', p.name), async () => {
           const playing = playingThis(status, p.id);
           await busy(btn, async () => {
             try {
-              if (playing) { await ctx.api('/stop', { method: 'POST' }); ctx.toast(t('tb.stopped'), 'ok'); } else {
+              if (playing) { await ctx.api('/stop', { method: 'POST' }); ctx.toast(here('tb.stopped'), 'ok'); } else {
                 await ctx.api(`/playlists/${p.id}/play`, { body: { start_index: 0, shuffle: false, repeat: repeatPref.get(p.id) || 'off' } });
-                ctx.toast(t('pl.nowPlaying', p.name), 'ok');
+                ctx.toast(here('pl.nowPlaying', p.name), 'ok');
               }
             } catch (e) { ctx.fail(e); }
           });
@@ -135,8 +140,8 @@ function listPage(ctx, selected) {
         }, 'tint');
         const upd = () => {
           const on = playingThis(status, p.id);
-          setRound(btn, on ? 'stop' : 'play', on ? t('tb.stopX', p.name) : t('tb.playOn', p.name));
-          sub.textContent = on ? t('tb.playing') : meta;
+          setRound(btn, on ? 'stop' : 'play', on ? t('tb.stopX', p.name) : here('tb.playOn', p.name));
+          sub.textContent = on ? here('tb.playing') : meta;
           row.classList.toggle('on', on);
         };
         btn.upd = upd;
@@ -228,6 +233,7 @@ function detailPage(ctx, id) {
 
 function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
   const op = canOp(ctx);
+  const play = canPlay(ctx);
   const node = h('div', { class: 'pl-dv' });
   const itemsEl = h('div', { class: 'list tb-list pl-items', role: 'list', 'aria-label': t('pl.items') });
   const live = h('p', { class: 'sr-only', 'aria-live': 'polite' });
@@ -267,14 +273,14 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
       kids.push(hd);
     }
     kids.push(embedded && more ? h('div', { class: 'pl-hero-row' }, hero, more) : hero);
-    if (op) {
+    if (play) {
       playBtn = h('button', { type: 'button', class: 'btn primary big pl-play', onclick: () => playAll() });
       shufBtn = h('button', { type: 'button', class: 'btn tonal big pl-shuf', onclick: () => shuffle() }, bicon('shuffle', 'sm'), t('pl.shuffle'));
       repBtn = h('button', { type: 'button', class: 'tb-rb soft pl-rep', onclick: () => cycleRepeat() });
-      reorderBtn = h('button', { type: 'button', class: 'linkbtn pl-reo', 'aria-pressed': 'false', onclick: () => setReorder(!reorder) });
+      reorderBtn = op ? h('button', { type: 'button', class: 'linkbtn pl-reo', 'aria-pressed': 'false', onclick: () => setReorder(!reorder) }) : null;
       kids.push(h('div', { class: 'pl-ctl' },
         h('div', { class: 'pl-btns' }, playBtn, shufBtn, repBtn),
-        h('div', { class: 'pl-links' },
+        op && h('div', { class: 'pl-links' },
           (addFab ? replacedByFab : (x) => x)(h('button', { type: 'button', class: 'linkbtn pl-add', onclick: addItems }, icon('plus', 'sm'), t('pl.addItem'))),
           reorderBtn,
           h('button', { type: 'button', class: 'linkbtn pl-ren', onclick: () => rename() }, bicon('pencil', 'sm pl-ic'), t('pl.rename')))));
@@ -296,7 +302,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
   function paintControls() {
     const list = items();
     metaEl.textContent = playlistMeta({ ...p, items: list, item_count: list.length, total_duration: undefined });
-    if (!op) return;
+    if (!play) return;
     const q = queue();
     const playing = !!q && mediaActive(status);
     playBtn.replaceChildren(bicon(playing ? 'stop' : 'play', 'sm'), playing ? t('pl.stop') : t('pl.playAll'));
@@ -308,14 +314,14 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
     repBtn.setAttribute('aria-label', t(`pl.repeat.${rep}`));
     repBtn.setAttribute('aria-pressed', String(rep !== 'off'));
     tip(repBtn, q ? t(`pl.repeat.${rep}`) : `${t(`pl.repeat.${rep}`)}. ${t('pl.repeatHint')}`);
-    reorderBtn.hidden = list.length < 2;
+    if (reorderBtn) reorderBtn.hidden = list.length < 2;
     // highlight the item the speaker is on
     const cur = q && playing && q.items[q.index];
     itemsEl.querySelectorAll('.pl-it').forEach((r) => {
       const on = !!cur && Number(r.dataset.id) === cur.id;
       r.classList.toggle('on', on);
       const sub = r.querySelector('.tb-s');
-      sub.textContent = on ? t('tb.playing') : sub.dataset.idle;
+      sub.textContent = on ? here('tb.playing') : sub.dataset.idle;
     });
   }
   async function start(body, okMsg) {
@@ -330,9 +336,9 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
     const q = queue();
     busy(playBtn, async () => {
       if (q && mediaActive(status)) {
-        try { await ctx.api('/stop', { method: 'POST' }); ctx.toast(t('tb.stopped'), 'ok'); } catch (e) { ctx.fail(e); }
+        try { await ctx.api('/stop', { method: 'POST' }); ctx.toast(here('tb.stopped'), 'ok'); } catch (e) { ctx.fail(e); }
         ctx.refreshStatus();
-      } else await start({}, t('pl.nowPlaying', p.name));
+      } else await start({}, here('pl.nowPlaying', p.name));
     });
   }
   function shuffle() {
@@ -348,7 +354,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
         ctx.refreshStatus();
       } else {
         const n = items().length;
-        await start({ shuffle: true, start_index: Math.floor(Math.random() * n) }, t('pl.shuffling', p.name));
+        await start({ shuffle: true, start_index: Math.floor(Math.random() * n) }, here('pl.shuffling', p.name));
       }
     });
   }
@@ -382,7 +388,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
     const subText = kindSub(it);
     const sub = h('span', { class: 'tb-s', dataset: { idle: subText } }, subText);
     const row = h('div', { class: 'tb-row pl-it', role: 'listitem', dataset: { id: String(it.id) } });
-    if (op && !reorder) row.append(h('button', { type: 'button', class: 'tb-stretch', 'aria-label': t('pl.playFrom', it.title), onclick: () => playFrom(it) }));
+    if (play && !reorder) row.append(h('button', { type: 'button', class: 'tb-stretch', 'aria-label': t('pl.playFrom', it.title), onclick: () => playFrom(it) }));
     if (op) {
       const grip = h('button', { type: 'button', class: 'pl-grip', 'aria-label': t('pl.drag', it.title) }, bicon('grip', 'sm'));
       tip(grip, t('pl.drag', it.title));
@@ -422,7 +428,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
   }
   function playFrom(it) {
     const i = items().findIndex((x) => x.id === it.id);
-    start({ start_index: i }, t('pl.nowPlaying', it.title));
+    start({ start_index: i }, here('pl.nowPlaying', it.title));
   }
   function itemMenu(it, anchor) {
     const list = items();

@@ -84,7 +84,9 @@ def test_schedule_full_screen_editor(android_app, seeded):
     p.locator(".ak-fab", has_text="New schedule").click()
     dlg = p.locator("dialog.ak-full[open]")
     expect(dlg).to_be_visible()
-    box = dlg.locator(".ak-full-panel").bounding_box()
+    panel = dlg.locator(".ak-full-panel")
+    panel.evaluate("el => Promise.all(el.getAnimations().map((a) => a.finished))")  # it slides up
+    box = panel.bounding_box()
     assert (box["x"], box["y"], box["width"]) == (0, 0, 412), f"full screen: {box}"
     expect(dlg.locator(".ak-full-t")).to_have_text("New schedule")
     expect(dlg.locator(".sc-form button[type=submit]")).to_have_count(0)  # Save lives in the top bar only

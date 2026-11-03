@@ -5,7 +5,7 @@ import re
 import httpx
 from playwright.sync_api import expect
 
-from .e2ekit import BASE
+from .e2ekit import BASE, wait_for
 
 CID = "1234-abc.apps.googleusercontent.com"  # placeholder client id: the server only checks its shape
 
@@ -116,7 +116,8 @@ def test_speaker_settings_save_and_validation(make_app, seeded, drained):
         p.get_by_role("radiogroup", name="Default announcement language").get_by_role("radio", name="日本語").click()
         row_switch(p, "Resume music after announcements").uncheck()
         save.click()
-        app.toast("Speaker settings saved")
+        # a new speaker name waits out a connect to the offline one
+        app.toast("Speaker settings saved", timeout=20_000)
         app.soft(lambda: expect(save).to_be_disabled(), "Save turns disabled again after a successful save")
         s = seeded.get("/settings")
         assert (s["speaker_name"], s["default_volume"], s["tts_lang"], s["resume_after_say"]) == (
@@ -191,3 +192,37 @@ def test_speaker_settings_lan_scan_mocked(make_app, seeded):
     app.clean("lan scan")
     # nothing saved
     assert seeded.get("/settings")["speaker_ip"] == "192.0.2.10"
+
+
+def test_sponsorblock_setting(make_app, seeded):
+    """Owner turns SponsorBlock segment removal off and on and picks categories (phone layout)."""
+    before = seeded.get("/settings")["yt_skip_segments"]
+    app = make_app("owner", device="phone", route="settings")
+    p = app.page
+    app.header("Speaker settings")
+    sw = row_switch(p, "Cut sponsor segments from YouTube videos")
+    cats = p.locator("fieldset.s-segs")
+    save = p.locator("button.btn.primary.big")
+    try:
+        expect(sw).to_be_checked()
+        expect(cats).to_be_visible()
+        expect(cats.get_by_label("Paid sponsor reads")).to_be_checked()
+        expect(cats.get_by_label("Intro animations")).not_to_be_checked()
+        expect(p.locator(".c-row", has_text="Cut sponsor segments").locator(".c-sub")).to_contain_text("SponsorBlock")
+        cats.scroll_into_view_if_needed()
+        app.shot("settings-sponsorblock")
+        sw.uncheck()
+        expect(cats).to_be_hidden()
+        save.click()
+        app.toast("Speaker settings saved")
+        assert seeded.get("/settings")["yt_skip_segments"] == []
+        sw = row_switch(p, "Cut sponsor segments from YouTube videos")
+        sw.check()
+        p.locator("fieldset.s-segs").get_by_label("Intro animations").check()
+        save.click()
+        # the first save's toast may still be up, so wait for the value
+        wanted = ["interaction", "intro", "selfpromo", "sponsor"]
+        wait_for(lambda: seeded.get("/settings")["yt_skip_segments"] == wanted, what="second save")
+    finally:
+        seeded.post("/settings", {"yt_skip_segments": before})
+    app.clean("sponsorblock setting")

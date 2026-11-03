@@ -12,6 +12,7 @@ import { modeSwitch } from '../a-modeswitch.js';
 register({
   en: {
     'ann.talk': 'Talk live',
+    'ann.outNote': 'Music plays on this device, but announcements and Talk live always play on the speaker, for everyone there.',
     'ann.textLabel': 'Text to announce',
     'ann.textPh': 'Type a message, e.g. Meeting in 5 minutes, please come to the main room',
     'ann.textPhShort': 'Type a message, e.g. Meeting in 5 minutes',
@@ -81,6 +82,7 @@ register({
   },
   th: {
     'ann.talk': 'พูดสด',
+    'ann.outNote': 'เพลงเล่นที่อุปกรณ์นี้ แต่ประกาศและพูดสดออกที่ลำโพงเสมอ ให้ทุกคนตรงนั้นได้ยิน',
     'ann.textLabel': 'ข้อความที่จะประกาศ',
     'ann.textPh': 'พิมพ์ข้อความ เช่น ประชุมใน 5 นาที เชิญที่ห้องประชุมใหญ่',
     'ann.textPhShort': 'พิมพ์ข้อความ เช่น ประชุมใน 5 นาที',
@@ -185,7 +187,9 @@ export async function render(ctx) {
 
   const mainCol = h('div', { class: 'ann-main' });
   const sideCol = h('div', { class: 'ann-side' });
-  const node = h('div', { class: 'page ann-page' }, ctx.header({ title: t('nav.announce'), actions: sw.headActs }), sw.slot,
+  // "This device" is the music output (local-player.js): say plainly where announcements still go
+  const outNote = ctx.output === 'device' ? h('p', { class: 'out-note small' }, icon('info', 'sm'), h('span', {}, t('ann.outNote'))) : null;
+  const node = h('div', { class: 'page ann-page' }, ctx.header({ title: t('nav.announce'), actions: sw.headActs }), sw.slot, outNote,
     h('div', { class: 'ann-grid' }, mainCol, sideCol));
 
   /* ================= Announce now ================= */

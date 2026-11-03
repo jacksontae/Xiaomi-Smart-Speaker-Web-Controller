@@ -7,6 +7,7 @@ import { errorText } from './api.js';
 import { isPhone } from './sheet.js';
 import { isAndroid } from './prefs.js';
 import { bicon } from './teamb-icons.js';
+import { isDevice } from './local-player.js';
 
 register({
   en: {
@@ -18,6 +19,10 @@ register({
     'tb.playOn': (x) => `Play ${x} on the speaker`, 'tb.stopX': (x) => `Stop ${x}`, 'tb.loadingX': (x) => `Loading ${x}`,
     'tb.loading': 'Loading on the speaker…', 'tb.playing': 'Playing on the speaker', 'tb.live': 'Live on the speaker',
     'tb.stopped': 'Speaker stopped', 'tb.nowPlaying': (x) => `Speaker is playing ${x}`,
+    // "This device" output (local-player.js): same messages, said about this device; see here()
+    'tb.playOn.here': (x) => `Play ${x} on this device`, 'tb.loading.here': 'Loading on this device…',
+    'tb.playing.here': 'Playing on this device', 'tb.live.here': 'Live on this device', 'tb.stopped.here': 'Stopped on this device',
+    'tb.nowPlaying.here': (x) => `Playing ${x} on this device`,
     'tb.addToPl': 'Add to playlist', 'tb.addX': (x) => `Add ${x} to a playlist`, 'tb.addedTo': (p) => `Added to ${p}`,
     'tb.newPl': 'New playlist', 'tb.plName': 'Playlist name', 'tb.namePh': 'e.g. Afternoon music',
     'tb.ytGone': 'YouTube couldn\'t find that video. It may be private or removed.',
@@ -60,6 +65,9 @@ register({
     'tb.playOn': (x) => `เล่น ${x} ที่ลำโพง`, 'tb.stopX': (x) => `หยุดเล่น ${x}`, 'tb.loadingX': (x) => `กำลังโหลด ${x}`,
     'tb.loading': 'กำลังโหลดลงลำโพง…', 'tb.playing': 'กำลังเล่นที่ลำโพง', 'tb.live': 'กำลังถ่ายทอดสดที่ลำโพง',
     'tb.stopped': 'ลำโพงหยุดเล่นแล้ว', 'tb.nowPlaying': (x) => `ลำโพงกำลังเล่น ${x}`,
+    'tb.playOn.here': (x) => `เล่น ${x} ที่อุปกรณ์นี้`, 'tb.loading.here': 'กำลังโหลดที่อุปกรณ์นี้…',
+    'tb.playing.here': 'กำลังเล่นที่อุปกรณ์นี้', 'tb.live.here': 'กำลังถ่ายทอดสดที่อุปกรณ์นี้', 'tb.stopped.here': 'หยุดเล่นที่อุปกรณ์นี้แล้ว',
+    'tb.nowPlaying.here': (x) => `กำลังเล่น ${x} ที่อุปกรณ์นี้`,
     'tb.addToPl': 'เพิ่มเข้าเพลย์ลิสต์', 'tb.addX': (x) => `เพิ่ม ${x} เข้าเพลย์ลิสต์`, 'tb.addedTo': (p) => `เพิ่มเข้า ${p} แล้ว`,
     'tb.newPl': 'เพลย์ลิสต์ใหม่', 'tb.plName': 'ชื่อเพลย์ลิสต์', 'tb.namePh': 'เช่น เพลงช่วงบ่าย',
     'tb.ytGone': 'ไม่พบวิดีโอนี้บน YouTube อาจถูกตั้งเป็นส่วนตัวหรือถูกลบไปแล้ว',
@@ -211,6 +219,9 @@ export function itemError(e, user) {
   return errorText(e, user);
 }
 
+/** t(key) for messages about where music plays: the `<key>.here` wording while this device is the output. */
+export const here = (key, ...args) => t(isDevice() ? `${key}.here` : key, ...args);
+
 /* ---------- play / stop tracking ---------- */
 const ACTIVE = ['PLAYING', 'BUFFERING', 'PAUSED'];
 /**
@@ -258,7 +269,7 @@ export function playTracker(ctx) {
         await ctx.api('/stop', { method: 'POST' });
         cur = null;
         notify();
-        ctx.toast(t('tb.stopped'), 'ok');
+        ctx.toast(here('tb.stopped'), 'ok');
         ctx.refreshStatus();
       } catch (e) { ctx.fail(e); }
     },
@@ -281,8 +292,8 @@ export function trackPlay(tracker, key, { btn, row, title, idleSub, live = false
     btn.disabled = state === 'loading';
     if (state === 'playing') setRound(btn, 'stop', t('tb.stopX', title));
     else if (state === 'loading') setRound(btn, 'play', t('tb.loadingX', title));
-    else setRound(btn, 'play', t('tb.playOn', title));
-    row.sub.textContent = state === 'loading' ? t('tb.loading') : state === 'playing' ? t(live ? 'tb.live' : 'tb.playing') : idleSub;
+    else setRound(btn, 'play', here('tb.playOn', title));
+    row.sub.textContent = state === 'loading' ? here('tb.loading') : state === 'playing' ? here(live ? 'tb.live' : 'tb.playing') : idleSub;
   }, row);
 }
 

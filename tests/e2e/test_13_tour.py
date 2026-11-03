@@ -1,12 +1,13 @@
 """First-run quick tour: opens once per user per device after sign-in, never again after Done/Skip/Esc, replays
 from App settings and Help, steps follow the role and the screen (phone tab bar vs desktop sidebar), keyboard,
-focus trap, taps outside don't close it, reduce motion, no sideways scroll."""
+focus trap, taps outside don't close it, reduce motion, no sideways scroll; someone who finished an older tour
+gets only the steps added since."""
 import re
 import time
 
 from playwright.sync_api import expect
 
-from .e2ekit import OPERATOR, wait_for
+from .e2ekit import BASE, OPERATOR, wait_for
 
 CARD = ".tour-card"
 
@@ -58,7 +59,7 @@ def test_tour_first_signin_phone_operator(make_app, seeded):
     expect(c).to_have_attribute("aria-modal", "true")
     expect(p.locator(".tour-text")).to_have_attribute("aria-live", "polite")
     expect(c).to_be_focused()
-    expect(p.locator(".tour-count")).to_have_text("1 of 5")
+    expect(p.locator(".tour-count")).to_have_text("1 of 6")
     expect(p.locator(".tour-back")).to_be_hidden()
     assert p.evaluate("document.getElementById('app').inert")
     p.wait_for_timeout(500)  # let the spotlight finish moving
@@ -74,21 +75,21 @@ def test_tour_first_signin_phone_operator(make_app, seeded):
         assert p.evaluate("document.activeElement.closest('.tour-card') !== null")
     # keyboard: arrows move, Back goes back
     p.keyboard.press("ArrowRight")
-    expect(p.locator(".tour-count")).to_have_text("2 of 5")
+    expect(p.locator(".tour-count")).to_have_text("2 of 6")
     p.keyboard.press("ArrowLeft")
-    expect(p.locator(".tour-count")).to_have_text("1 of 5")
+    expect(p.locator(".tour-count")).to_have_text("1 of 6")
     p.locator(".tour-next").click()
     p.locator(".tour-back").click()
-    expect(p.locator(".tour-count")).to_have_text("1 of 5")
-    # operator on a phone: tab bar, Now, Announce, Music, Account
-    assert steps(p) == ["tabs", "now", "announce", "music", "account"]
+    expect(p.locator(".tour-count")).to_have_text("1 of 6")
+    # operator on a phone: tab bar, Now, This device, Announce, Music, Account
+    assert steps(p) == ["tabs", "now", "device", "announce", "music", "account"]
     expect(p.locator(".tour-dot.on")).to_have_count(1)
-    expect(p.locator(".tour-dot")).to_have_count(5)
+    expect(p.locator(".tour-dot")).to_have_count(6)
     in_view(p, CARD)
     p.locator(".tour-next", has_text="Done").click()
     expect(p.locator(".tour")).to_have_count(0)
     assert not p.evaluate("document.getElementById('app').inert")
-    assert stored(p) == "1"
+    assert stored(p) == "2"
     # not again on this device
     p.reload()
     app.header()
@@ -100,19 +101,20 @@ def test_tour_viewer_desktop_th_dark_skip(make_app, seeded):
     app = make_app("viewer", device="desktop", lang="th", theme="dark", tour=True)
     p = app.page
     card(p)
-    expect(p.locator(".tour-count")).to_have_text("1 จาก 4")
+    expect(p.locator(".tour-count")).to_have_text("1 จาก 5")
     expect(p.locator(".tour-skip")).to_have_text("ข้าม")
-    # viewers can't announce: sidebar, speaker, Now, Help
-    assert steps(p) == ["nav", "speaker", "now", "help"]
+    # viewers can't announce, but may play on their own device: sidebar, speaker, This device, Now, Help
+    assert steps(p) == ["nav", "speaker", "device", "now", "help"]
     p.locator(".tour-back").click()
     p.locator(".tour-back").click()
-    expect(p.locator(".tour")).to_have_attribute("data-step", "speaker")
+    expect(p.locator(".tour")).to_have_attribute("data-step", "device")
+    expect(p.locator(".tour-title")).to_have_text("ฟังที่เครื่องนี้แทน")
     p.wait_for_timeout(500)  # let the spotlight finish moving
     app.shot("tour-desktop-th-dark")
     app.no_hscroll("tour open, desktop")
     p.locator(".tour-skip").click()
     expect(p.locator(".tour")).to_have_count(0)
-    assert stored(p) == "1"
+    assert stored(p) == "2"
     p.reload()
     app.header()
     no_tour_after_wait(p)
@@ -123,10 +125,10 @@ def test_tour_owner_desktop_esc_and_replay(make_app, seeded):
     app = make_app("owner", device="desktop", tour=True)
     p = app.page
     card(p)
-    assert steps(p) == ["nav", "speaker", "now", "announce", "help"]
-    for _ in range(4):
+    assert steps(p) == ["nav", "speaker", "device", "now", "announce", "help"]
+    for _ in range(5):
         p.keyboard.press("ArrowLeft")
-    expect(p.locator(".tour-count")).to_have_text("1 of 5")
+    expect(p.locator(".tour-count")).to_have_text("1 of 6")
     p.wait_for_timeout(500)  # let the spotlight finish moving
     app.shot("tour-desktop-en-light")
     # resize while open: the card follows and stays inside the window
@@ -138,13 +140,13 @@ def test_tour_owner_desktop_esc_and_replay(make_app, seeded):
     p.set_viewport_size({"width": 1440, "height": 900})
     p.keyboard.press("Escape")
     expect(p.locator(".tour")).to_have_count(0)
-    assert stored(p) == "1"
+    assert stored(p) == "2"
     # replay from Account & app settings: goes to Now, starts at step 1
     app.go("prefs")
     p.get_by_role("button", name=re.compile("Show quick tour again")).click()
     card(p)
     assert app.hash() in ("#/", "")
-    expect(p.locator(".tour-count")).to_have_text("1 of 5")
+    expect(p.locator(".tour-count")).to_have_text("1 of 6")
     p.locator(".tour-skip").click()
     expect(p.locator(".tour")).to_have_count(0)
     # replay from Help; the row hides while searching
@@ -156,7 +158,7 @@ def test_tour_owner_desktop_esc_and_replay(make_app, seeded):
     tour_row.click()
     card(p)
     expect(p.locator(".tour")).to_have_attribute("data-step", "nav")
-    for _ in range(5):
+    for _ in range(6):
         p.keyboard.press("ArrowRight")  # the last ArrowRight is Done
     expect(p.locator(".tour")).to_have_count(0)
     app.clean("tour owner desktop")
@@ -169,8 +171,8 @@ def test_tour_replay_phone_th_dark_reduced_motion(make_app, seeded):
     no_tour_after_wait(p, 2)
     p.get_by_role("button", name=re.compile("ดูทัวร์แนะนำอีกครั้ง")).click()
     card(p)
-    # viewer on a phone: no Announce or Music steps
-    expect(p.locator(".tour-count")).to_have_text("1 จาก 3")
+    # viewer on a phone: no Announce or Music steps (This device is theirs too)
+    expect(p.locator(".tour-count")).to_have_text("1 จาก 4")
     dur = p.evaluate("getComputedStyle(document.querySelector('.tour-ring')).transitionDuration")
     assert all(float(x.strip().rstrip("s")) <= 0.002 for x in dur.split(",")), dur
     p.locator(".tour-next").click()
@@ -185,7 +187,43 @@ def test_tour_replay_phone_th_dark_reduced_motion(make_app, seeded):
     app.go("help")
     p.get_by_role("button", name="ดูทัวร์แนะนำ").click()
     card(p)
-    assert steps(p) == ["tabs", "now", "account"]
+    assert steps(p) == ["tabs", "now", "device", "account"]
     p.locator(".tour-next").click()
     expect(p.locator(".tour")).to_have_count(0)
     app.clean("tour phone viewer th")
+
+
+def test_tour_whats_new_after_an_older_tour(make_app, seeded):
+    """Finished tour 1 on this device: the next sign-in shows only the step added since (This device), once."""
+    app = make_app("operator", device="phone", tour=True, go=False)
+    uid = app.ctx.request.get(f"{BASE}/auth/state").json()["user"]["id"]
+    app.ctx.add_init_script(f"try {{ if (localStorage.getItem('spk.tour.{uid}') === null)"
+                            f" localStorage.setItem('spk.tour.{uid}', '1'); }} catch (e) {{}}")
+    app.go("")
+    p = app.page
+    card(p)
+    expect(p.locator(".tour-count")).to_have_text("1 of 1")
+    expect(p.locator(".tour")).to_have_attribute("data-step", "device")
+    expect(p.locator(".tour-title")).to_have_text("Listen here instead")
+    in_view(p, CARD)
+    p.locator(".tour-next", has_text="Done").click()
+    expect(p.locator(".tour")).to_have_count(0)
+    assert stored(p) == "2"
+    p.reload()
+    app.header()
+    no_tour_after_wait(p)
+    app.clean("tour whats new")
+
+
+def test_tour_this_device_step_on_android(make_app, seeded):
+    """On Android the speaker chip sits under the page title, not in the top bar."""
+    for device in ("android", "android-tablet"):
+        app = make_app("operator", device=device, tour=True, go=False)
+        uid = app.ctx.request.get(f"{BASE}/auth/state").json()["user"]["id"]
+        app.ctx.add_init_script(f"try {{ if (localStorage.getItem('spk.tour.{uid}') === null)"
+                                f" localStorage.setItem('spk.tour.{uid}', '1'); }} catch (e) {{}}")
+        app.go("")
+        p = app.page
+        card(p)
+        expect(p.locator(".tour")).to_have_attribute("data-step", "device")
+        in_view(p, CARD)
