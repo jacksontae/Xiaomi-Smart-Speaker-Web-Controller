@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-04
+
 ### Added
 - Personal playlists and files (schema 6: `owner_id` on `playlists` and `media_files`, deleted with their member,
   files on disk too). Viewers create, edit and delete their own playlists and upload their own files; operators and
@@ -18,7 +20,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 - Viewers on This device may play YouTube tracks the server hasn't saved yet (reverts the cached-only rule).
-- Schedules may only pick a playlist their author can see (someone else's personal one is "Unknown playlist").
+- Schedules play shared playlists only (a personal one would go with its member).
+- The web app follows a viewer's output: on the speaker there is no Music page, shared playlists are read-only and
+  previous/next and tapping a queue row work; on This device Music appears, uploads are private and Playlists
+  gains "My playlists". Owners see members' personal playlists and files in their own group.
+
+### Fixed
+- Saving a new speaker name or address no longer waits (up to ~10 s) for a connect to the offline old speaker.
 
 ## [0.5.0] - 2026-11-03
 
