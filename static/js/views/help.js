@@ -5,7 +5,7 @@ import { h, icon } from '../ui.js';
 import { register, t, lang } from '../i18n.js';
 import { ROUTES, href } from '../routes.js';
 import { isPhone } from '../sheet.js';
-import { aicon } from '../a-icons.js';
+import { glyph } from '../icons.js';
 
 register({
   en: {
@@ -262,14 +262,14 @@ export async function render(ctx) {
   const input = h('input', { class: 'input hp-input', type: 'search', placeholder: t('help.searchPh'), 'aria-label': t('help.search'), value: query, autocomplete: 'off', spellcheck: false });
   const clear = h('button', { type: 'button', class: 'iconbtn hp-clear', 'aria-label': t('help.clear'), hidden: !query, onclick: () => { input.value = ''; onSearch(); input.focus(); } }, icon('close', 'sm'));
   const count = h('p', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
-  const search = h('div', { class: 'hp-search', role: 'search' }, aicon('search', 'sm hp-sic'), input, clear);
+  const search = h('div', { class: 'hp-search', role: 'search' }, glyph('search', 'sm hp-sic'), input, clear);
   const groupsBox = h('div', { class: 'hp-groups' });
 
   const sub = h('p', { class: 'hp-sub' }, t('help.sub'));
   // replays the first-run quick tour on the Now page (js/tour.js); hidden while searching
   const tour = h('div', { class: 'hp-list hp-tourbox', hidden: !!query },
     h('button', { type: 'button', class: 'hp-q hp-tour', onclick: () => import('../tour.js').then((m) => m.replay({ user: ctx.user })) },
-      h('span', { class: 'hp-tic', 'aria-hidden': 'true' }, aicon('play', 'sm')), h('span', { class: 'hp-qt' }, t('help.tour')), icon('chev-right', 'sm hp-chev')));
+      h('span', { class: 'hp-tic', 'aria-hidden': 'true' }, glyph('play', 'sm')), h('span', { class: 'hp-qt' }, t('help.tour')), icon('chev-right', 'sm hp-chev')));
   const node = h('div', { class: 'page narrow help-page' },
     ctx.header({ title: t('nav.help'), back: isPhone() ? { href: '#/account', label: t('nav.account') } : null }),
     sub, search, count, tour, groupsBox);
@@ -277,7 +277,7 @@ export async function render(ctx) {
   function topicEl(tp, matchAll) {
     const c = tp[L] || tp.en;
     const isOpen = matchAll || open.has(tp.id);
-    const ic = tp.ic[1] === 'sprite' ? icon(tp.ic[0], 'sm') : aicon(tp.ic[0], 'sm');
+    const ic = tp.ic[1] === 'sprite' ? icon(tp.ic[0], 'sm') : glyph(tp.ic[0], 'sm');
     const btn = h('button', { type: 'button', class: 'hp-q', id: `hq-${tp.id}`, 'aria-expanded': String(isOpen), 'aria-controls': `hp-${tp.id}` },
       h('span', { class: 'hp-ic', 'aria-hidden': 'true' }, ic), h('span', { class: 'hp-qt' }, c.title), icon('chev-down', 'sm hp-chev'));
     const tryIt = canRoute(tp) ? h('a', { class: 'btn tonal hp-try', href: href(...tp.route), 'aria-label': t('help.tryIn', c.where) }, t('help.try'), icon('chev-right', 'xs')) : null;

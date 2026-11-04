@@ -5,7 +5,8 @@
 import { h, icon, segmented, busy } from '../ui.js';
 import { register, t, fmtClock } from '../i18n.js';
 import { isAndroid } from '../prefs.js';
-import { cIcon, tile, phoneBack, fmtDayHead, sameDay } from '../c-kit.js';
+import { tile, phoneBack, fmtDayHead, sameDay } from '../kit.js';
+import { glyph } from '../icons.js';
 
 register({
   en: {
@@ -52,7 +53,7 @@ register({
 
 const PAGE = 50;
 const sprite = (n) => () => icon(n);
-const own = (n) => () => cIcon(n);
+const own = (n) => () => glyph(n);
 // action -> label key, icon, tile tone, filter group (play | acct | fail)
 const KINDS = {
   say: ['act.say', sprite('announce'), 'accent', 'play'],
@@ -109,7 +110,7 @@ function detailOf(e) {
 }
 
 export function render(ctx) {
-  ctx.css('views/c-common.css');
+  ctx.css('views/common.css');
   ctx.css('views/activity.css');
   const FILTERS = ['all', 'play', 'acct', 'fail'];
   const label = { all: t('act.all'), play: t('act.play'), acct: t('act.acct'), fail: t('act.fail') };

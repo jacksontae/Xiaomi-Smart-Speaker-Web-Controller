@@ -1,6 +1,6 @@
 // Wavy progress (Android look, M3 Expressive; board A_Now): a sine line for the played part, a flat track for the
-// rest, a stop dot at the end. Display only (there is no seek endpoint). The caller keeps the role="progressbar"
-// element and sets --np-pos on it; styles live in css/views/now.css.
+// rest, a stop dot at the end. Drawing only: the caller keeps the progress bar element (and its seeking)
+// and sets --np-pos on it; styles live in css/views/now.css.
 // Heat: the wave's phase drifts with a CSS transform on one small SVG (compositor only) and only while the page
 // marks itself playing; it is static otherwise and under reduced motion.
 

@@ -15,11 +15,11 @@ import { isPhone } from '../sheet.js';
 import { isAndroid } from '../prefs.js';
 import { kitCss, fab, replacedByFab } from '../android-kit.js';
 import { isDevice } from '../local-player.js';
-import { bicon } from '../teamb-icons.js';
 import {
   thumb, roundBtn, setRound, errBox, note, spinnerLine, sectionLabel, ownerMeta, kindSub, addItemSheet, mediaActive,
   deleteLater, isPending, undoDelete, flushDeletes, ibtn, here,
-} from '../teamb-common.js';
+} from '../media-kit.js';
+import { glyph } from '../icons.js';
 
 register({
   en: {
@@ -81,7 +81,7 @@ const GROUPS = { mine: 'pl.mine', shared: 'pl.shared', members: 'pl.members' };
 const groupOf = (p) => (p.owner_id == null ? 'shared' : p.mine ? 'mine' : 'members');
 
 export async function render(ctx) {
-  await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/playlists.css'), kitCss(ctx)]);
+  await Promise.all([ctx.css('views/media.css'), ctx.css('views/playlists.css'), kitCss(ctx)]);
   const id = parseInt(ctx.params[0], 10) || null;
   if (id && !isDesk()) return detailPage(ctx, id);
   return listPage(ctx, id);
@@ -303,7 +303,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
     kids.push(embedded && more ? h('div', { class: 'pl-hero-row' }, hero, more) : hero);
     if (play) {
       playBtn = h('button', { type: 'button', class: 'btn primary big pl-play', onclick: () => playAll() });
-      shufBtn = h('button', { type: 'button', class: 'btn tonal big pl-shuf', onclick: () => shuffle() }, bicon('shuffle', 'sm'), t('pl.shuffle'));
+      shufBtn = h('button', { type: 'button', class: 'btn tonal big pl-shuf', onclick: () => shuffle() }, glyph('shuffle', 'sm'), t('pl.shuffle'));
       repBtn = h('button', { type: 'button', class: 'tb-rb soft pl-rep', onclick: () => cycleRepeat() });
       reorderBtn = op ? h('button', { type: 'button', class: 'linkbtn pl-reo', 'aria-pressed': 'false', onclick: () => setReorder(!reorder) }) : null;
       kids.push(h('div', { class: 'pl-ctl' },
@@ -311,9 +311,9 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
         op && h('div', { class: 'pl-links' },
           (addFab ? replacedByFab : (x) => x)(h('button', { type: 'button', class: 'linkbtn pl-add', onclick: addItems }, icon('plus', 'sm'), t('pl.addItem'))),
           reorderBtn,
-          h('button', { type: 'button', class: 'linkbtn pl-ren', onclick: () => rename() }, bicon('pencil', 'sm pl-ic'), t('pl.rename')))));
+          h('button', { type: 'button', class: 'linkbtn pl-ren', onclick: () => rename() }, glyph('pencil', 'sm pl-ic'), t('pl.rename')))));
     }
-    if (reorderBtn) reorderBtn.replaceChildren(bicon('swap-vert', 'sm pl-ic'), t('pl.reorder'));
+    if (reorderBtn) reorderBtn.replaceChildren(glyph('swap-vert', 'sm pl-ic'), t('pl.reorder'));
     kids.push(itemsEl, live);
     node.replaceChildren(...kids);
     paintItems();
@@ -333,12 +333,12 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
     if (!play) return;
     const q = queue();
     const playing = !!q && mediaActive(status);
-    playBtn.replaceChildren(bicon(playing ? 'stop' : 'play', 'sm'), playing ? t('pl.stop') : t('pl.playAll'));
+    playBtn.replaceChildren(glyph(playing ? 'stop' : 'play', 'sm'), playing ? t('pl.stop') : t('pl.playAll'));
     playBtn.disabled = !list.length && !playing;
     shufBtn.disabled = !list.length;
     shufBtn.setAttribute('aria-pressed', String(!!(q && q.shuffle)));
     const rep = q ? q.repeat : repeatPref.get(id) || 'off';
-    repBtn.replaceChildren(bicon(rep === 'one' ? 'repeat-one' : 'repeat', 'sm'));
+    repBtn.replaceChildren(glyph(rep === 'one' ? 'repeat-one' : 'repeat', 'sm'));
     repBtn.setAttribute('aria-label', t(`pl.repeat.${rep}`));
     repBtn.setAttribute('aria-pressed', String(rep !== 'off'));
     tip(repBtn, q ? t(`pl.repeat.${rep}`) : `${t(`pl.repeat.${rep}`)}. ${t('pl.repeatHint')}`);
@@ -418,7 +418,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
     const row = h('div', { class: 'tb-row pl-it', role: 'listitem', dataset: { id: String(it.id) } });
     if (play && !reorder) row.append(h('button', { type: 'button', class: 'tb-stretch', 'aria-label': t('pl.playFrom', it.title), onclick: () => playFrom(it) }));
     if (op) {
-      const grip = h('button', { type: 'button', class: 'pl-grip', 'aria-label': t('pl.drag', it.title) }, bicon('grip', 'sm'));
+      const grip = h('button', { type: 'button', class: 'pl-grip', 'aria-label': t('pl.drag', it.title) }, glyph('grip', 'sm'));
       tip(grip, t('pl.drag', it.title));
       grip.addEventListener('pointerdown', (e) => startDrag(e, row, grip));
       grip.addEventListener('keydown', (e) => {
@@ -450,7 +450,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
   }
   function setReorder(on) {
     reorder = on;
-    reorderBtn.replaceChildren(bicon(on ? 'check' : 'swap-vert', 'sm pl-ic'), t(on ? 'pl.done' : 'pl.reorder'));
+    reorderBtn.replaceChildren(glyph(on ? 'check' : 'swap-vert', 'sm pl-ic'), t(on ? 'pl.done' : 'pl.reorder'));
     reorderBtn.setAttribute('aria-pressed', String(on));
     paintItems();
   }
@@ -463,7 +463,7 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
     const i = list.findIndex((x) => x.id === it.id);
     const rows = (close) => {
       const mi = (ic, label, fn, cls = '') => h('button', { type: 'button', class: `mi ${cls}`.trim(), onclick: () => { close(); fn(); } },
-        h('span', { class: 'mic' }, bicon(ic, 'xs')), h('span', {}, label));
+        h('span', { class: 'mic' }, glyph(ic, 'xs')), h('span', {}, label));
       return h('div', { class: 'menu' },
         mi('play', t('pl.playHere'), () => playFrom(it)),
         i > 0 ? mi('top', t('pl.moveTop'), () => moveTo(it, 0)) : null,
@@ -574,8 +574,8 @@ function detailView(ctx, id, { embedded, header, onChanged, onDeleted }) {
   }
   function moreMenu(anchor) {
     const rows = (close) => h('div', { class: 'menu' },
-      h('button', { type: 'button', class: 'mi', onclick: () => { close(); rename(); } }, h('span', { class: 'mic' }, bicon('pencil', 'xs')), h('span', {}, t('pl.rename'))),
-      h('button', { type: 'button', class: 'mi danger', onclick: () => { close(); remove(); } }, h('span', { class: 'mic' }, bicon('trash', 'xs')), h('span', {}, t('pl.delete'))));
+      h('button', { type: 'button', class: 'mi', onclick: () => { close(); rename(); } }, h('span', { class: 'mic' }, glyph('pencil', 'xs')), h('span', {}, t('pl.rename'))),
+      h('button', { type: 'button', class: 'mi danger', onclick: () => { close(); remove(); } }, h('span', { class: 'mic' }, glyph('trash', 'xs')), h('span', {}, t('pl.delete'))));
     if (isPhone()) ctx.sheet({ title: p.name, build: (body, sheet) => body.append(h('div', { class: 'list tb-menu' }, rows(() => sheet.close()))) });
     else ctx.popover({ anchor, label: t('pl.more', p.name), className: 'tb-pop', build: (el, close) => el.append(rows(close)) });
   }

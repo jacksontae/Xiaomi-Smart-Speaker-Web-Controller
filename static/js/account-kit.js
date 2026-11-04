@@ -7,8 +7,8 @@ import { register, t, roleLabel } from './i18n.js';
 import { errorText } from './api.js';
 import { get as getPref, set as setPref, motionReduced, onChange as onPrefs } from './prefs.js';
 import { googleCredential } from './signin.js';
-import { createPasskey, createError, passkeyCapable, deviceName } from './c-passkey-offer.js';
-import { card, badge, tile, gMark, fmtDay, fmtWhen, toneOf, initialOf, settingRow, linkRow } from './c-kit.js';
+import { createPasskey, createError, passkeyCapable, deviceName } from './passkey-offer.js';
+import { card, badge, tile, gMark, fmtDay, fmtWhen, toneOf, initialOf, settingRow, linkRow } from './kit.js';
 
 register({
   en: {

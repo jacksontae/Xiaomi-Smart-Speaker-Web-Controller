@@ -1,4 +1,4 @@
-/* Announce mode switch (js/a-modeswitch.js), the same on #/announce and #/schedule: three equal tabs
+/* Announce mode switch (js/modeswitch.js), the same on #/announce and #/schedule: three equal tabs
    (two when Talk live is off), one sliding thumb. Phone/iPad: under the title; desktop: in the header. */
 .ann-seg { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-flow: row; background: var(--glass-soft); border: 1px solid var(--glass-edge); }
 .ann-seg.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -184,7 +184,7 @@ function startApp() {
   startPolling();
   prefetchRoutes();
   // passkey offer after a fresh sign-in / "passkey required" prompt (team C module; guards itself to once per load)
-  import('./c-passkey-offer.js').then((m) => m.maybePrompt({ api, user: state.user, fresh: !(state.auth && state.auth.user) })).catch(() => {});
+  import('./passkey-offer.js').then((m) => m.maybePrompt({ api, user: state.user, fresh: !(state.auth && state.auth.user) })).catch(() => {});
   // first-run quick tour: once per user per device, when the Now page is up and no sheet is open (tour.js)
   import('./tour.js').then((m) => m.maybeStart({ user: state.user })).catch(() => {});
 }

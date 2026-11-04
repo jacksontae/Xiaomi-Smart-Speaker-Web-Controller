@@ -34,7 +34,8 @@ export async function api(path, { method, body, signal, allow401 = false } = {})
     throw new ApiError(0, 'network');
   }
   if (r.status === 204) return null;
-  const data = await r.json().catch(() => null);
+  // a body cut short by leaving the page is an abort, not an empty answer (Activity drew a null row from it)
+  const data = await r.json().catch((e) => { if (e.name === 'AbortError') throw e; return null; });
   if (!r.ok) {
     const retry = parseInt(r.headers.get('Retry-After') || '', 10);
     const detail = data && (typeof data.detail === 'string' ? data.detail : '');
