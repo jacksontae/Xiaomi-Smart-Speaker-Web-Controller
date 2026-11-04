@@ -36,9 +36,10 @@ def tts_playlist(api, name="Device check"):
 
 
 def watch(app):
-    """Serve the tone for signed TTS links and record the API calls the page makes."""
+    """Serve the tone for signed TTS links and record the API calls the page makes. The tone outlasts the test's
+    steps (a 4 s one ended under a loaded full run, emptying the queue before Now was checked)."""
     seen = {"tts": [], "calls": []}
-    wav = tone_wav()
+    wav = tone_wav(seconds=60)
 
     def tts(route):
         seen["tts"].append(route.request.url)
