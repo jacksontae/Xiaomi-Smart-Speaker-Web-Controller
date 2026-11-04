@@ -12,8 +12,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   and point to the speaker, Safari or a recent Chrome.
 - A live stream on This device that ends or drops (including the relay's 6-hour cut) reconnects by itself with a
   fresh link after 1, 2, 4, 8 and 16 s, at most 5 times in a row; 60 s of playing resets the count.
+- Owners unlink a member's Google account and remove their passkeys in Members, for a lost phone or a Google
+  account that isn't theirs any more (`GET /users/{id}/passkeys`, `DELETE /users/{id}/passkeys/{pid}`,
+  `DELETE /users/{id}/google`). The member is signed out of every device; the API won't take away their only way in.
 
 ### Fixed
+- On iPad, desktop and iPhone in landscape the scrolled page header is a floating glass bar instead of a flat strip
+  that ran into the sidebar, and the sidebar clears the iPhone notch in landscape.
 - The relay plays SHOUTcast v1 stations that answer `ICY 200 OK`.
 - The relay connects only to the public addresses it checked, so a DNS answer that changes after the check can't
   point it inside the network (DNS rebinding).
