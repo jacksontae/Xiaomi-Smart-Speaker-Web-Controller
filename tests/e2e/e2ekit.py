@@ -88,6 +88,14 @@ class Api:
         return u
 
 
+def where_thrown(error):
+    """The first app frame of a page error's stack ("file.js:line:col"), or "?"."""
+    for line in (getattr(error, "stack", "") or "").splitlines()[1:]:
+        if "/static/" in line:
+            return line.strip().split("/static/")[-1].rstrip(")")
+    return "?"
+
+
 class App:
     """One browser context + page with helpers for this app."""
 
@@ -95,7 +103,8 @@ class App:
         self.ctx, self.page, self.name = ctx, page, name
         self.errors = []
         self.issues = []  # soft checks: the test goes on, clean() fails at the end
-        page.on("pageerror", lambda e: self.errors.append(f"pageerror: {e}"))
+        # with where it was thrown, so a rare error seen once in a full run can be traced
+        page.on("pageerror", lambda e: self.errors.append(f"pageerror: {e} @ {where_thrown(e)}"))
         page.on("console", self._console)
 
     def _console(self, msg):

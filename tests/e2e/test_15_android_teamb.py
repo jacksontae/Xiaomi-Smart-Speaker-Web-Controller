@@ -85,9 +85,10 @@ def test_schedule_full_screen_editor(android_app, seeded):
     dlg = p.locator("dialog.ak-full[open]")
     expect(dlg).to_be_visible()
     panel = dlg.locator(".ak-full-panel")
-    panel.evaluate("el => Promise.all(el.getAnimations().map((a) => a.finished))")  # it slides up
-    box = panel.bounding_box()
-    assert (box["x"], box["y"], box["width"]) == (0, 0, 412), f"full screen: {box}"
+    # it slides up; under load the animation may not have started yet, so wait for where it ends
+    panel.evaluate("el => Promise.all(el.getAnimations().map((a) => a.finished))")
+    p.wait_for_function("""() => { const r = document.querySelector('dialog.ak-full[open] .ak-full-panel')
+      .getBoundingClientRect(); return r.x === 0 && r.y === 0 && r.width === 412; }""", timeout=5_000)
     expect(dlg.locator(".ak-full-t")).to_have_text("New schedule")
     expect(dlg.locator(".sc-form button[type=submit]")).to_have_count(0)  # Save lives in the top bar only
     save = dlg.locator(".ak-full-bar").get_by_role("button", name="Save")
