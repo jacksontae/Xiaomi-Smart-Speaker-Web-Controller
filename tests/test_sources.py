@@ -314,7 +314,8 @@ def test_upload_list_and_serve(as_role, app, anon):
     assert r.status_code == 200, r.text
     f = r.json()
     assert f["title"] == "My Song" and f["original_name"] == "My Song.mp3" and f["content_type"] == "audio/mpeg"
-    assert f["size"] == len(MP3) and f["duration"] == 61.5 and f["owner"] == "Operator-User"
+    assert f["size"] == len(MP3) and f["duration"] == 61.5 and f["uploader"] == "Operator-User"
+    assert f["owner_id"] is None and f["owner_name"] is None and not f["mine"] and f["can_edit"]  # shared
     assert "stored_name" not in f
     listing = as_role("viewer").get("/files").json()
     assert [i["id"] for i in listing["items"]] == [f["id"]] and listing["used"] == len(MP3)

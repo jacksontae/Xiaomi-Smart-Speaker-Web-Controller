@@ -94,8 +94,8 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 
 | role | ทำอะไรได้ |
 |---|---|
-| `viewer` | ดูสถานะ คิว เพลย์ลิสต์ และข้อความด่วน |
-| `operator` | viewer + ประกาศ เล่น ปรับเสียง หยุด/เล่นต่อ คุมคิว แก้เพลย์ลิสต์และข้อความด่วน |
+| `viewer` | ดูสถานะ คิว เพลย์ลิสต์ที่แชร์ และข้อความด่วน · ข้ามเพลง/ย้อน/เลือกเพลงในคิวของลำโพง · ค้นเพลง เล่นที่อุปกรณ์นี้ · อัปโหลดไฟล์และทำเพลย์ลิสต์ของตัวเอง (ส่วนตัว) |
+| `operator` | viewer + ประกาศ เล่น ปรับเสียง หยุด/เล่นต่อ คุมคิว แก้เพลย์ลิสต์ที่แชร์และข้อความด่วน |
 | `admin` | operator + จัดการสมาชิก ตั้งค่า ค้นหาลำโพง ดูบันทึกกิจกรรม |
 
 ### บัญชี
@@ -159,18 +159,26 @@ challenge ใช้ได้ครั้งเดียวและหมดอ�
 
 | Method | Path | สิทธิ์ | Body | หน้าที่ |
 |---|---|---|---|---|
-| GET · POST | `/playlists` | viewer · operator | `{"name"}` | รายการเพลย์ลิสต์ · สร้างใหม่ |
-| GET · PATCH · DELETE | `/playlists/{id}` | viewer · operator | `{"name"}` | ดูพร้อมรายการ · เปลี่ยนชื่อ · ลบ |
-| POST | `/playlists/{id}/items` | operator | `{"kind": "youtube"\|"url"\|"tts"\|"radio"\|"podcast"\|"file", "source", "title", "lang", "thumbnail", "duration", "content_type"}` | เพิ่มรายการ |
-| DELETE | `/playlists/{id}/items/{item_id}` | operator | – | ลบรายการ |
-| PUT | `/playlists/{id}/order` | operator | `{"item_ids": [...]}` | เรียงใหม่ (ต้องครบทุก id พอดี ไม่งั้น `409`) |
+| GET · POST | `/playlists` | viewer | `{"name", "personal": false}` | รายการเพลย์ลิสต์ที่เห็นได้ · สร้างใหม่ |
+| GET · PATCH · DELETE | `/playlists/{id}` | viewer | `{"name"}` | ดูพร้อมรายการ · เปลี่ยนชื่อ · ลบ |
+| POST | `/playlists/{id}/items` | viewer | `{"kind": "youtube"\|"url"\|"tts"\|"radio"\|"podcast"\|"file", "source", "title", "lang", "thumbnail", "duration", "content_type"}` | เพิ่มรายการ |
+| DELETE | `/playlists/{id}/items/{item_id}` | viewer | – | ลบรายการ |
+| PUT | `/playlists/{id}/order` | viewer | `{"item_ids": [...]}` | เรียงใหม่ (ต้องครบทุก id พอดี ไม่งั้น `409`) |
 | POST | `/playlists/{id}/play` | operator | `{"start_index": 0, "shuffle": false, "repeat": "off"\|"all"\|"one"}` | เล่นทั้งเพลย์ลิสต์เป็นคิว |
 | GET · PATCH | `/queue` | viewer · operator | `{"shuffle", "repeat"}` | ดูคิว (`null` ถ้าไม่มี) · สลับ shuffle/repeat |
-| POST | `/queue/next` · `/queue/prev` · `/queue/jump` | operator | `{"index"}` (เฉพาะ jump) | ข้ามเพลง |
+| POST | `/queue/next` · `/queue/prev` · `/queue/jump` | viewer | `{"index"}` (เฉพาะ jump) | ข้ามเพลง |
 | POST | `/queue/clear` | operator | – | ล้างคิวและหยุดเล่น |
 | GET · POST | `/phrases` | viewer · operator | `{"text", "lang"}` | ข้อความด่วน (กดแล้วหน้าเว็บเรียก `/say`) |
 | DELETE | `/phrases/{id}` | operator | – | ลบข้อความด่วน |
 
+- เพลย์ลิสต์ส่วนตัว: `owner_id` เป็น id ของเจ้าของ (`null` = แชร์ ทุกเพลย์ลิสต์ที่มีก่อน schema 6 เป็นแบบแชร์) ผลลัพธ์มี `owner_id`, `owner_name`, `mine` และ `can_edit` (ผู้เรียกแก้ได้ไหม)
+  - viewer สร้างได้เฉพาะแบบส่วนตัว · operator/admin สร้างแบบแชร์ เว้นแต่ส่ง `"personal": true` (API token สร้างแบบส่วนตัวไม่ได้ `400`)
+  - เห็นได้: แบบแชร์ทุกคน · แบบส่วนตัวเฉพาะเจ้าของและ admin (operator ไม่เห็นของคนอื่น) ที่มองไม่เห็นตอบ `404` เสมอ
+  - แก้ (เปลี่ยนชื่อ ลบ เพิ่ม/ลบ/เรียงรายการ): แบบแชร์ต้อง operator ขึ้นไป (viewer ได้ `403`) · แบบส่วนตัวเจ้าของหรือ admin
+  - `/playlists/{id}/play` (เล่นที่ลำโพง) ยังเป็น operator และต้องมองเห็นเพลย์ลิสต์นั้น · ตารางเวลาเลือกได้เฉพาะเพลย์ลิสต์ที่ผู้ตั้งมองเห็น
+  - รายการ `file` ต้องเป็นไฟล์ที่เจ้าของเพลย์ลิสต์มองเห็น (แบบแชร์ใส่ได้แค่ไฟล์แชร์ แบบส่วนตัวใส่ไฟล์แชร์หรือไฟล์ของเจ้าของ) ไม่งั้น `400`
+  - ลบสมาชิกแล้ว เพลย์ลิสต์และไฟล์ส่วนตัวของเขา (รวมไฟล์บนดิสก์) ถูกลบด้วย ตารางเวลาที่เล่นเพลย์ลิสต์นั้นถูกปิด
+- viewer คุมคิวของลำโพงได้แค่ next/prev/jump (ลง activity เหมือน operator) ส่วน shuffle/repeat ล้างคิว หยุด และเสียงยังเป็น operator
 - รายการ `youtube` ใส่ได้ทั้ง URL, video id หรือคำค้น (เอาผลแรก) · `url` ต้องเป็นลิงก์ http(s) และต้องมี `title` · `tts` ยาวไม่เกิน 1000 ตัวอักษร
 - `radio` ใส่ uuid ของสถานีจาก radio-browser หรือลิงก์ stream (ต้องมี `title`) · `podcast` ใส่ลิงก์ไฟล์ตอน (ต้องมี `title`) · `file` ใส่ id ของไฟล์ที่อัปโหลด (ลบไฟล์แล้วรายการนั้นหายจากเพลย์ลิสต์ด้วย)
 - สถานีวิทยุในคิวเล่นแบบ LIVE ไม่มีวันจบ คิวจะค้างที่สถานีนั้นจนกด next
@@ -189,18 +197,20 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 
 | Method | Path | สิทธิ์ | Body / query | หน้าที่ |
 |---|---|---|---|---|
-| GET | `/radio/search?q=&country=TH&tag=&limit=20` | operator | – | ค้นสถานีจาก [radio-browser.info](https://www.radio-browser.info) (เรียงตามความนิยม) |
+| GET | `/radio/search?q=&country=TH&tag=&limit=20` | viewer | – | ค้นสถานีจาก [radio-browser.info](https://www.radio-browser.info) (เรียงตามความนิยม) |
 | GET · POST | `/radio/favorites` | viewer · operator | `{"uuid"}` หรือ `{"url", "name"}` | สถานีโปรด · เพิ่ม (ซ้ำ `409`) |
 | DELETE | `/radio/favorites/{id}` | operator | – | ลบสถานีโปรด |
 | POST | `/radio/play` | operator | `{"favorite_id"}` หรือ `{"uuid"}` หรือ `{"url", "name"}` + `"volume"` | เล่นวิทยุแบบ LIVE (ล้างคิว) |
-| GET | `/podcasts/search?q=&country=TH&limit=20` | operator | – | ค้นรายการจาก iTunes Search API ได้ `feed_url` |
-| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | operator | – | อ่าน RSS ได้รายละเอียดรายการและตอนล่าสุด |
+| GET | `/podcasts/search?q=&country=TH&limit=20` | viewer | – | ค้นรายการจาก iTunes Search API ได้ `feed_url` |
+| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | viewer | – | อ่าน RSS ได้รายละเอียดรายการและตอนล่าสุด |
 | POST | `/podcasts/play` | operator | `{"url", "title", "thumbnail", "content_type", "volume"}` | เล่นตอนหนึ่ง (ล้างคิว) |
-| GET | `/files` | viewer | – | `{"items", "used", "quota", "max_size", "types"}` |
-| POST | `/files?name=<ชื่อไฟล์>&duration=<วินาที>` | operator | ตัวไฟล์เสียงเป็น body ตรงๆ (ไม่ใช่ form) | อัปโหลด |
-| PATCH · DELETE | `/files/{id}` | operator (เจ้าของ) · admin (ทุกไฟล์) | `{"title"}` | เปลี่ยนชื่อ · ลบ |
+| GET | `/files` | viewer | – | `{"items", "used", "quota", "max_size", "types"}` (เฉพาะไฟล์ที่เห็นได้) |
+| POST | `/files?name=<ชื่อไฟล์>&duration=<วินาที>&personal=1` | viewer | ตัวไฟล์เสียงเป็น body ตรงๆ (ไม่ใช่ form) | อัปโหลด |
+| PATCH · DELETE | `/files/{id}` | viewer (ตามสิทธิ์ของไฟล์) | `{"title"}` | เปลี่ยนชื่อ · ลบ |
 | POST | `/files/{id}/play` | operator | `{"volume"}` | เล่นไฟล์ (ล้างคิว) |
 
+- ไฟล์ส่วนตัวใช้กติกาเดียวกับเพลย์ลิสต์: ของ viewer เป็นส่วนตัวเสมอ operator/admin แชร์ เว้นแต่ `personal=1` · เห็นได้เฉพาะไฟล์แชร์และของตัวเอง (admin เห็นทั้งหมด) ที่มองไม่เห็นตอบ `404` · แต่ละไฟล์มี `owner_id`, `owner_name`, `mine`, `can_edit`, `uploader_id`, `uploader` (คนอัปโหลด)
+- แก้/ลบไฟล์: ไฟล์ส่วนตัว เจ้าของหรือ admin · ไฟล์แชร์ operator ที่อัปโหลดหรือ admin (viewer ได้ `403`) · โควตาพื้นที่ยังรวมทุกคน
 - ไฟล์อัปโหลดตรวจชนิดจากเนื้อไฟล์ (mp3, aac, m4a, ogg/opus, wav, flac, webm) ไม่ใช่จากชื่อ · ชนิดอื่นได้ `415` ใหญ่เกิน `413` พื้นที่เต็ม `507`
 - เก็บที่ `media/` ข้าง `data.db` (env `MEDIA_DIR`) จำกัดไฟล์ละ 50 MB (`UPLOAD_MAX_MB`) รวม 2000 MB (`UPLOAD_QUOTA_MB`) ลำโพงดึงผ่านลิงก์เซ็น `/media/...` แบบเดียวกับ `/yt/...`
 - วิทยุและพอดแคสต์ลำโพงดึงจากต้นทางเอง · feed พอดแคสต์ server เป็นคนดึง จึงรับเฉพาะโฮสต์บนอินเทอร์เน็ตสาธารณะ (ไม่รับ IP ใน LAN) และอ่านไม่เกิน 10 MB
@@ -216,7 +226,7 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 | GET | `/local/stream?u=&t=&exp=&sig=` | ลิงก์เซ็น (จาก `proxy_url`) | - | relay สตรีมต้นทางแบบ streaming |
 
 - ในเว็บ เลือก "This device" จากปุ่มชื่อลำโพง หน้าเล่นอยู่ เพลง และเพลย์ลิสต์ จะเล่นใน `<audio>` ของเบราว์เซอร์นั้นแทนลำโพง (คิว สุ่ม เล่นวน เลื่อนตำแหน่ง ระดับเสียง และปุ่มบนหน้าจอล็อกผ่าน Media Session ทำในเบราว์เซอร์) จำค่าไว้ต่อเครื่องใน `localStorage` (`spk.output`) ไม่เปลี่ยนสิ่งที่คนอื่นได้ยิน
-- ผู้ชม (viewer) ใช้ได้ด้วย เพราะเล่นแค่ที่เครื่องตัวเอง ส่วน endpoint ที่สั่งลำโพงยังเป็น operator ขึ้นไป
+- ผู้ชม (viewer) ใช้ได้ด้วย รวมถึงดาวน์โหลด YouTube ที่ server ยังไม่มี เพราะเล่นแค่ที่เครื่องตัวเอง ส่วน endpoint ที่สั่งลำโพงยังเป็น operator ขึ้นไป · รายการ `file` ต้องเป็นไฟล์ที่ผู้เรียกมองเห็น ไม่งั้น `404`
 - `/local/resolve` ไม่ติดต่อลำโพงและไม่ลง activity (เบราว์เซอร์เรียกล่วงหน้าสำหรับเพลงถัดไป และเรียกซ้ำเมื่อลิงก์หมดอายุ) เบราว์เซอร์เรียก `/local/played` หนึ่งครั้งต่อการกดเล่น (เพลย์ลิสต์ลงชื่อเพลย์ลิสต์ ไม่ลงทุกเพลง ไม่ลงตอนเลื่อนตำแหน่ง): YouTube ดาวน์โหลดเข้า cache เดิมแล้วคืนลิงก์เซ็น `/yt/...` (path สัมพัทธ์กับ server นี้) ข้อความคืน `/tts.mp3?...` ไฟล์คืน `/media/...` ส่วนวิทยุ พอดแคสต์ และลิงก์คืน URL ต้นทาง
 - `proxy_url` (วิทยุ พอดแคสต์ ลิงก์ภายนอก ยกเว้น HLS) คือลิงก์เซ็นของ `/local/stream` ที่ server ดึงต้นทางแล้วส่งต่อทันทีโดยไม่เก็บ เบราว์เซอร์ใช้เมื่อจำเป็นเท่านั้น: สตรีม `http://` บนหน้า `https://` (mixed content, iPhone Safari), ชนิดไฟล์ที่ `canPlayType` บอกว่าเล่นไม่ได้ หรือเล่นลิงก์ตรงไม่ขึ้น relay รับเฉพาะ http(s) ไปยัง host สาธารณะ (ปฏิเสธ private/loopback/link-local ตรวจทุก redirect), ส่งต่อ content-type/Range, ปฏิเสธที่ไม่ใช่เสียง, เงียบ 30 วินาทีตัด, จำกัด 512 MB หรือ 6 ชั่วโมงต่อครั้ง และพร้อมกันได้ 8 สตรีม
 - ประกาศ พูดสด และตารางเวลาออกที่ลำโพงเสมอ · HLS เล่นได้เฉพาะ Safari (relay ไม่รองรับ HLS) · iOS ต้องแตะก่อนจึงมีเสียง และเล่นเบื้องหลังได้เท่าที่หน้าเว็บยังเล่นอยู่
