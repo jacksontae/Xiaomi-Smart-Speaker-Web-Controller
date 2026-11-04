@@ -6,7 +6,8 @@
 import { h, icon, busy, segmented, toast } from '../ui.js';
 import { register, t } from '../i18n.js';
 import { errorText } from '../api.js';
-import { caption, card, settingRow, switchInput, linkRow, tile, cIcon, phoneBack, fmtWhen } from '../c-kit.js';
+import { caption, card, settingRow, switchInput, linkRow, tile, phoneBack, fmtWhen } from '../kit.js';
+import { glyph } from '../icons.js';
 
 register({
   en: {
@@ -97,7 +98,7 @@ const SEGMENTS = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'prev
 const SEG_DEFAULT = ['interaction', 'selfpromo', 'sponsor'];
 
 export function render(ctx) {
-  ctx.css('views/c-common.css');
+  ctx.css('views/common.css');
   ctx.css('views/settings.css');
   let saved = null;   // last GET/POST result
   let draft = {};     // changed keys only
@@ -150,7 +151,7 @@ export function render(ctx) {
       fieldInput.speaker_ip = ip;
       showFieldErr('speaker_ip', '');
       const found = h('div', { class: 's-found', 'aria-live': 'polite' });
-      const scan = h('button', { type: 'button', class: 'btn tonal wide' }, cIcon('scan', 'sm'), t('set.scan'));
+      const scan = h('button', { type: 'button', class: 'btn tonal wide' }, glyph('scan', 'sm'), t('set.scan'));
       scan.addEventListener('click', () => busy(scan, async () => {
         found.replaceChildren(h('p', { class: 'small' }, t('set.scanning')));
         try {
@@ -211,7 +212,7 @@ export function render(ctx) {
     ];
     const connCard = card(...connRows);
 
-    const appCard = card(linkRow({ href: '#/prefs', title: t('set.app'), sub: t('set.appHelp'), lead: tile(cIcon('phone'), 'plain') }));
+    const appCard = card(linkRow({ href: '#/prefs', title: t('set.app'), sub: t('set.appHelp'), lead: tile(glyph('phone'), 'plain') }));
 
     // phone/iPad read top to bottom in board order (speaker, sound, storage, connection); desktop has two columns
     const sec = (order, ...kids) => h('section', { class: 'c-col', style: { order } }, kids);

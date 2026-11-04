@@ -10,7 +10,7 @@ import { infoTip, copyRow } from '../infotip.js';
 import { register, t } from '../i18n.js';
 import { errorText } from '../api.js';
 import { isPhone } from '../sheet.js';
-import { caption, card, settingRow, switchInput, tile, gMark, linkRow } from '../c-kit.js';
+import { caption, card, settingRow, switchInput, tile, gMark, linkRow } from '../kit.js';
 
 register({
   en: {
@@ -189,7 +189,7 @@ function settingsErr(e, user, users = []) {
 }
 
 export function render(ctx) {
-  ctx.css('views/c-common.css');
+  ctx.css('views/common.css');
   let saved = null;
   let draft = {};
   let users = [];

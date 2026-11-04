@@ -1,4 +1,4 @@
-/* Speaker settings: volume header, LAN scan results, SponsorBlock categories. Cards/rows: c-common.css. */
+/* Speaker settings: volume header, LAN scan results, SponsorBlock categories. Cards/rows: common.css. */
 .s-volhead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .s-pct { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .s-found { display: flex; flex-direction: column; gap: 4px; }

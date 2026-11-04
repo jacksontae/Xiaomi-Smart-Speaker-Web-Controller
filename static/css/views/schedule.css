@@ -1,4 +1,4 @@
-/* Schedule (boards T_Schedule / D_Schedule; the iPhone Announce board's Schedule mode). Shared rows: teamb.css. */
+/* Schedule (boards T_Schedule / D_Schedule; the iPhone Announce board's Schedule mode). Shared rows: media.css. */
 .sc-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; }
 .sc-list { display: flex; flex-direction: column; gap: 18px; }
 .sc-group { display: flex; flex-direction: column; gap: 8px; }

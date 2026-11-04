@@ -1,13 +1,13 @@
 // Announce (boards Announce / T_Announce / D_Announce): "Announce now" (text to speech with language, optional
-// volume and quick phrases) and "Talk live" (browser mic streamed to the speaker, see ../a-talk.js).
+// volume and quick phrases) and "Talk live" (browser mic streamed to the speaker, see ../talk-client.js).
 // "Schedule" is a link to #/schedule (its own page). #/announce/talk opens Talk live directly.
 // Talk live only shows when the server offers it (GET /talk/status -> { available: true }) and for operators.
 import { h, icon, iconBtn, field, segmented, busy } from '../ui.js';
 import { register, t, lang as appLang } from '../i18n.js';
 import { isPhone } from '../sheet.js';
-import { aicon } from '../a-icons.js';
-import { liveTalk, micPermission, askMic, micAllowedHere } from '../a-talk.js';
-import { modeSwitch } from '../a-modeswitch.js';
+import { liveTalk, micPermission, askMic, micAllowedHere } from '../talk-client.js';
+import { modeSwitch } from '../modeswitch.js';
+import { glyph } from '../icons.js';
 
 register({
   en: {
@@ -166,7 +166,7 @@ const coarse = () => matchMedia('(pointer: coarse)').matches;
 const isIos = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
 export async function render(ctx) {
-  await Promise.all([ctx.css('views/announce.css'), ctx.css('views/a-modeswitch.css')]);
+  await Promise.all([ctx.css('views/announce.css'), ctx.css('views/modeswitch.css')]);
   const op = ctx.can('operator');
   let mode = 'say';
   let talkAvail = false;
@@ -223,7 +223,7 @@ export async function render(ctx) {
       volIn.setAttribute('aria-valuetext', v == null ? t('ann.volCurrent') : `${v}%`);
     }
     volIn.addEventListener('input', () => setVol(+volIn.value));
-    const volRow = h('div', { class: 'ann-vol' }, h('span', { class: 'ann-vollbl', 'aria-hidden': 'true' }, aicon('vol-low', 'sm'), t('ann.volume')), volIn, volOut, volReset);
+    const volRow = h('div', { class: 'ann-vol' }, h('span', { class: 'ann-vollbl', 'aria-hidden': 'true' }, glyph('vol-low', 'sm'), t('ann.volume')), volIn, volOut, volReset);
     // the hint is page text (shown once a volume is picked), not a hover label: touch has no hover
     const volHint = h('p', { class: 'small ann-volhint', id: `avh${Date.now().toString(36)}`, hidden: true }, t('ann.volHint'));
     volIn.setAttribute('aria-describedby', volHint.id);
@@ -368,7 +368,7 @@ export async function render(ctx) {
     const meter = h('div', { class: 'tk-meter', role: 'meter', 'aria-label': t('talk.level'), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0' }, meterFill);
     const lockSlot = h('div', { class: 'tk-lockslot' });
     const ring = h('span', { class: 'tk-ring', 'aria-hidden': 'true' });
-    const ptt = h('button', { type: 'button', class: 'tk-ptt', 'aria-pressed': 'false', 'aria-describedby': 'tk-lbl' }, ring, aicon('mic'));
+    const ptt = h('button', { type: 'button', class: 'tk-ptt', 'aria-pressed': 'false', 'aria-describedby': 'tk-lbl' }, ring, glyph('mic'));
     const lbl = h('span', { class: 'tk-lbl', role: 'status' });
     const sub = h('span', { class: 'small tk-sub' });
     const kbd = h('p', { class: 'small tk-kbd' });
@@ -386,7 +386,7 @@ export async function render(ctx) {
     const line = (title, help, extra) => [h('span', { class: 'tk-ltx' }, h('span', { class: 'tk-lt' }, title), h('span', { class: 'small' }, help)), extra];
     const musicHref = ctx.can('admin') ? '#/settings' : '#/help/queue';
     const twoBody = h('div', { class: 'tk-twobody', id: 'tk-two', hidden: true },
-      h('p', { class: 'small' }, t('talk.twoWayBody')), h('p', { class: 'tk-later' }, aicon('clock', 'xs'), t('talk.later')));
+      h('p', { class: 'small' }, t('talk.twoWayBody')), h('p', { class: 'tk-later' }, glyph('clock', 'xs'), t('talk.later')));
     const twoBtn = h('button', { type: 'button', class: 'tk-line tk-twobtn', 'aria-expanded': 'false', 'aria-controls': 'tk-two',
       onclick: () => { twoWay = !twoWay; twoBtn.setAttribute('aria-expanded', String(twoWay)); twoBody.hidden = !twoWay; } },
     line(t('talk.twoWay'), t('talk.twoWaySub'), icon('chev-right', 'sm tk-chev')));
@@ -508,7 +508,7 @@ export async function render(ctx) {
       ptt.setAttribute('aria-pressed', String(active));
       ptt.setAttribute('aria-label', t(active ? 'talk.micStop' : touch ? 'talk.micStartHold' : 'talk.micStart'));
       ptt.disabled = state === 'ending';
-      ptt.replaceChildren(ring, aicon(active ? 'stop' : 'mic', active ? 'tk-stopic' : 'tk-micic'));
+      ptt.replaceChildren(ring, glyph(active ? 'stop' : 'mic', active ? 'tk-stopic' : 'tk-micic'));
       let L = touch ? 'talk.holdToTalk' : 'talk.clickToTalk', S = touch ? 'talk.holdSub' : 'talk.clickSub';
       if (state === 'connecting') { L = 'talk.connecting'; S = 'talk.connectingSub'; }
       if (live) { L = touch ? (locked ? 'talk.tapToEnd' : 'talk.releaseToEnd') : 'talk.clickToEnd'; S = 'talk.liveSub'; }
@@ -517,7 +517,7 @@ export async function render(ctx) {
       lbl.textContent = t(L);
       sub.textContent = t(S);
       lockSlot.replaceChildren(...[
-        active && holding && !locked ? h('span', { class: 'tk-lock' }, aicon('arrow-up', 'xs'), t('talk.slideLock')) : null,
+        active && holding && !locked ? h('span', { class: 'tk-lock' }, glyph('arrow-up', 'xs'), t('talk.slideLock')) : null,
         active && locked && touch ? h('span', { class: 'tk-lock on' }, icon('lock', 'xs'), t('talk.handsFree')) : null].filter(Boolean));
       kbd.hidden = touch || !['idle', 'live'].includes(state);
       kbd.replaceChildren(t('talk.kbdPre'), ' ', h('kbd', {}, 'Space'), ' ', t(live ? 'talk.kbdEnd' : 'talk.kbdStart'));
@@ -532,10 +532,10 @@ export async function render(ctx) {
       if (state === 'http') msg.removeAttribute('role'); else msg.setAttribute('role', 'alert');
       if (state === 'http') {
         const secure = secureUrl();
-        msg.replaceChildren(...box(aicon('unlock'), t('talk.httpTitle'), t('talk.httpBody', location.origin),
+        msg.replaceChildren(...box(glyph('unlock'), t('talk.httpTitle'), t('talk.httpBody', location.origin),
           [secure ? h('a', { class: 'btn primary', href: `${secure}/#/announce/talk` }, t('talk.openSecure', secure)) : h('p', { class: 'small' }, t('talk.askOwner'))]));
       } else if (state === 'denied') {
-        msg.replaceChildren(...box(aicon('mic-off'), t('talk.deniedTitle'), t('talk.deniedBody', host),
+        msg.replaceChildren(...box(glyph('mic-off'), t('talk.deniedTitle'), t('talk.deniedBody', host),
           [h('button', { type: 'button', class: 'btn tonal', 'aria-haspopup': 'dialog', onclick: howTo }, t('talk.howAllow')), tryBtn()]));
       } else {
         const c = info.code;
@@ -550,7 +550,7 @@ export async function render(ctx) {
         if (c === 'forbidden') body = t('err.forbidden', t(`role.${ctx.user.role}`));
         if (c === 'unauthorized') body = t('err.session');
         if (c === 'busy' && info.detail) body = `${info.detail}. ${t('talk.busyBody')}`.replace('.. ', '. ');
-        msg.replaceChildren(...box(aicon(speakerish ? 'vol-x' : 'mic-off'), t(ti), body,
+        msg.replaceChildren(...box(glyph(speakerish ? 'vol-x' : 'mic-off'), t(ti), body,
           [c === 'unsupported' || c === 'forbidden' ? null : tryBtn(), speakerish ? h('a', { class: 'btn tonal', href: '#/help/offline' }, t('talk.offlineHelp')) : null].filter(Boolean)));
       }
     }

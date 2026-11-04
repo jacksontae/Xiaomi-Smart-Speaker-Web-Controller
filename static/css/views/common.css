@@ -1,5 +1,5 @@
 /* Owner/account pages (members, activity, settings, prefs, account, auth): grouped cards, setting rows,
-   captions, badges, two-column layout on desktop. Built by js/c-kit.js. */
+   captions, badges, two-column layout on desktop. Built by js/kit.js. */
 
 .c-cap { margin: 6px 0 -8px 8px; font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--ink-2); }
 .c-card { border-radius: var(--r-lg); background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: var(--glass-hi); overflow: hidden; }

@@ -1,7 +1,7 @@
 // The Announce mode switch, one component for #/announce and #/schedule so it looks and behaves the same on both:
 // Announce now | Talk live | Schedule, one sliding thumb. Talk live shows only for operators when the server
 // offers it (GET /talk/status -> { available: true }); the answer is remembered for the session so moving between
-// the two pages never adds, drops, reorders or resizes a tab. Styles: css/views/a-modeswitch.css.
+// the two pages never adds, drops, reorders or resizes a tab. Styles: css/views/modeswitch.css.
 import { h } from './ui.js';
 import { register, t } from './i18n.js';
 

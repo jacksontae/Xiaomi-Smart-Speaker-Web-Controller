@@ -5,14 +5,14 @@
 // streams, nor a relay before firmware 0.2.0): dragging previews, letting go sends one POST /seek. With "This device"
 // as the output (status.local, local-player.js) it seeks the browser's player directly.
 // The page marks its state in data-np (playing, paused, loading, announce, idle, off): Android tints the player card
-// with it and draws the wavy progress (a-wavy.js), whose wave only moves while playing.
+// with it and draws the wavy progress (wavy.js), whose wave only moves while playing.
 import { h, icon, iconBtn, tip, busy } from '../ui.js';
 import { register, t, fmtDur, fmtRel } from '../i18n.js';
 import { speaker3d } from '../speaker3d.js';
-import { aicon } from '../a-icons.js';
 import { isAndroid } from '../prefs.js';
-import { wavyTrack } from '../a-wavy.js';
+import { wavyTrack } from '../wavy.js';
 import { seek, isDevice } from '../local-player.js';
+import { glyph } from '../icons.js';
 
 register({
   en: {
@@ -124,7 +124,7 @@ const KIND_ICON = { youtube: 'note', radio: 'radio', podcast: 'podcast', file: '
 const REPEAT_NEXT = { off: 'all', all: 'one', one: 'off' };
 const QUEUE_PEEK = 6; // rows shown from the current item before "Show all"
 
-const kindIcon = (kind, cls) => (kind === 'tts' ? icon('announce', cls) : aicon(KIND_ICON[kind] || 'note', cls));
+const kindIcon = (kind, cls) => (kind === 'tts' ? icon('announce', cls) : glyph(KIND_ICON[kind] || 'note', cls));
 
 export async function render(ctx) {
   await Promise.all([ctx.css('speaker3d.css'), ctx.css('views/now.css')]); // styled before first paint
@@ -202,7 +202,7 @@ export async function render(ctx) {
   /* ----- transport ----- */
   // busy while the command is on its way (a round trip through the tunnel, then the speaker): dimmed, no double taps
   const ctl = (name, label, fn, cls = '') => {
-    const b = h('button', { type: 'button', class: `np-b ${cls}`.trim(), 'aria-label': label, onclick: () => busy(b, fn) }, aicon(name, 'lg'));
+    const b = h('button', { type: 'button', class: `np-b ${cls}`.trim(), 'aria-label': label, onclick: () => busy(b, fn) }, glyph(name, 'lg'));
     tip(b, label);
     return b;
   };
@@ -230,7 +230,7 @@ export async function render(ctx) {
   } else {
     volCtl = h('div', { class: 'np-meter', role: 'meter', 'aria-label': t('now.volume'), 'aria-valuemin': '0', 'aria-valuemax': '100' }, h('span'));
   }
-  const volume = h('div', { class: 'np-volume glass', hidden: true }, aicon('vol-low', 'sm'), volCtl, volOut);
+  const volume = h('div', { class: 'np-volume glass', hidden: true }, glyph('vol-low', 'sm'), volCtl, volOut);
   function paintVol(pct) {
     volOut.textContent = `${pct}%`;
     volCtl.style.setProperty('--p', `${pct}%`);
@@ -277,7 +277,7 @@ export async function render(ctx) {
   }
   function setPlayIcon(playing) {
     const label = t(playing ? 'now.pause' : 'now.play');
-    playB.replaceChildren(aicon(playing ? 'pause' : 'play', 'lg'));
+    playB.replaceChildren(glyph(playing ? 'pause' : 'play', 'lg'));
     playB.setAttribute('aria-label', label);
     playB.dataset.on = String(playing); // Android: circle when paused, rounded square while playing
     tip(playB, label);
@@ -376,14 +376,14 @@ export async function render(ctx) {
     const tools = [];
     if (op) {
       const sh = iconBtn('shuffle', '', () => patchQueue({ shuffle: !q.shuffle }), 'np-tool');
-      sh.replaceChildren(aicon('shuffle', 'sm'));
+      sh.replaceChildren(glyph('shuffle', 'sm'));
       sh.setAttribute('aria-pressed', String(!!q.shuffle));
       sh.setAttribute('aria-label', t(q.shuffle ? 'now.shuffleOn' : 'now.shuffleOff'));
       tip(sh, sh.getAttribute('aria-label'));
       const rep = q.repeat || 'off';
       const rLabel = t({ off: 'now.repeatOff', all: 'now.repeatAll', one: 'now.repeatOne' }[rep]);
       const rp = iconBtn('repeat', rLabel, () => patchQueue({ repeat: REPEAT_NEXT[rep] }), 'np-tool');
-      rp.replaceChildren(aicon(rep === 'one' ? 'repeat-one' : 'repeat', 'sm'));
+      rp.replaceChildren(glyph(rep === 'one' ? 'repeat-one' : 'repeat', 'sm'));
       rp.setAttribute('aria-pressed', String(rep !== 'off'));
       tools.push(sh, rp);
     }
@@ -440,7 +440,7 @@ export async function render(ctx) {
     relayBox.hidden = false;
     const ok = r.broker_connected && r.online;
     const rows = [
-      h('div', { class: 'row np-rhead' }, aicon('wifi', 'sm'), h('span', { class: 'np-rlbl' }, t('now.relay')),
+      h('div', { class: 'row np-rhead' }, glyph('wifi', 'sm'), h('span', { class: 'np-rlbl' }, t('now.relay')),
         h('span', { class: ok ? 'np-ok' : 'np-bad' }, t(ok ? 'now.relayOnline' : 'now.relayOffline'))),
     ];
     const notes = [];

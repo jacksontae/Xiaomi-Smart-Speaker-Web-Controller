@@ -118,7 +118,7 @@ button.np-row:hover { background: var(--fill); }
 
 /* ================= Android look (boards A_Now / AT_Now; css/android.css has the tokens) =================
    The pinned title with the speaker chip under it (not in the top bar), one player card whose top band carries a
-   subtle tint of the speaker's state (data-np, set by now.js), wavy progress (js/a-wavy.js), and the transport and
+   subtle tint of the speaker's state (data-np, set by now.js), wavy progress (js/wavy.js), and the transport and
    queue tools as M3 Expressive button groups. Heat: the only loop is the wave's phase, and only while playing. */
 @property --np-tint { syntax: "<color>"; inherits: true; initial-value: transparent; }
 :root[data-os="android"] .now-page {

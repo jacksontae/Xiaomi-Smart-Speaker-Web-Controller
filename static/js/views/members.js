@@ -8,9 +8,10 @@
 import { h, append, icon, iconBtn, field, passwordInput, busy, segmented, tip, toast } from '../ui.js';
 import { register, t, roleLabel } from '../i18n.js';
 import { errorText } from '../api.js';
-import { card, badge, linkRow, tile, switchInput, settingRow, phoneBack, fmtWhen, gMark, toneOf, initialOf, cIcon } from '../c-kit.js';
+import { card, badge, linkRow, tile, switchInput, settingRow, phoneBack, fmtWhen, gMark, toneOf, initialOf } from '../kit.js';
 import { isAndroid } from '../prefs.js';
 import { kitCss, fab, fullDialog } from '../android-kit.js';
+import { glyph } from '../icons.js';
 
 register({
   en: {
@@ -119,7 +120,7 @@ function memErr(e, user) {
 }
 
 export function render(ctx) {
-  ctx.css('views/c-common.css');
+  ctx.css('views/common.css');
   ctx.css('views/members.css');
   kitCss(ctx);
   const me = ctx.user;
@@ -147,7 +148,7 @@ export function render(ctx) {
   const node = h('div', { class: 'page m-page' },
     phoneBack(ctx.header({ title: t('nav.members'), back: { href: '#/account', label: t('nav.account') }, actions })),
     h('div', { class: 'm-grid' }, h('div', { class: 'm-left' }, ...lists, methods), pane));
-  fab(ctx, { icon: cIcon('user-plus'), label: t('mem.add'), onclick: () => addMember(), replaces: plus });
+  fab(ctx, { icon: glyph('user-plus'), label: t('mem.add'), onclick: () => addMember(), replaces: plus });
 
   function load() {
     return ctx.api('/users', { signal: ctx.signal }).then((r) => {
