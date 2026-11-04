@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- This device plays HLS radio through the server: `GET /local/hls` (signed) rewrites the playlist so variant
+  playlists, segments, keys and init sections go through signed relay links. Browsers that can't play HLS say so
+  and point to the speaker, Safari or a recent Chrome.
+- A live stream on This device that ends or drops (including the relay's 6-hour cut) reconnects by itself with a
+  fresh link after 1, 2, 4, 8 and 16 s, at most 5 times in a row; 60 s of playing resets the count.
+
+### Fixed
+- The relay plays SHOUTcast v1 stations that answer `ICY 200 OK`.
+- The relay connects only to the public addresses it checked, so a DNS answer that changes after the check can't
+  point it inside the network (DNS rebinding).
+
+### Docs
+- README.en.md (full English guide) and a language switch on both READMEs. The Thai README gains a schedules API
+  section, Docker first-run steps and limits it was missing, and corrections where it no longer matched the code.
+
 ## [0.5.1] - 2026-11-04
 
 ### Added
