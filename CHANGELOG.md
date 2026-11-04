@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   status `proto` 2.
 
 ### Fixed
+- Leaving Activity while it was still loading could throw a page error (a body read cut short by the page change
+  was treated as an empty answer).
 - Relay firmware: a play onto a cold speaker runs step by step from the main loop, so MQTT, HTTP and status
   keep running while the speaker starts (it used to block for up to ~40 s).
 - On iPad, desktop and iPhone in landscape the scrolled page header is a floating glass bar instead of a flat strip
@@ -29,6 +31,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The relay plays SHOUTcast v1 stations that answer `ICY 200 OK`.
 - The relay connects only to the public addresses it checked, so a DNS answer that changes after the check can't
   point it inside the network (DNS rebinding).
+
+### Changed
+- One icon set for the whole web app (`js/icons.js`); a few icons on Music, Schedule, Help, Settings and Account are
+  redrawn to match the rest. Front-end modules are named for what they do instead of the team that wrote them.
 
 ### Docs
 - README.en.md (full English guide) and a language switch on both READMEs. The Thai README gains a schedules API
