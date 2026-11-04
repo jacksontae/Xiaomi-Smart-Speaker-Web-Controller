@@ -219,7 +219,7 @@ async function load(it, at = 0) {
   retried = at > 0;
   setPhase('BUFFERING');
   let got;
-  try { got = await resolve(it); } catch (e) { if (g === gen) throw e; return; }
+  try { got = await resolve(it); } catch (e) { if (g !== gen) return; throw e; } // a newer load won: stay quiet
   if (g !== gen) return;
   item = { ...it, ...got, title: got.title || it.title || null, thumbnail: got.thumbnail || it.thumbnail || null };
   item.proxied = viaProxy(got);

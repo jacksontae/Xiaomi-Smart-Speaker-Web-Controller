@@ -40,7 +40,9 @@ def add(client, pid, **body):
 
 def test_playlist_crud(client):
     pl = new_playlist(client, "  Morning  ")
-    assert pl["name"] == "Morning" and pl["items"] == [] and set(pl) == {"id", "name", "updated_at", "items"}
+    assert pl["name"] == "Morning" and pl["items"] == []
+    assert set(pl) == {"id", "name", "updated_at", "items", "owner_id", "owner_name", "mine", "can_edit"}
+    assert pl["owner_id"] is None and pl["owner_name"] is None and not pl["mine"] and pl["can_edit"]
     assert client.patch(f"/playlists/{pl['id']}", json={"name": "Evening"}).json()["name"] == "Evening"
     assert client.get(f"/playlists/{pl['id']}").json()["name"] == "Evening"
     assert client.post("/playlists", json={"name": "   "}).status_code == 400
@@ -113,7 +115,8 @@ def test_playlist_summary_list(client, fake_yt):
     assert empty["item_count"] == 0 and empty["total_duration"] == 0 and empty["cover"] is None
     assert full["item_count"] == 3 and full["total_duration"] == 813.5
     assert full["cover"] == "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"
-    assert set(full) == {"id", "name", "item_count", "total_duration", "updated_at", "cover"}
+    assert set(full) == {"id", "name", "item_count", "total_duration", "updated_at", "cover",
+                         "owner_id", "owner_name", "mine", "can_edit"}
 
 
 def test_reorder_and_delete_items(client):
@@ -146,12 +149,13 @@ def test_playlist_item_limit(client, app, monkeypatch):
     assert add(client, pid, kind="tts", source="3").status_code == 409
 
 
-def test_viewer_reads_operator_writes(as_role):
+def test_viewer_reads_shared_operator_writes(as_role):
     op, viewer = as_role("operator"), as_role("viewer")
     pid = new_playlist(op)["id"]
-    assert viewer.get(f"/playlists/{pid}").status_code == 200
-    assert viewer.post("/playlists", json={"name": "x"}).status_code == 403
+    assert viewer.get(f"/playlists/{pid}").json()["can_edit"] is False
     assert viewer.post(f"/playlists/{pid}/items", json={"kind": "tts", "source": "x"}).status_code == 403
+    mine = new_playlist(viewer)  # a viewer's new playlist is their own
+    assert mine["owner_id"] is not None and mine["mine"] and mine["can_edit"]
 
 
 def test_youtube_search(client, fake_yt):

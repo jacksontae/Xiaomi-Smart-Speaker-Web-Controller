@@ -649,6 +649,7 @@ _offline = None  # {"until": loop time, "detail": message of the last unreachabl
 _probe = None  # the background task retrying an offline speaker
 _status_cache = None  # (loop time, (ReceiverState, MediaState)) from the last /status read
 _status_flight = None  # the /status read in progress, awaited by every concurrent poll
+_transport_gen = 0  # bumped when settings replace the transport: a call still on the old one changes nothing
 
 
 def speaker_error_detail(e):
@@ -706,14 +707,16 @@ async def probe_speaker():
 
 async def call_speaker(fn, *args, **kwargs):
     """Run a blocking transport call in a worker thread and keep track of reachability. Hold cast_lock."""
+    gen = _transport_gen
     try:
         result = await asyncio.to_thread(fn, *args, **kwargs)
     except SPEAKER_ERRORS as e:
         detail = speaker_error_detail(e)
-        if isinstance(e, UNREACHABLE_ERRORS):
+        if isinstance(e, UNREACHABLE_ERRORS) and gen == _transport_gen:
             mark_offline(detail)
         raise HTTPException(503, detail) from e
-    mark_online()
+    if gen == _transport_gen:
+        mark_online()
     return result
 
 
@@ -748,8 +751,10 @@ async def _read_speaker_state():
     try:
         async with cast_lock:
             fail_fast()
+            gen = _transport_gen
             state = await call_speaker(lambda: (transport.receiver(), transport.media()))
-            _status_cache = (asyncio.get_running_loop().time(), state)
+            if gen == _transport_gen:
+                _status_cache = (asyncio.get_running_loop().time(), state)
             return state
     finally:
         _status_flight = None
@@ -1370,6 +1375,10 @@ class PlaylistBody(BaseModel):
     name: str
 
 
+class NewPlaylistBody(PlaylistBody):
+    personal: bool = False  # operators and admins: a personal playlist (a viewer's always is)
+
+
 class ItemBody(BaseModel):
     """`source` per kind: youtube = URL/id/words, url/podcast = audio URL, tts = text,
     radio = radio-browser station uuid or stream URL, file = id of an uploaded file."""
@@ -1843,10 +1852,13 @@ async def delete_user(user_id: int, who: Who):
         raise HTTPException(409, "You can't delete yourself")
     target = db.get_user(user_id)
     try:
-        if target is None or not db.delete_user(user_id):
-            raise HTTPException(404, "No such member")
+        stored = db.delete_user(user_id) if target is not None else None
     except Conflict as e:
         raise HTTPException(409, str(e)) from e
+    if stored is None:
+        raise HTTPException(404, "No such member")
+    for name in stored:  # their personal files went with them
+        (MEDIA_DIR / name).unlink(missing_ok=True)
     record(who, "member delete", target["username"])
 
 
@@ -1936,7 +1948,7 @@ async def youtube(body: YoutubeBody, who: Who):
     return {"ok": True, "id": info["id"], "title": info["title"], "duration": info["duration"]}
 
 
-@operator_api.get("/youtube/search")
+@viewer_api.get("/youtube/search")
 async def youtube_search(q: Annotated[str, Query(min_length=1, max_length=200)], limit: int = Query(8, ge=1, le=20)):
     return await asyncio.to_thread(yt_search, q.strip(), limit)
 
@@ -1982,10 +1994,18 @@ async def get_settings():
     return public_settings(settings)
 
 
+async def close_transport(old):
+    async with cast_lock:
+        try:
+            await asyncio.to_thread(old.close)
+        except SPEAKER_ERRORS as e:
+            print(f"closing the old transport failed: {e!r}")
+
+
 @admin_api.post("/settings")
 async def update_settings(changes: dict, background: BackgroundTasks, who: Who):
     """Partial update. Changing the port restarts the process; launchd brings it back up."""
-    global settings, transport
+    global settings, transport, _transport_gen
     if "api_token" in changes:
         raise HTTPException(400, "api_token can't be changed over the API; rotate it with ./speakerctl token --rotate")
     try:
@@ -2007,14 +2027,13 @@ async def update_settings(changes: dict, background: BackgroundTasks, who: Who):
     if (new.transport, new.speaker_ip, new.speaker_name, new.mqtt) != (
         old.transport, old.speaker_ip, old.speaker_name, old.mqtt
     ):
-        async with cast_lock:  # not run_cast: an offline old speaker mustn't block switching to a new one
-            old_transport, transport = transport, make_transport(new)
-            try:
-                await asyncio.to_thread(old_transport.close)
-            except SPEAKER_ERRORS as e:
-                print(f"closing the old transport failed: {e!r}")
+        # Swap at once: a call still waiting on an offline old speaker (up to ~10 s) mustn't hold up the save.
+        # The old transport closes behind that call, and _transport_gen keeps its result out of the new state.
+        old_transport, transport = transport, make_transport(new)
+        _transport_gen += 1
         reset_reachability()  # a new target starts with a clean slate
         transport.start()
+        spawn(close_transport(old_transport))
     restart = new.port != old.port
     if restart:
         background.add_task(lambda: os._exit(0))
@@ -2036,6 +2055,31 @@ async def activity(limit: int = Query(50, ge=1, le=500), before_id: int | None =
     return db.activity(limit, before_id)
 
 
+# --- Personal items: playlists and files with an owner_id are seen only by that member and admins ---
+
+def owns(row, who):
+    return who.user is not None and row["owner_id"] == who.user["id"]
+
+
+def can_see(row, who):
+    """Shared (owner_id NULL), the caller's own, or anything for an admin."""
+    return row["owner_id"] is None or who.role == "admin" or owns(row, who)
+
+
+def personal_owner(who, personal):
+    """owner_id for something new: viewers only make personal items, others when they ask for one."""
+    if not (personal or who.role == "viewer"):
+        return None
+    if who.user is None:
+        raise HTTPException(400, "The API token can't own personal items")
+    return who.user["id"]
+
+
+def with_rights(row, who, can_edit):
+    """The row as sent to this caller: plus `mine` and whether they may change it."""
+    return row | {"mine": owns(row, who), "can_edit": can_edit(row, who)}
+
+
 # --- Playlists ---
 
 def playlist_or_404(playlist):
@@ -2044,33 +2088,62 @@ def playlist_or_404(playlist):
     return playlist
 
 
+def can_edit_playlist(playlist, who):
+    if playlist["owner_id"] is None:
+        return ROLE_RANK[who.role] >= ROLE_RANK["operator"]
+    return who.role == "admin" or owns(playlist, who)
+
+
+def visible_playlist(playlist_id, who):
+    """The playlist if the caller may see it, else 404 (someone else's personal one looks missing)."""
+    playlist = db.get_playlist(playlist_id)
+    if playlist is None or not can_see(playlist, who):
+        raise HTTPException(404, "No such playlist")
+    return playlist
+
+
+def editable_playlist(playlist_id, who):
+    playlist = visible_playlist(playlist_id, who)
+    if not can_edit_playlist(playlist, who):
+        raise HTTPException(403, "Shared playlists need the operator role to change")
+    return playlist
+
+
+def playlist_view(playlist, who):
+    return with_rights(playlist_or_404(playlist), who, can_edit_playlist)
+
+
 @viewer_api.get("/playlists")
-async def list_playlists():
-    return db.list_playlists()
+async def list_playlists(who: Who):
+    return [playlist_view(p, who) for p in db.list_playlists() if can_see(p, who)]
 
 
-@operator_api.post("/playlists")
-async def create_playlist(body: PlaylistBody):
-    return db.create_playlist(clean_text(body.name, "name", 100))
+@viewer_api.post("/playlists")
+async def create_playlist(body: NewPlaylistBody, who: Who):
+    name = clean_text(body.name, "name", 100)
+    return playlist_view(db.create_playlist(name, personal_owner(who, body.personal)), who)
 
 
 @viewer_api.get("/playlists/{playlist_id}")
-async def get_playlist(playlist_id: int):
-    return playlist_or_404(db.get_playlist(playlist_id))
+async def get_playlist(playlist_id: int, who: Who):
+    return playlist_view(visible_playlist(playlist_id, who), who)
 
 
-@operator_api.patch("/playlists/{playlist_id}")
-async def rename_playlist(playlist_id: int, body: PlaylistBody):
-    return playlist_or_404(db.rename_playlist(playlist_id, clean_text(body.name, "name", 100)))
+@viewer_api.patch("/playlists/{playlist_id}")
+async def rename_playlist(playlist_id: int, body: PlaylistBody, who: Who):
+    editable_playlist(playlist_id, who)
+    return playlist_view(db.rename_playlist(playlist_id, clean_text(body.name, "name", 100)), who)
 
 
-@operator_api.delete("/playlists/{playlist_id}", status_code=204)
-async def delete_playlist(playlist_id: int):
+@viewer_api.delete("/playlists/{playlist_id}", status_code=204)
+async def delete_playlist(playlist_id: int, who: Who):
+    editable_playlist(playlist_id, who)
     if not db.delete_playlist(playlist_id):
         raise HTTPException(404, "No such playlist")
 
 
-async def build_item(body):
+async def build_item(body, owner_id=None):
+    """A playlist item from the request; a `file` item must be a file the playlist's owner (None: everyone) sees."""
     title = body.title.strip()[:200] if body.title and body.title.strip() else None
     if body.kind == "youtube":
         meta = await asyncio.to_thread(yt_info, clean_text(body.source, "source", 500))
@@ -2096,7 +2169,7 @@ async def build_item(body):
                 "content_type": audio_type(body.content_type) or guess_audio_type(source)}
     if body.kind == "file":
         row = db.get_file(int(body.source)) if body.source.strip().isdigit() else None
-        if row is None:
+        if row is None or row["owner_id"] not in (None, owner_id):
             raise HTTPException(400, "source must be the id of an uploaded file")
         return {"kind": "file", "source": str(row["id"]), "title": title or row["title"], "duration": row["duration"],
                 "thumbnail": None, "lang": None, "content_type": row["content_type"]}
@@ -2106,34 +2179,36 @@ async def build_item(body):
             "lang": lang}
 
 
-@operator_api.post("/playlists/{playlist_id}/items")
-async def add_item(playlist_id: int, body: ItemBody):
-    playlist_or_404(db.get_playlist(playlist_id))
-    item = await build_item(body)
+@viewer_api.post("/playlists/{playlist_id}/items")
+async def add_item(playlist_id: int, body: ItemBody, who: Who):
+    playlist = editable_playlist(playlist_id, who)
+    item = await build_item(body, playlist["owner_id"])
     try:
         return playlist_or_404(db.add_item(playlist_id, item, MAX_PLAYLIST_ITEMS))
     except Conflict as e:
         raise HTTPException(409, str(e)) from e
 
 
-@operator_api.delete("/playlists/{playlist_id}/items/{item_id}", status_code=204)
-async def delete_item(playlist_id: int, item_id: int):
+@viewer_api.delete("/playlists/{playlist_id}/items/{item_id}", status_code=204)
+async def delete_item(playlist_id: int, item_id: int, who: Who):
+    editable_playlist(playlist_id, who)
     if not db.delete_item(playlist_id, item_id):
         raise HTTPException(404, "No such item in this playlist")
 
 
-@operator_api.put("/playlists/{playlist_id}/order")
-async def reorder_playlist(playlist_id: int, body: OrderBody):
+@viewer_api.put("/playlists/{playlist_id}/order")
+async def reorder_playlist(playlist_id: int, body: OrderBody, who: Who):
+    editable_playlist(playlist_id, who)
     try:
-        return playlist_or_404(db.reorder(playlist_id, body.item_ids))
+        return playlist_view(db.reorder(playlist_id, body.item_ids), who)
     except Conflict as e:
         raise HTTPException(409, str(e)) from e
 
 
 @operator_api.post("/playlists/{playlist_id}/play")
 async def play_playlist(playlist_id: int, body: PlayPlaylistBody, who: Who):
-    return await start_playlist(playlist_or_404(db.get_playlist(playlist_id)), body.start_index, body.shuffle,
-                                body.repeat, who)
+    return await start_playlist(visible_playlist(playlist_id, who), body.start_index, body.shuffle, body.repeat,
+                                who)
 
 
 async def start_playlist(playlist, start_index, shuffle, repeat, who, volume=None):
@@ -2181,7 +2256,7 @@ async def get_queue():
     return _queue.summary() if _queue is not None else None
 
 
-@operator_api.post("/queue/next")
+@viewer_api.post("/queue/next")
 async def queue_next(who: Who):
     q = active_queue()
     if not q.advance(auto=False):
@@ -2189,14 +2264,14 @@ async def queue_next(who: Who):
     return await play_moved(q, who, "next")
 
 
-@operator_api.post("/queue/prev")
+@viewer_api.post("/queue/prev")
 async def queue_prev(who: Who):
     q = active_queue()
     q.back()
     return await play_moved(q, who, "previous")
 
 
-@operator_api.post("/queue/jump")
+@viewer_api.post("/queue/jump")
 async def queue_jump(body: JumpBody, who: Who):
     q = active_queue()
     try:
@@ -2333,7 +2408,7 @@ async def resolve_station(body):
     raise HTTPException(400, "Give a station uuid, a favorite_id, or a url and name")
 
 
-@operator_api.get("/radio/search")
+@viewer_api.get("/radio/search")
 async def search_radio(
     q: Annotated[str, Query(max_length=100)] = "",
     country: Annotated[str, Query(pattern=r"^([A-Za-z]{2})?$")] = "",
@@ -2482,7 +2557,7 @@ def parse_feed(data, limit):
     }
 
 
-@operator_api.get("/podcasts/search")
+@viewer_api.get("/podcasts/search")
 async def search_podcasts(
     q: Annotated[str, Query(min_length=1, max_length=100)],
     country: Annotated[str, Query(pattern=r"^([A-Za-z]{2})?$")] = "",
@@ -2509,7 +2584,7 @@ async def search_podcasts(
     return shows
 
 
-@operator_api.get("/podcasts/episodes")
+@viewer_api.get("/podcasts/episodes")
 async def podcast_episodes(
     feed: Annotated[str, Query(min_length=1, max_length=2000)], limit: int = Query(50, ge=1, le=EPISODES_MAX)
 ):
@@ -2548,26 +2623,35 @@ def sniff_audio(head):
     return None
 
 
-def public_file(row):
-    return {k: v for k, v in row.items() if k != "stored_name"}
+def can_edit_file(row, who):
+    """Admins any file; a personal file its owner; a shared one the operator who uploaded it."""
+    if who.role == "admin" or owns(row, who):
+        return True
+    return (row["owner_id"] is None and ROLE_RANK[who.role] >= ROLE_RANK["operator"]
+            and who.user is not None and row["uploader_id"] == who.user["id"])
 
 
-def file_or_404(file_id):
+def public_file(row, who):
+    return with_rights({k: v for k, v in row.items() if k != "stored_name"}, who, can_edit_file)
+
+
+def file_or_404(file_id, who):
+    """The file if the caller may see it, else 404 (someone else's personal file looks missing)."""
     row = db.get_file(file_id)
-    if row is None:
+    if row is None or not can_see(row, who):
         raise HTTPException(404, "No such file")
     return row
 
 
 def check_file_owner(row, who):
-    if who.role != "admin" and (who.user is None or row["owner_id"] != who.user["id"]):
+    if not can_edit_file(row, who):
         raise HTTPException(403, "Only the member who uploaded this file or an admin can change it")
 
 
 @viewer_api.get("/files")
-async def list_files():
+async def list_files(who: Who):
     return {
-        "items": [public_file(r) for r in db.list_files()],
+        "items": [public_file(r, who) for r in db.list_files() if can_see(r, who)],
         "used": db.files_size(),
         "quota": UPLOAD_QUOTA,
         "max_size": UPLOAD_MAX,
@@ -2575,15 +2659,18 @@ async def list_files():
     }
 
 
-@operator_api.post("/files")
+@viewer_api.post("/files")
 async def upload_file(
     request: Request,
     who: Who,
     name: Annotated[str, Query(min_length=1, max_length=255)],
     duration: Annotated[float | None, Query(ge=0, le=24 * 3600)] = None,
+    personal: bool = False,
 ):
     """The request body is the audio file itself (not a form); `name` is its original file name and
-    `duration` (seconds, optional) what the browser measured. The format is checked from the content."""
+    `duration` (seconds, optional) what the browser measured. The format is checked from the content.
+    A viewer's upload is personal; operators and admins share theirs unless `personal=1`."""
+    owner_id = personal_owner(who, personal)
     declared = request.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > UPLOAD_MAX:
         raise HTTPException(413, f"Files can be at most {UPLOAD_MAX // (1024 * 1024)} MB")
@@ -2613,23 +2700,23 @@ async def upload_file(
         part.unlink(missing_ok=True)
     original = Path(name.replace("\\", "/")).name.strip()[:255] or "upload"
     title = Path(original).stem.strip()[:UPLOAD_TITLE_MAX] or "Untitled"
-    row = db.add_file(stored, title, original, FILE_TYPES[ext], size, duration, who.user and who.user["id"])
+    row = db.add_file(stored, title, original, FILE_TYPES[ext], size, duration, who.user and who.user["id"], owner_id)
     record(who, "file upload", f"{title} ({size // 1024} KB)")
-    return public_file(row)
+    return public_file(row, who)
 
 
-@operator_api.patch("/files/{file_id}")
+@viewer_api.patch("/files/{file_id}")
 async def rename_file(file_id: int, body: FilePatch, who: Who):
-    row = file_or_404(file_id)
+    row = file_or_404(file_id, who)
     check_file_owner(row, who)
     title = clean_text(body.title, "title", UPLOAD_TITLE_MAX)
     record(who, "file rename", f"{row['title']} -> {title}"[:200])
-    return public_file(db.rename_file(file_id, title))
+    return public_file(db.rename_file(file_id, title), who)
 
 
-@operator_api.delete("/files/{file_id}", status_code=204)
+@viewer_api.delete("/files/{file_id}", status_code=204)
 async def delete_file(file_id: int, who: Who):
-    row = file_or_404(file_id)
+    row = file_or_404(file_id, who)
     check_file_owner(row, who)
     if db.delete_file(file_id) is None:
         raise HTTPException(404, "No such file")
@@ -2639,7 +2726,7 @@ async def delete_file(file_id: int, who: Who):
 
 @operator_api.post("/files/{file_id}/play")
 async def play_file(file_id: int, body: FilePlayBody, who: Who):
-    row = file_or_404(file_id)
+    row = file_or_404(file_id, who)
     if not (MEDIA_DIR / row["stored_name"]).is_file():
         raise HTTPException(410, "The file is missing from the server's disk")
     url = media_url(f"/media/{row['stored_name']}")
@@ -2648,7 +2735,7 @@ async def play_file(file_id: int, body: FilePlayBody, who: Who):
 
 # --- This device: play in the browser instead of on the speaker ---
 
-async def local_item(body):
+async def local_item(body, who):
     """A playlist-style item (kind, source, title, lang, thumbnail, duration, content_type) checked like
     build_item, but without the metadata lookups a browser already has; YouTube words or URLs are looked up."""
     title = body.title.strip()[:200] if body.title and body.title.strip() else None
@@ -2666,7 +2753,7 @@ async def local_item(body):
         return {**item, "source": text, "title": title or text[:60], "lang": (body.lang or settings.tts_lang)[:16]}
     if body.kind == "file":
         row = db.get_file(int(body.source)) if body.source.strip().isdigit() else None
-        if row is None:
+        if row is None or not can_see(row, who):
             raise HTTPException(404, "No such file")
         return {**item, "source": str(row["id"]), "title": title or row["title"],
                 "duration": item["duration"] or row["duration"]}
@@ -2687,12 +2774,13 @@ def local_proxy_path(item, url, content_type):
 
 
 @viewer_api.post("/local/resolve")
-async def local_resolve(body: ItemBody):
+async def local_resolve(body: ItemBody, who: Who):
     """A link this browser can play itself when "This device" is its output: the same signed media links the
     speaker gets (relative to this server), or the item's own stream URL plus a relayed one (`proxy_url`).
     The speaker is never contacted. Open to viewers: it plays only on their own device. Not logged here, since
-    a browser also asks ahead for the next track and again when a long pause outlived a link: POST /local/played."""
-    item = await local_item(body)
+    a browser also asks ahead for the next track and again when a long pause outlived a link: POST /local/played.
+    A `file` must be one the caller may see."""
+    item = await local_item(body, who)
     url, content_type = await queue_media(item, sign=media_path)
     if item["kind"] == "youtube":
         await asyncio.to_thread(prune_cache, {Path(urllib.parse.urlsplit(url).path).name})
@@ -2849,8 +2937,9 @@ def next_run_after(schedule, after):
     return None  # unreachable with at least one day
 
 
-def validate_schedule(fields, now):
-    """Normalize a whole schedule (after merging a PATCH) and work out next_run. 400 on anything invalid."""
+def validate_schedule(fields, now, who=None):
+    """Normalize a whole schedule (after merging a PATCH) and work out next_run. 400 on anything invalid.
+    With `who`, the playlist must be one they can see (someone else's personal one counts as unknown)."""
     out = {"name": clean_text(fields.get("name") or "", "name", SCHEDULE_NAME_MAX)}
     out["enabled"] = True if fields.get("enabled") is None else fields["enabled"]
     action = fields.get("action")
@@ -2864,8 +2953,11 @@ def validate_schedule(fields, now):
     else:
         if fields.get("playlist_id") is None:
             raise HTTPException(400, "playlist_id is required for a playlist schedule")
-        if db.get_playlist(fields["playlist_id"]) is None:
+        playlist = db.get_playlist(fields["playlist_id"])
+        if playlist is None or (who is not None and not can_see(playlist, who)):
             raise HTTPException(400, "Unknown playlist")
+        if playlist["owner_id"] is not None:  # it would go, and the schedule stop, when its member is deleted
+            raise HTTPException(400, "Schedules play shared playlists only")
         out["playlist_id"], out["shuffle"] = fields["playlist_id"], bool(fields.get("shuffle"))
         out["text"] = out["lang"] = None
     volume = fields.get("volume")
@@ -2967,7 +3059,7 @@ async def list_schedules():
 
 @operator_api.post("/schedules")
 async def create_schedule(body: ScheduleBody, who: Who):
-    fields = validate_schedule(body.model_dump(), datetime.now(UTC))
+    fields = validate_schedule(body.model_dump(), datetime.now(UTC), who)
     schedule = db.create_schedule(fields, who.user and who.user["id"])
     record(who, "schedule create", schedule["name"])
     return schedule
@@ -2976,7 +3068,9 @@ async def create_schedule(body: ScheduleBody, who: Who):
 @operator_api.patch("/schedules/{schedule_id}")
 async def update_schedule(schedule_id: int, body: ScheduleBody, who: Who):
     current = schedule_or_404(db.get_schedule(schedule_id))
-    fields = validate_schedule(current | body.model_dump(exclude_unset=True), datetime.now(UTC))
+    changes = body.model_dump(exclude_unset=True)
+    picked = changes.get("playlist_id", current["playlist_id"]) != current["playlist_id"]
+    fields = validate_schedule(current | changes, datetime.now(UTC), who if picked else None)
     schedule = schedule_or_404(db.update_schedule(schedule_id, fields))
     record(who, "schedule update", schedule["name"])
     return schedule

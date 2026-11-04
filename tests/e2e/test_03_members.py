@@ -42,7 +42,7 @@ def test_members_desktop_crud(make_app, seeded):
     uname = f"wipa{int(time.time()) % 100000}"
     sheet.get_by_label("Username").fill(uname)
     sheet.get_by_role("radio", name="Viewer").click()
-    expect(sheet.locator(".m-sec .small")).to_contain_text("Can't control the speaker")
+    expect(sheet.locator(".m-sec .small")).to_contain_text("Can't start, stop or announce on the speaker")
     sheet.locator("button[type=submit]").click()
     app.toast("Wipa Test added")
     app.no_sheet()

@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-04
+
+### Added
+- Personal playlists and files (schema 6: `owner_id` on `playlists` and `media_files`, deleted with their member,
+  files on disk too). Viewers create, edit and delete their own playlists and upload their own files; operators and
+  admins make shared ones unless they ask for `personal`. Personal items are seen only by their owner and admins
+  (others get 404); everything from before stays shared. Playlists and files carry `owner_id`, `owner_name`, `mine`
+  and `can_edit`; files also `uploader_id`/`uploader` (the old `owner` field). A playlist's `file` items must be
+  files its owner can see, and `/local/resolve` plays only files the caller can see.
+- Viewers may skip, go back and jump in the speaker's queue (`/queue/next`, `/prev`, `/jump`) and search YouTube,
+  radio and podcasts (`/youtube/search`, `/radio/search`, `/podcasts/search`, `/podcasts/episodes`).
+
+### Changed
+- Viewers on This device may play YouTube tracks the server hasn't saved yet (reverts the cached-only rule).
+- Schedules play shared playlists only (a personal one would go with its member).
+- The web app follows a viewer's output: on the speaker there is no Music page, shared playlists are read-only and
+  previous/next and tapping a queue row work; on This device Music appears, uploads are private and Playlists
+  gains "My playlists". Owners see members' personal playlists and files in their own group.
+
+### Fixed
+- Saving a new speaker name or address no longer waits (up to ~10 s) for a connect to the offline old speaker.
+
 ## [0.5.0] - 2026-11-03
 
 ### Added

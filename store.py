@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 SESSION_TTL = 30 * 24 * 3600
 ACTIVITY_KEEP = 5000
 
@@ -159,6 +159,15 @@ MIGRATIONS = {
             created_at TEXT NOT NULL
         )""",
     ],
+    6: [
+        # Personal playlists and files: owner_id NULL = shared (every row from before), else only that member and
+        # admins see it, and it goes when the member is deleted. media_files.owner_id used to be the uploader.
+        "ALTER TABLE playlists ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE",
+        "CREATE INDEX IF NOT EXISTS playlists_owner ON playlists(owner_id)",
+        "ALTER TABLE media_files RENAME COLUMN owner_id TO uploaded_by",
+        "ALTER TABLE media_files ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE",
+        "CREATE INDEX IF NOT EXISTS media_files_owner ON media_files(owner_id)",
+    ],
 }
 USER_SELECT = "SELECT u.*, EXISTS (SELECT 1 FROM passkeys p WHERE p.user_id = u.id) AS has_passkey FROM users u"
 SCHEDULE_COLUMNS = (
@@ -179,9 +188,13 @@ FAVORITE_SELECT = (
     " f.created_at, u.display_name AS created_by FROM radio_favorites f LEFT JOIN users u ON u.id = f.created_by"
 )
 FILE_SELECT = (
-    "SELECT m.id, m.stored_name, m.title, m.original_name, m.content_type, m.size, m.duration, m.owner_id,"
-    " u.display_name AS owner, m.created_at FROM media_files m LEFT JOIN users u ON u.id = m.owner_id"
+    "SELECT m.id, m.stored_name, m.title, m.original_name, m.content_type, m.size, m.duration,"
+    " m.uploaded_by AS uploader_id, u.display_name AS uploader, m.owner_id, o.display_name AS owner_name,"
+    " m.created_at FROM media_files m LEFT JOIN users u ON u.id = m.uploaded_by"
+    " LEFT JOIN users o ON o.id = m.owner_id"
 )
+PLAYLIST_COLUMNS = "p.id, p.name, p.updated_at, p.owner_id, o.display_name AS owner_name"
+PLAYLIST_FROM = "playlists p LEFT JOIN users o ON o.id = p.owner_id"
 
 
 class Conflict(Exception):
@@ -344,14 +357,24 @@ class Store:
             return _user(db.execute(f"{USER_SELECT} WHERE u.id = ?", (user_id,)).fetchone())
 
     def delete_user(self, user_id):
+        """Delete the member with their personal playlists and files; returns the stored names of those files
+        (for the caller to remove from disk), or None if there is no such member."""
         with self.tx(immediate=True) as db:
             row = db.execute(f"{USER_SELECT} WHERE u.id = ?", (user_id,)).fetchone()
             if row is None:
-                return False
+                return None
             if row["role"] == "admin" and not row["disabled"]:
                 self._check_other_admin(db, user_id)
-            db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-            return True
+            files = db.execute("SELECT id, stored_name FROM media_files WHERE owner_id = ?", (user_id,)).fetchall()
+            db.executemany("DELETE FROM playlist_items WHERE kind = 'file' AND source = ?",
+                           [(str(f["id"]),) for f in files])
+            db.execute(
+                "UPDATE schedules SET enabled = 0, playlist_id = NULL, next_run = NULL"
+                " WHERE playlist_id IN (SELECT id FROM playlists WHERE owner_id = ?)",
+                (user_id,),
+            )
+            db.execute("DELETE FROM users WHERE id = ?", (user_id,))  # cascades to their playlists and files
+            return [f["stored_name"] for f in files]
 
     @staticmethod
     def _check_other_admin(db, user_id):
@@ -488,13 +511,13 @@ class Store:
     def list_playlists(self):
         with self.tx() as db:
             rows = db.execute(
-                """SELECT p.id, p.name, p.updated_at,
+                f"""SELECT {PLAYLIST_COLUMNS},
                           (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id) AS item_count,
                           (SELECT COALESCE(SUM(duration), 0) FROM playlist_items i WHERE i.playlist_id = p.id)
                               AS total_duration,
                           (SELECT thumbnail FROM playlist_items i WHERE i.playlist_id = p.id
                               AND thumbnail IS NOT NULL ORDER BY position, id LIMIT 1) AS cover
-                   FROM playlists p ORDER BY p.name COLLATE NOCASE, p.id"""
+                   FROM {PLAYLIST_FROM} ORDER BY p.name COLLATE NOCASE, p.id"""
             ).fetchall()
         return [dict(r) | {"total_duration": float(r["total_duration"])} for r in rows]
 
@@ -502,7 +525,7 @@ class Store:
         if db is None:
             with self.tx() as db:
                 return self.get_playlist(playlist_id, db)
-        row = db.execute("SELECT id, name, updated_at FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+        row = db.execute(f"SELECT {PLAYLIST_COLUMNS} FROM {PLAYLIST_FROM} WHERE p.id = ?", (playlist_id,)).fetchone()
         if row is None:
             return None
         items = db.execute(
@@ -510,10 +533,14 @@ class Store:
         ).fetchall()
         return dict(row) | {"items": [dict(i) for i in items]}
 
-    def create_playlist(self, name):
+    def create_playlist(self, name, owner_id=None):
+        """A shared playlist, or with owner_id a personal one of that member."""
         now = now_iso()
         with self.tx() as db:
-            cur = db.execute("INSERT INTO playlists (name, created_at, updated_at) VALUES (?, ?, ?)", (name, now, now))
+            cur = db.execute(
+                "INSERT INTO playlists (name, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (name, owner_id, now, now),
+            )
             return self.get_playlist(cur.lastrowid, db)
 
     def rename_playlist(self, playlist_id, name):
@@ -696,12 +723,13 @@ class Store:
         with self.tx() as db:
             return db.execute("SELECT COALESCE(SUM(size), 0) FROM media_files").fetchone()[0]
 
-    def add_file(self, stored_name, title, original_name, content_type, size, duration, owner_id):
+    def add_file(self, stored_name, title, original_name, content_type, size, duration, uploader_id, owner_id=None):
+        """A shared file, or with owner_id a personal one of that member."""
         with self.tx() as db:
             cur = db.execute(
-                "INSERT INTO media_files (stored_name, title, original_name, content_type, size, duration, owner_id,"
-                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (stored_name, title, original_name, content_type, size, duration, owner_id, now_iso()),
+                "INSERT INTO media_files (stored_name, title, original_name, content_type, size, duration,"
+                " uploaded_by, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (stored_name, title, original_name, content_type, size, duration, uploader_id, owner_id, now_iso()),
             )
             return self.get_file(cur.lastrowid, db)
 
