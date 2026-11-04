@@ -36,6 +36,7 @@ class CastClient {
     bool stop(String& err);
     bool pause(String& err);
     bool resume(String& err);
+    bool seek(float position, String& err);
     bool refresh(String& err);
     void status(JsonObject out) const;
     // Bumped whenever the app, player state, idle reason, track or volume changes; lets the

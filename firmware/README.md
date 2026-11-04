@@ -62,6 +62,7 @@ The same JSON works over HTTP and MQTT. HTTP bodies must be sent with `Content-T
 | `POST /api/play` `{"url":"…","content_type":"audio/mpeg","title":"…","volume":0.4,"position":12.5}` | `{"cmd":"play",…}` | Launch the Default Media Receiver and play the URL |
 | `POST /api/volume` `{"level":0.3}` | `{"cmd":"volume","level":0.3}` | Set volume 0–1 |
 | `POST /api/pause` · `/api/resume` · `/api/stop` | `{"cmd":"pause"}` … | Playback control |
+| `POST /api/seek` `{"position":42}` | `{"cmd":"seek","position":42}` | Jump to a position in seconds (not live streams); from 0.2.0, `proto` 2 |
 
 ```bash
 TOKEN=...   # from the setup page
@@ -76,7 +77,7 @@ and heartbeats keep running (a cold start takes a few seconds; each step has its
 40 s in all). The result is sent once the speaker has accepted the LOAD (or the play failed): over MQTT
 on `<base>/result` with the command's `id`, over HTTP as the response to `POST /api/play`, which waits
 for it (other HTTP requests queue meanwhile; MQTT is still served). One play runs at a time: `play`,
-`pause` and `resume` sent while one is starting fail with `a play is still starting; try again`,
+`pause`, `resume` and `seek` sent while one is starting fail with `a play is still starting; try again`,
 `stop` cancels it (its result is `cancelled by stop`), `volume` and `status` work as usual (`status`
 answers from the cached state). Finding and connecting to the speaker the first time still blocks
 briefly (mDNS lookup and TLS handshake).

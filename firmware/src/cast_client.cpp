@@ -406,6 +406,15 @@ bool CastClient::resume(String& err) {
     return request(transportId_.c_str(), NS_MEDIA, doc, 5000, err);
 }
 
+bool CastClient::seek(float position, String& err) {
+    if (!ensureMediaSession(err)) return false;
+    JsonDocument doc;
+    doc["type"] = "SEEK";
+    doc["mediaSessionId"] = mediaSessionId_;
+    doc["currentTime"] = position;
+    return request(transportId_.c_str(), NS_MEDIA, doc, 5000, err);
+}
+
 void CastClient::loop() {
     if (tls_.connected()) {
         castmsg::Message m;

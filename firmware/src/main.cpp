@@ -3,7 +3,7 @@
 // Commands arrive over HTTP (POST /api/<cmd>, Bearer token) or MQTT (<base>/cmd) and use one
 // JSON shape: {"cmd": "play", "url": "...", "content_type": "audio/mpeg", "title": "...",
 //              "volume": 0.4, "position": 12.5} · {"cmd": "volume", "level": 0.3}
-//             · {"cmd": "stop" | "pause" | "resume" | "status"}
+//             · {"cmd": "seek", "position": 42.0} · {"cmd": "stop" | "pause" | "resume" | "status"}
 // Audio URLs must be reachable by the speaker; this board never touches the audio itself.
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -26,7 +26,7 @@ static const int kResetPin = 0;  // BOOT button: hold while powering on to wipe 
 static const uint32_t kWifiTimeoutMs = 20000;
 static const uint32_t kStatusEveryMs = 30000;
 static const uint32_t kStatusMinGapMs = 1000;  // on-change status is rate-limited to one per second
-static const int kProtocol = 1;               // bump when the MQTT JSON shape changes
+static const int kProtocol = 2;               // bump when the MQTT JSON shape changes (2: "seek")
 
 Config config;
 CastClient cast;
@@ -137,7 +137,7 @@ static Run runCommand(JsonVariantConst in, JsonDocument& out, String& err) {
         return Run::Ok;
     }
     // pendingPlay stays active until its waiter has taken the result, so a new play can't overwrite it
-    if ((cast.playPending() || pendingPlay.active) && (cmd == "play" || cmd == "pause" || cmd == "resume")) {
+    if ((cast.playPending() || pendingPlay.active) && (cmd == "play" || cmd == "pause" || cmd == "resume" || cmd == "seek")) {
         err = "a play is still starting; try again";
         return Run::Failed;
     }
@@ -168,6 +168,13 @@ static Run runCommand(JsonVariantConst in, JsonDocument& out, String& err) {
         ok = cast.pause(err);
     } else if (cmd == "resume") {
         ok = cast.resume(err);
+    } else if (cmd == "seek") {
+        float position = in["position"] | -1.0f;
+        if (position < 0) {
+            err = "position must be 0 or more seconds";
+            return Run::Failed;
+        }
+        ok = cast.seek(position, err);
     } else {
         err = "unknown cmd \"" + cmd + "\"";
         return Run::Failed;
@@ -335,6 +342,7 @@ static void startApi() {
     server.on("/api/stop", HTTP_POST, [] { handleCommand("stop"); });
     server.on("/api/pause", HTTP_POST, [] { handleCommand("pause"); });
     server.on("/api/resume", HTTP_POST, [] { handleCommand("resume"); });
+    server.on("/api/seek", HTTP_POST, [] { handleCommand("seek"); });
     server.on("/api/config", HTTP_GET, handleGetConfig);
     server.on("/api/config", HTTP_POST, handleSetConfig);
     server.on("/api/token/rotate", HTTP_POST, handleRotateToken);
