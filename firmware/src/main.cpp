@@ -3,7 +3,7 @@
 // Commands arrive over HTTP (POST /api/<cmd>, Bearer token) or MQTT (<base>/cmd) and use one
 // JSON shape: {"cmd": "play", "url": "...", "content_type": "audio/mpeg", "title": "...",
 //              "volume": 0.4, "position": 12.5} · {"cmd": "volume", "level": 0.3}
-//             · {"cmd": "stop" | "pause" | "resume" | "status"}
+//             · {"cmd": "seek", "position": 42.0} · {"cmd": "stop" | "pause" | "resume" | "status"}
 // Audio URLs must be reachable by the speaker; this board never touches the audio itself.
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -26,7 +26,7 @@ static const int kResetPin = 0;  // BOOT button: hold while powering on to wipe 
 static const uint32_t kWifiTimeoutMs = 20000;
 static const uint32_t kStatusEveryMs = 30000;
 static const uint32_t kStatusMinGapMs = 1000;  // on-change status is rate-limited to one per second
-static const int kProtocol = 1;               // bump when the MQTT JSON shape changes
+static const int kProtocol = 2;               // bump when the MQTT JSON shape changes (2: "seek")
 
 Config config;
 CastClient cast;
@@ -47,6 +47,16 @@ uint32_t lastMqttTry = 0;
 uint32_t lastStatus = 0;
 uint32_t statusSeq = 0;
 uint32_t publishedChanges = 0;
+
+// The play that CastClient is still driving (one at a time) and who waits for its result.
+struct PendingPlay {
+    bool active = false;
+    bool viaHttp = false;  // an HTTP handler waits for it; otherwise the result goes to <base>/result
+    String id;             // MQTT "id", as serialized JSON
+    bool done = false;     // HTTP only: the result has arrived
+    bool ok = false;
+    String err;
+} pendingPlay;
 
 // ---------- speaker ----------
 
@@ -110,34 +120,46 @@ static bool ensureSpeaker(String& err) {
 
 static void speakerStatus(JsonObject out) {
     String err;
-    if (ensureSpeaker(err)) cast.refresh(err);
+    // While a play is starting, the cached state is fresh anyway (every frame is absorbed in loop()).
+    if (!cast.playPending() && ensureSpeaker(err)) cast.refresh(err);
     cast.status(out);
     if (err.length()) out["error"] = err;
 }
 
 // ---------- commands (shared by HTTP and MQTT) ----------
 
-static bool runCommand(JsonVariantConst in, JsonDocument& out, String& err) {
+enum class Run { Failed, Ok, Pending };  // Pending: a play started; its result comes from loop()
+
+static Run runCommand(JsonVariantConst in, JsonDocument& out, String& err) {
     String cmd = in["cmd"] | "";
     if (cmd == "status") {
         speakerStatus(out["speaker"].to<JsonObject>());
-        return true;
+        return Run::Ok;
     }
-    if (!ensureSpeaker(err)) return false;
+    // pendingPlay stays active until its waiter has taken the result, so a new play can't overwrite it
+    if ((cast.playPending() || pendingPlay.active) && (cmd == "play" || cmd == "pause" || cmd == "resume" || cmd == "seek")) {
+        err = "a play is still starting; try again";
+        return Run::Failed;
+    }
+    if (cmd == "stop") cast.cancelPlay("cancelled by stop");
+    if (!ensureSpeaker(err)) return Run::Failed;
     bool ok;
     if (cmd == "play") {
         String url = in["url"] | "";
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
             err = "url must be an http(s) URL";
-            return false;
+            return Run::Failed;
         }
-        if (!in["volume"].isNull() && !cast.setVolume(in["volume"].as<float>(), err)) return false;
-        ok = cast.play(url, in["content_type"] | "audio/mpeg", in["title"] | "", in["position"] | -1.0f, err);
+        float volume = in["volume"].isNull() ? -1.0f : constrain(in["volume"].as<float>(), 0.0f, 1.0f);
+        return cast.startPlay(url, in["content_type"] | "audio/mpeg", in["title"] | "", in["position"] | -1.0f,
+                              volume, err)
+                   ? Run::Pending
+                   : Run::Failed;
     } else if (cmd == "volume") {
         float level = in["level"] | -1.0f;
         if (level < 0 || level > 1) {
             err = "level must be between 0 and 1";
-            return false;
+            return Run::Failed;
         }
         ok = cast.setVolume(level, err);
     } else if (cmd == "stop") {
@@ -146,12 +168,19 @@ static bool runCommand(JsonVariantConst in, JsonDocument& out, String& err) {
         ok = cast.pause(err);
     } else if (cmd == "resume") {
         ok = cast.resume(err);
+    } else if (cmd == "seek") {
+        float position = in["position"] | -1.0f;
+        if (position < 0) {
+            err = "position must be 0 or more seconds";
+            return Run::Failed;
+        }
+        ok = cast.seek(position, err);
     } else {
         err = "unknown cmd \"" + cmd + "\"";
-        return false;
+        return Run::Failed;
     }
     if (ok) cast.status(out["speaker"].to<JsonObject>());
-    return ok;
+    return ok ? Run::Ok : Run::Failed;
 }
 
 // ---------- HTTP ----------
@@ -199,6 +228,8 @@ static bool readBody(JsonDocument& doc) {
     return true;
 }
 
+static void serviceWhileWaiting();
+
 static void handleCommand(const char* cmd) {
     if (!authorized()) return;
     JsonDocument in;
@@ -206,7 +237,19 @@ static void handleCommand(const char* cmd) {
     in["cmd"] = cmd;
     JsonDocument out;
     String err;
-    bool ok = runCommand(in.as<JsonVariantConst>(), out, err);
+    Run run = runCommand(in.as<JsonVariantConst>(), out, err);
+    bool ok = run == Run::Ok;
+    if (run == Run::Pending) {
+        // WebServer answers inside this handler, so wait here, but keep Cast, MQTT and status running.
+        // Other HTTP clients queue until the play is done (at most ~40 s).
+        pendingPlay = PendingPlay();
+        pendingPlay.active = pendingPlay.viaHttp = true;
+        while (!pendingPlay.done) serviceWhileWaiting();
+        ok = pendingPlay.ok;
+        err = pendingPlay.err;
+        pendingPlay = PendingPlay();
+        if (ok) cast.status(out["speaker"].to<JsonObject>());
+    }
     out["ok"] = ok;
     if (!ok) out["error"] = err;
     sendJson(ok ? 200 : 503, out);
@@ -299,6 +342,7 @@ static void startApi() {
     server.on("/api/stop", HTTP_POST, [] { handleCommand("stop"); });
     server.on("/api/pause", HTTP_POST, [] { handleCommand("pause"); });
     server.on("/api/resume", HTTP_POST, [] { handleCommand("resume"); });
+    server.on("/api/seek", HTTP_POST, [] { handleCommand("seek"); });
     server.on("/api/config", HTTP_GET, handleGetConfig);
     server.on("/api/config", HTTP_POST, handleSetConfig);
     server.on("/api/token/rotate", HTTP_POST, handleRotateToken);
@@ -426,10 +470,41 @@ static void onMqtt(char*, byte* payload, unsigned int len) {
     } else {
         out["id"] = in["id"];
         out["version"] = RELAY_VERSION;
-        bool ok = runCommand(in.as<JsonVariantConst>(), out, err);
-        out["ok"] = ok;
-        if (!ok) out["error"] = err;
+        Run run = runCommand(in.as<JsonVariantConst>(), out, err);
+        if (run == Run::Pending) {
+            // answered from deliverPlayResult() once the speaker has taken the LOAD (or the play failed)
+            pendingPlay = PendingPlay();
+            pendingPlay.active = true;
+            serializeJson(in["id"], pendingPlay.id);
+            return;
+        }
+        out["ok"] = run == Run::Ok;
+        if (run == Run::Failed) out["error"] = err;
     }
+    publishJson(config.baseTopic() + "/result", out);
+}
+
+// Hands a finished play's result to whoever started it.
+static void deliverPlayResult() {
+    bool ok;
+    String err;
+    if (!cast.takePlayResult(ok, err)) return;
+    if (!pendingPlay.active) return;  // nobody waits for it
+    if (pendingPlay.viaHttp) {
+        pendingPlay.done = true;
+        pendingPlay.ok = ok;
+        pendingPlay.err = err;
+        return;
+    }
+    JsonDocument out;
+    out["id"] = serialized(pendingPlay.id);
+    out["version"] = RELAY_VERSION;
+    out["ok"] = ok;
+    if (ok)
+        cast.status(out["speaker"].to<JsonObject>());
+    else
+        out["error"] = err;
+    pendingPlay = PendingPlay();
     publishJson(config.baseTopic() + "/result", out);
 }
 
@@ -481,7 +556,7 @@ static void setupMqtt() {
     }
     mqtt.setServer(config.mqttHost.c_str(), config.mqttPort);
     mqtt.setBufferSize(2048);
-    mqtt.setKeepAlive(60);  // a cold play can block the callback ~40 s; the 15 s default drops the session
+    mqtt.setKeepAlive(60);  // finding and connecting to the speaker still blocks for up to ~15 s
     mqtt.setCallback(onMqtt);
 }
 
@@ -600,6 +675,17 @@ void loop() {
     mdnsUpdate();
     server.handleClient();
     cast.loop();
+    deliverPlayResult();
     loopMqtt();
     publishStatus();
+}
+
+// loop() minus the web server (its handler is what is waiting), for an HTTP play in progress.
+static void serviceWhileWaiting() {
+    mdnsUpdate();
+    cast.loop();
+    deliverPlayResult();
+    loopMqtt();
+    publishStatus();
+    delay(2);  // feeds the ESP8266 watchdog and lets Wi-Fi run
 }

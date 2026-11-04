@@ -9,7 +9,7 @@ fetches it (from the speaker service or the cloud).
 [server / cloud] --MQTT or HTTP--> [ESP32 relay] --Cast (TLS :8009)--> [speaker] --HTTP--> audio URL
 ```
 
-> **Status:** builds for `esp32dev`, `esp32-s3` and `esp8266` (D1 mini / NodeMCU); the Cast codec has
+> **Status:** builds for `esp32dev`, `esp32-s3` and `esp8266` (D1 mini / NodeMCU); the Cast codec and the play state machine have
 > host unit tests. Tested on an ESP32-D0WDQ6 (`esp32dev`) with a Xiaomi Mi Smart Speaker over MQTT:
 > status, volume, play, pause/resume/stop, and the speaker service's announcements, YouTube and
 > resume-after-announcement, over plain MQTT and over MQTT on WebSocket (Mosquitto `ws://`). ESP32-S3 and ESP8266 are not yet tested on hardware.
@@ -22,7 +22,7 @@ Needs [PlatformIO](https://platformio.org/install/cli).
 cd firmware
 pio run -e esp32dev -t upload     # or -e esp32-s3, -e esp8266
 pio device monitor                # 115200 baud
-pio test -e native                # codec tests on your computer
+pio test -e native                # codec and play-state tests on your computer
 ```
 
 ## ESP32 or ESP8266?
@@ -62,6 +62,7 @@ The same JSON works over HTTP and MQTT. HTTP bodies must be sent with `Content-T
 | `POST /api/play` `{"url":"…","content_type":"audio/mpeg","title":"…","volume":0.4,"position":12.5}` | `{"cmd":"play",…}` | Launch the Default Media Receiver and play the URL |
 | `POST /api/volume` `{"level":0.3}` | `{"cmd":"volume","level":0.3}` | Set volume 0–1 |
 | `POST /api/pause` · `/api/resume` · `/api/stop` | `{"cmd":"pause"}` … | Playback control |
+| `POST /api/seek` `{"position":42}` | `{"cmd":"seek","position":42}` | Jump to a position in seconds (not live streams); from 0.2.0, `proto` 2 |
 
 ```bash
 TOKEN=...   # from the setup page
@@ -69,6 +70,17 @@ curl -X POST http://speaker-relay.local/api/play -H "Authorization: Bearer $TOKE
   -H "Content-Type: application/json" \
   -d '{"url":"http://192.0.2.20:8090/yt/abc.m4a?exp=…&sig=…","content_type":"audio/mp4"}'
 ```
+
+`play` never blocks the board: when the speaker has no app running, the relay launches the Default
+Media Receiver, waits for it, connects and sends the LOAD step by step from its main loop, so MQTT, status
+and heartbeats keep running (a cold start takes a few seconds; each step has its own time limit, about
+40 s in all). The result is sent once the speaker has accepted the LOAD (or the play failed): over MQTT
+on `<base>/result` with the command's `id`, over HTTP as the response to `POST /api/play`, which waits
+for it (other HTTP requests queue meanwhile; MQTT is still served). One play runs at a time: `play`,
+`pause`, `resume` and `seek` sent while one is starting fail with `a play is still starting; try again`,
+`stop` cancels it (its result is `cancelled by stop`), `volume` and `status` work as usual (`status`
+answers from the cached state). Finding and connecting to the speaker the first time still blocks
+briefly (mDNS lookup and TLS handshake).
 
 Over MQTT, add an `"id"` to match replies: results go to `<base>/result` (with the firmware `version`),
 a retained status is published to `<base>/status` every 30 s and within a second of any change (app,
