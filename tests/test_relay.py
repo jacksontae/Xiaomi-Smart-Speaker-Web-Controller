@@ -55,6 +55,8 @@ class FakeRelay:
             media["state"] = "PAUSED"
         elif kind == "resume":
             media["state"] = "PLAYING"
+        elif kind == "seek":
+            media["position"] = cmd["position"]
         elif kind == "stop":
             self.speaker["app"] = ""
             media["state"] = ""
@@ -532,3 +534,18 @@ def test_settings_api_merges_mqtt_and_masks_password(client, app, monkeypatch):
     assert client.post("/settings", json={"transport": "mqtt", "mqtt": {"host": ""}}).status_code == 422
     assert client.post("/settings", json={"default_volume": 0.3}).status_code == 200
     assert built == ["mqtt", "mqtt"]  # unrelated changes don't rebuild the transport
+
+
+def test_seek_needs_relay_protocol_2(relay_app, client, relay, mqtt_transport):
+    t = mqtt_transport
+    asyncio.run(relay_app.run_cast(relay_app.cast_play, relay_app.media_url("/yt/abc.m4a"), "audio/mp4", "Song"))
+    relay.speaker["media"]["duration"] = 200
+    t.fake.deliver("status", {"proto": 1, "speaker": relay.speaker})
+    assert client.get("/status").json()["media"]["seekable"] is False
+    r = client.post("/seek", json={"position": 60})
+    assert r.status_code == 409 and "0.2.0" in r.json()["detail"]
+    t.fake.deliver("status", {"proto": 2, "speaker": relay.speaker})
+    assert client.post("/seek", json={"position": 60}).status_code == 200
+    assert relay.speaker["media"]["position"] == 60
+    media = client.get("/status").json()["media"]
+    assert media["seekable"] is True and media["position"] >= 60

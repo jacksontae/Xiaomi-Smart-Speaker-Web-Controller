@@ -1399,6 +1399,10 @@ class VolumeBody(BaseModel):
     level: float
 
 
+class SeekBody(BaseModel):
+    position: float
+
+
 class SetupBody(BaseModel):
     api_token: str
     username: str
@@ -2003,6 +2007,9 @@ async def status(who: Who):
             "state": m.player_state,
             "duration": m.duration,
             "position": round(m.adjusted_current_time, 1) if m.current_time is not None else None,
+            # live streams have no duration; a relay before firmware 0.2.0 can't seek
+            "seekable": bool(m.duration) and m.player_state in ("PLAYING", "PAUSED", "BUFFERING")
+                        and transport.can_seek(),
             "thumbnail": thumbnail_for(m.content_id),
         },
         "resume_pending": _resume and _resume["title"],
@@ -2090,6 +2097,17 @@ async def pause():
 async def resume():
     await run_cast(transport.resume)
     return {"ok": True}
+
+
+@operator_api.post("/seek")
+async def seek(body: SeekBody):
+    """Jump to `position` seconds in what the speaker is playing (not live streams)."""
+    if not 0 <= body.position < 86400:
+        raise HTTPException(400, "position must be between 0 and 86400 seconds")
+    if not transport.can_seek():
+        raise HTTPException(409, "The relay's firmware can't seek; update it to 0.2.0 or later")
+    await run_cast(transport.seek, body.position)
+    return {"ok": True, "position": body.position}
 
 
 async def stop_everything():
