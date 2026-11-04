@@ -1934,6 +1934,52 @@ async def delete_user(user_id: int, who: Who):
     record(who, "member delete", target["username"])
 
 
+# Owner reset: take back a lost phone's passkey or a Google account that isn't the member's any more.
+# Members add these themselves in Account (/me/...); each removal signs the member out of every device.
+
+def reset_target(user_id, who):
+    if who.user is not None and who.user["id"] == user_id:
+        raise HTTPException(409, "Use Account to change your own sign-in methods")
+    target = db.get_user(user_id)
+    if target is None:
+        raise HTTPException(404, "No such member")
+    return target
+
+
+@admin_api.get("/users/{user_id}/passkeys")
+async def member_passkeys(user_id: int):
+    if db.get_user(user_id) is None:
+        raise HTTPException(404, "No such member")
+    return db.list_passkeys(user_id)
+
+
+@admin_api.delete("/users/{user_id}/passkeys/{passkey_id}", status_code=204)
+async def remove_member_passkey(user_id: int, passkey_id: int, who: Who):
+    target = reset_target(user_id, who)
+    names = {p["id"]: p["name"] for p in db.list_passkeys(user_id)}
+    try:  # never leave them with no way in: set a new password for them first
+        gone = db.delete_passkey(user_id, passkey_id, keep_one=not sign_in_methods(target) - {"passkey"})
+    except Conflict as e:
+        raise HTTPException(409, "This is their only way to sign in; set a new password for them first") from e
+    if not gone:
+        raise HTTPException(404, "No such passkey")
+    db.delete_sessions(user_id)
+    record(who, "member update", f"{target['username']}: removed passkey {names.get(passkey_id)}")
+
+
+@admin_api.delete("/users/{user_id}/google")
+async def unlink_member_google(user_id: int, who: Who):
+    target = reset_target(user_id, who)
+    if not target["google_email"]:
+        raise HTTPException(404, "No Google account is linked")
+    if not sign_in_methods(target) - {"google"}:
+        raise HTTPException(409, "This is their only way to sign in; set a new password for them first")
+    user = db.unlink_google(user_id)
+    db.delete_sessions(user_id)
+    record(who, "member update", f"{target['username']}: unlinked Google {target['google_email']}")
+    return user
+
+
 # --- Player ---
 
 @viewer_api.get("/status")

@@ -28,6 +28,15 @@ register({
     'mem.viaPw': (u) => `Signs in with the username ${u} and a password.`,
     'mem.viaGoogle': (e) => `Can also sign in with Google (${e}).`,
     'mem.selfLinks': 'Members link Google and add passkeys themselves in Account.',
+    'mem.resetNote': 'Members link Google and add passkeys themselves in Account. Remove one here if a phone is lost or the Google account isn’t theirs any more; they get signed out of every device.',
+    'mem.gLine': (e) => `Google · ${e}`, 'mem.pkLine': (n, w) => `Passkey ${n} · ${w}`,
+    'mem.pkUsed': (w) => `last used ${w}`, 'mem.pkNever': 'not used yet',
+    'mem.unlink': 'Unlink', 'mem.remove': 'Remove', 'mem.keepIt': 'Keep',
+    'mem.gAsk': (n) => `Unlink Google from ${n}? ${n} gets signed out of every device, can still sign in with the password, and can link Google again in Account.`,
+    'mem.pkAsk': (n, pk) => `Remove the ${pk} passkey from ${n}? ${n} gets signed out of every device and can add a new passkey in Account.`,
+    'mem.gDone': (n) => `Unlinked Google from ${n} and signed them out of every device.`,
+    'mem.pkDone': (n, pk) => `Removed ${n}’s ${pk} passkey and signed them out of every device.`,
+    'mem.errOnlyWay': 'That’s their only way to sign in. Set a new password for them first.',
     'mem.disable': 'Disable account', 'mem.disableOff': 'Blocks sign-in and signs them out of every device right away.',
     'mem.disableOn': 'Disabled. They can\'t sign in until you turn this off.',
     'mem.setPw': 'Set a new password', 'mem.setPwBtn': 'Set new password', 'mem.newPwPh': 'New password, at least 8 characters',
@@ -62,6 +71,15 @@ register({
     'mem.viaPw': (u) => `เข้าด้วยชื่อผู้ใช้ ${u} และรหัสผ่าน`,
     'mem.viaGoogle': (e) => `เข้าด้วย Google ได้ด้วย (${e})`,
     'mem.selfLinks': 'สมาชิกเชื่อม Google และเพิ่มพาสคีย์เองได้ในหน้าบัญชี',
+    'mem.resetNote': 'สมาชิกเชื่อม Google และเพิ่มพาสคีย์เองได้ในหน้าบัญชี · ลบที่นี่ได้เมื่อโทรศัพท์หายหรือบัญชี Google ไม่ใช่ของเขาแล้ว สมาชิกจะออกจากระบบทุกเครื่อง',
+    'mem.gLine': (e) => `Google · ${e}`, 'mem.pkLine': (n, w) => `พาสคีย์ ${n} · ${w}`,
+    'mem.pkUsed': (w) => `ใช้ล่าสุด${w}`, 'mem.pkNever': 'ยังไม่เคยใช้',
+    'mem.unlink': 'ยกเลิกการเชื่อม', 'mem.remove': 'ลบ', 'mem.keepIt': 'เก็บไว้',
+    'mem.gAsk': (n) => `ยกเลิกการเชื่อม Google ของ ${n}? ${n} จะถูกออกจากระบบทุกเครื่อง ยังเข้าด้วยรหัสผ่านได้ และเชื่อม Google ใหม่เองได้ในหน้าบัญชี`,
+    'mem.pkAsk': (n, pk) => `ลบพาสคีย์ ${pk} ของ ${n}? ${n} จะถูกออกจากระบบทุกเครื่อง และเพิ่มพาสคีย์ใหม่เองได้ในหน้าบัญชี`,
+    'mem.gDone': (n) => `ยกเลิกการเชื่อม Google ของ ${n} แล้ว ออกจากระบบทุกเครื่องแล้ว`,
+    'mem.pkDone': (n, pk) => `ลบพาสคีย์ ${pk} ของ ${n} แล้ว ออกจากระบบทุกเครื่องแล้ว`,
+    'mem.errOnlyWay': 'นี่เป็นทางเดียวที่สมาชิกเข้าระบบได้ ตั้งรหัสผ่านใหม่ให้ก่อน',
     'mem.disable': 'ปิดใช้งานบัญชี', 'mem.disableOff': 'เข้าระบบไม่ได้ และออกจากระบบทุกเครื่องทันที',
     'mem.disableOn': 'ปิดใช้งานแล้ว เข้าระบบไม่ได้จนกว่าจะเปิดอีกครั้ง',
     'mem.setPw': 'ตั้งรหัสผ่านใหม่ให้', 'mem.setPwBtn': 'ตั้งรหัสผ่านใหม่', 'mem.newPwPh': 'รหัสผ่านใหม่ อย่างน้อย 8 ตัว',
@@ -95,6 +113,7 @@ function memErr(e, user) {
     if (/yourself/i.test(d) && /delete/i.test(d)) return t('mem.errSelfDel');
     if (/yourself/i.test(d)) return t('mem.errSelf');
     if (/taken/i.test(d)) return t('mem.errTaken');
+    if (/only way to sign in/i.test(d)) return t('mem.errOnlyWay');
   }
   return errorText(e, user);
 }
@@ -234,14 +253,16 @@ export function render(ctx) {
       h('div', { class: 'm-ed-ht' }, h('p', { class: 'm-ed-name' }, u.display_name), h('p', { class: 'small' }, t('mem.usernameLine', u.username))),
       isAndroid() ? save : null);
 
-    /* sign-in, read-only */
+    /* sign-in: read-only for yourself (Account changes those); for others, Unlink Google / Remove a passkey */
     const passkeyOn = (ctx.auth && ctx.auth.methods && ctx.auth.methods.passkey) || u.has_passkey;
-    const signIn = h('div', { class: 'm-sec' }, h('p', { class: 'm-lab' }, t('mem.signIn')),
-      h('ul', { class: 'm-facts' },
-        h('li', {}, icon('key', 'xs'), t('mem.viaPw', u.username)),
-        u.google_email ? h('li', {}, gMark(), t('mem.viaGoogle', u.google_email)) : null,
-        passkeyOn ? h('li', {}, icon('passkey', 'xs'), t(u.has_passkey ? 'mem.hasPk' : 'mem.noPk')) : null),
-      h('p', { class: 'small' }, t('mem.selfLinks')));
+    const signIn = self
+      ? h('div', { class: 'm-sec' }, h('p', { class: 'm-lab' }, t('mem.signIn')),
+        h('ul', { class: 'm-facts' },
+          h('li', {}, icon('key', 'xs'), t('mem.viaPw', u.username)),
+          u.google_email ? h('li', {}, gMark(), t('mem.viaGoogle', u.google_email)) : null,
+          passkeyOn ? h('li', {}, icon('passkey', 'xs'), t(u.has_passkey ? 'mem.hasPk' : 'mem.noPk')) : null),
+        h('p', { class: 'small' }, t('mem.selfLinks')))
+      : resetSec(u, passkeyOn);
 
     /* disable */
     let disableRow = null;
@@ -312,6 +333,64 @@ export function render(ctx) {
       h('div', { class: 'm-save' }, err, head && isAndroid() ? null : save),
       signIn, disableRow, pwSec, delSec]);
     return wrap;
+  }
+
+  /* Sign-in methods of another member, each Google / passkey row with its own remove button and an inline confirm
+     (the Delete member pattern). Removing one signs them out of every device; their password keeps working. */
+  function resetSec(u, passkeyOn) {
+    const facts = h('ul', { class: 'm-facts m-reset' }, h('li', {}, icon('key', 'xs'), h('span', { class: 'm-ft' }, t('mem.viaPw', u.username))));
+    const rErr = h('p', { class: 'form-error', role: 'alert' });
+    const confirm = h('li', { class: 'm-cf' });
+    let open = null; // the row whose confirm is showing
+    const closeConfirm = () => { if (!open) return; open.btn.hidden = false; confirm.remove(); open = null; };
+    const row = (mark, text, label, ask, run) => {
+      const btn = h('button', { type: 'button', class: 'btn m-del' }, label);
+      const li = h('li', {}, mark, h('span', { class: 'm-ft' }, text), btn);
+      btn.addEventListener('click', () => {
+        closeConfirm();
+        rErr.textContent = '';
+        const yes = h('button', { type: 'button', class: 'btn danger' }, label);
+        const no = h('button', { type: 'button', class: 'btn', onclick: () => { closeConfirm(); btn.focus(); } }, t('mem.keepIt'));
+        yes.addEventListener('click', () => busy(yes, async () => {
+          try { await run(li); closeConfirm(); } catch (e) { rErr.textContent = memErr(e, me); }
+        }));
+        confirm.replaceChildren(h('div', { class: 'c-confirm' }, h('p', {}, ask), h('div', { class: 'c-actions' }, yes, no)));
+        btn.hidden = true;
+        li.after(confirm);
+        open = { btn };
+        no.focus();
+      });
+      return li;
+    };
+    const touch = (nu) => { Object.assign(u, nu); users = users.map((x) => (x.id === u.id ? { ...x, ...nu } : x)); paintList(); };
+    if (u.google_email) {
+      facts.append(row(gMark(), t('mem.gLine', u.google_email), t('mem.unlink'), t('mem.gAsk', u.display_name), async (li) => {
+        const nu = await ctx.api(`/users/${u.id}/google`, { method: 'DELETE' });
+        li.remove();
+        touch(nu);
+        toast(t('mem.gDone', u.display_name), 'ok');
+      }));
+    }
+    const pkSlot = h('li', { hidden: !passkeyOn }, icon('passkey', 'xs'), h('span', { class: 'm-ft' }, t(u.has_passkey ? 'mem.hasPk' : 'mem.noPk')));
+    facts.append(pkSlot);
+    if (u.has_passkey) {
+      ctx.api(`/users/${u.id}/passkeys`).then((list) => {
+        let left = list.length;
+        const rows = list.map((p) => {
+          const when = p.last_used_at ? t('mem.pkUsed', fmtWhen(p.last_used_at)) : t('mem.pkNever');
+          return row(icon('passkey', 'xs'), t('mem.pkLine', p.name, when), t('mem.remove'), t('mem.pkAsk', u.display_name, p.name), async (li) => {
+            await ctx.api(`/users/${u.id}/passkeys/${p.id}`, { method: 'DELETE' });
+            li.remove();
+            left -= 1;
+            if (!left) { pkSlot.lastChild.textContent = t('mem.noPk'); pkSlot.hidden = false; }
+            touch({ has_passkey: left > 0 });
+            toast(t('mem.pkDone', u.display_name, p.name), 'ok');
+          });
+        });
+        if (rows.length) { pkSlot.hidden = true; pkSlot.after(...rows); }
+      }).catch((e) => { rErr.textContent = memErr(e, me); });
+    }
+    return h('div', { class: 'm-sec' }, h('p', { class: 'm-lab' }, t('mem.signIn')), facts, rErr, h('p', { class: 'small' }, t('mem.resetNote')));
   }
 
   /* ---------- add member ---------- */
