@@ -1,8 +1,9 @@
 // Now playing (boards Now / T_Now / D_Now): the 3D speaker mirrors the real state, then title + status line,
 // progress (ticks locally between polls), transport, volume and the queue with shuffle/repeat.
 // Idle, offline and announcing states come from /status; owners also see the ESP32 relay's health when the
-// server reports `relay` (mqtt transport). The speaker has no seek endpoint, so its progress bar is display only;
-// with "This device" as the output (status.local, local-player.js) the bar is a slider seeking the browser's player.
+// server reports `relay` (mqtt transport). The progress bar is a slider when status.media.seekable (operators; not live
+// streams, nor a relay before firmware 0.2.0): dragging previews, letting go sends one POST /seek. With "This device"
+// as the output (status.local, local-player.js) it seeks the browser's player directly.
 // The page marks its state in data-np (playing, paused, loading, announce, idle, off): Android tints the player card
 // with it and draws the wavy progress (a-wavy.js), whose wave only moves while playing.
 import { h, icon, iconBtn, tip, busy } from '../ui.js';
@@ -136,6 +137,7 @@ export async function render(ctx) {
   let err = null;         // latest status error
   let statusAt = 0;       // performance.now() of the last poll, for the local progress tick
   let volHoldUntil = 0;   // ignore polled volume while the user drags
+  let seekHold = null;    // {pos, at, until}: the speaker position just asked for, shown until polls catch up
   let showAll = false;
   let queueKey = '';
 
@@ -157,11 +159,22 @@ export async function render(ctx) {
   const liveTag = h('p', { class: 'np-livetag', hidden: true }, h('span', { 'aria-hidden': 'true' }), t('now.live'));
   const localNote = h('p', { class: 'np-local small', hidden: true }, icon('info', 'sm'), h('span'));
 
-  /* ----- seeking (this device only): tap/drag the bar, arrow keys move 10 s ----- */
-  const seekable = () => !!(st && st.local && st.media && st.media.duration && !err);
-  function seekAt(clientX) {
+  /* ----- seeking: tap/drag the bar, arrow keys move 10 s ----- */
+  const seekable = () => !!(st && st.media && st.media.duration && !err && (st.local || (member && st.media.seekable)));
+  // This device seeks at once; the speaker shows the new spot now and gets one /seek when the drag (or keys) settle
+  let seekSend = 0;
+  function seekTo(sec, settle) {
+    const to = Math.max(0, Math.min(sec, st.media.duration - 1));
+    if (st.local) { seek(to); return; }
+    seekHold = { pos: to, at: performance.now(), until: performance.now() + 4000 };
+    tick();
+    clearTimeout(seekSend);
+    if (settle) seekSend = setTimeout(() => act('/seek', { position: Math.round(to * 10) / 10 }), settle);
+  }
+  const posNow = () => (seekHold ? seekHold.pos : st.media.position || 0);
+  function seekAt(clientX, settle) {
     const r = bar.getBoundingClientRect();
-    seek(Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * st.media.duration);
+    seekTo(Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * st.media.duration, settle);
   }
   bar.addEventListener('pointerdown', (e) => {
     if (!seekable()) return;
@@ -170,15 +183,15 @@ export async function render(ctx) {
     bar.setPointerCapture(e.pointerId);
     const move = (ev) => seekAt(ev.clientX);
     bar.addEventListener('pointermove', move);
-    bar.addEventListener('pointerup', () => bar.removeEventListener('pointermove', move), { once: true });
+    bar.addEventListener('pointerup', (ev) => { bar.removeEventListener('pointermove', move); seekAt(ev.clientX, 1); }, { once: true });
   });
   bar.addEventListener('keydown', (e) => {
     if (!seekable()) return;
-    const pos = st.media.position || 0;
+    const pos = posNow();
     const to = { ArrowLeft: pos - 10, ArrowDown: pos - 10, ArrowRight: pos + 10, ArrowUp: pos + 10, Home: 0, End: st.media.duration }[e.key];
     if (to === undefined) return;
     e.preventDefault();
-    seek(to);
+    seekTo(to, 500);
   });
   function setSeekable(on) {
     bar.classList.toggle('seek', on);
@@ -406,8 +419,9 @@ export async function render(ctx) {
   function tick() {
     const m = st && st.media;
     if (err || !m || !m.duration || prog.hidden) return;
-    let pos = m.position || 0;
-    if (m.state === 'PLAYING') pos += (performance.now() - statusAt) / 1000;
+    let pos = m.position || 0, since = statusAt;
+    if (seekHold && performance.now() < seekHold.until && Math.abs(pos - seekHold.pos) > 3) { pos = seekHold.pos; since = seekHold.at; } else seekHold = null;
+    if (m.state === 'PLAYING') pos += (performance.now() - since) / 1000;
     pos = Math.min(pos, m.duration);
     fill.style.width = `${(pos / m.duration) * 100}%`;
     bar.style.setProperty('--np-pos', `${(pos / m.duration) * 100}%`);

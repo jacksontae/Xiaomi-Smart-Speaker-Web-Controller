@@ -38,6 +38,7 @@ ROLE_TABLE = {
     ("POST", "/volume"): "operator",
     ("POST", "/pause"): "operator",
     ("POST", "/resume"): "operator",
+    ("POST", "/seek"): "operator",
     ("POST", "/stop"): "operator",
     ("GET", "/settings"): "admin",
     ("POST", "/settings"): "admin",
