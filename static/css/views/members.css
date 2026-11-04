@@ -25,6 +25,10 @@
 .m-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
 .m-facts li { display: flex; align-items: center; gap: 8px; }
 .m-facts .icon { color: var(--ink-2); }
+.m-facts.m-reset { gap: 10px; }
+.m-facts .m-ft { flex: 1 1 auto; min-width: 0; }
+.m-facts .m-del { flex: 0 0 auto; align-self: center; }
+.m-facts .m-cf { display: block; }
 .m-save { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
 .m-save .form-error { flex: 1 1 200px; }
 .m-flat { padding: 0; min-height: 0; }
@@ -68,6 +72,7 @@
 :root[data-os="android"] .m-facts .icon { color: var(--md-primary); }
 :root[data-os="android"] .m-ed .small { color: var(--md-on-surface-variant); }
 :root[data-os="android"] .m-del { align-self: stretch; justify-content: flex-start; border: 0; padding: 0 8px; color: var(--md-error); }
+:root[data-os="android"] .m-facts .m-del { align-self: center; padding: 0 12px; border-radius: 20px; }
 :root[data-os="android"] .m-del:hover { background: color-mix(in srgb, var(--md-error) 8%, transparent); color: var(--md-error); }
 :root[data-os="android"] .m-ed .c-confirm { padding: 0; background: transparent; }
 :root[data-os="android"] .m-add { gap: 16px; }

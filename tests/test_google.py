@@ -250,6 +250,37 @@ def test_unlink_is_allowed_while_google_is_switched_off(app, google_on):
     assert session_client(alice).delete("/me/google").status_code == 200
 
 
+def test_owner_unlinks_a_members_google(app, google_on, client):
+    owner, alice, bob = make_user("olivia"), make_user("alice", "operator"), make_user("bob", "viewer")
+    app.db.link_google(alice["id"], "1000001", "alice@example.com")
+    a, boss = session_client(alice), session_client(owner)
+    assert session_client(bob).delete(f"/users/{alice['id']}/google").status_code == 403
+    assert boss.delete(f"/users/{bob['id']}/google").status_code == 404  # nothing linked
+    assert boss.delete("/users/999/google").status_code == 404
+    r = boss.delete(f"/users/{alice['id']}/google")
+    assert r.status_code == 200 and r.json()["google_email"] is None
+    assert a.get("/auth/state").json()["user"] is None  # signed out of every device
+    assert web(app).post("/auth/google", json={"credential": token()}).status_code == 401
+    e = next(e for e in app.db.activity() if e["action"] == "member update")
+    assert (e["actor"], e["detail"]) == ("Olivia", "alice: unlinked Google alice@example.com")
+    app.db.link_google(alice["id"], "1000001", "alice@example.com")
+    assert client.delete(f"/users/{alice['id']}/google").status_code == 200  # the API token too
+
+
+def test_owner_cannot_unlink_a_members_only_way_in_or_their_own(app, google_on):
+    owner, alice = make_user("olivia"), make_user("alice", "operator")
+    app.db.link_google(alice["id"], "1000001", "alice@example.com")
+    app.db.link_google(owner["id"], "1000002", "olivia@example.com")
+    with app.db.tx() as db:  # a Google-only member
+        db.execute("UPDATE users SET password_hash = '' WHERE id = ?", (alice["id"],))
+    boss = session_client(owner)
+    r = boss.delete(f"/users/{alice['id']}/google")
+    assert r.status_code == 409 and "set a new password" in r.json()["detail"]
+    r = boss.delete(f"/users/{owner['id']}/google")
+    assert r.status_code == 409 and "Account" in r.json()["detail"]
+    assert app.db.get_user(owner["id"])["google_email"] == "olivia@example.com"
+
+
 # --- Storage ---
 
 def test_member_list_shows_linked_email(client, app):

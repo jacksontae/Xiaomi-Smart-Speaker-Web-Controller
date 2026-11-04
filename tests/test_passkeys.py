@@ -299,6 +299,42 @@ def test_cannot_remove_the_only_sign_in_method(https):
     assert c.delete(f"/me/passkeys/{second['id']}").status_code == 409
 
 
+def test_owner_removes_a_members_passkey(https, client):
+    owner, alice, bob = make_user("olivia"), make_user("alice", "operator"), make_user("bob", "viewer")
+    a = session_client(alice)
+    _, phone = register(a, name="iPhone")
+    _, laptop = register(a, name="MacBook")
+    boss = session_client(owner)
+    assert [p["name"] for p in boss.get(f"/users/{alice['id']}/passkeys").json()] == ["iPhone", "MacBook"]
+    assert "public_key" not in boss.get(f"/users/{alice['id']}/passkeys").json()[0]
+    assert session_client(bob).get(f"/users/{alice['id']}/passkeys").status_code == 403
+    assert session_client(bob).delete(f"/users/{alice['id']}/passkeys/{phone['id']}").status_code == 403
+    assert boss.delete(f"/users/{bob['id']}/passkeys/{phone['id']}").status_code == 404  # not bob's
+    assert boss.get("/users/999/passkeys").status_code == 404
+
+    r = boss.delete(f"/users/{alice['id']}/passkeys/{phone['id']}")
+    assert r.status_code == 204
+    assert [p["name"] for p in boss.get(f"/users/{alice['id']}/passkeys").json()] == ["MacBook"]
+    assert a.get("/auth/state").json()["user"] is None  # signed out of every device
+    assert boss.get("/auth/state").json()["user"]["id"] == owner["id"]
+    e = https.db.activity()[0]
+    assert (e["actor"], e["action"], e["detail"]) == ("Olivia", "member update", "alice: removed passkey iPhone")
+    assert client.delete(f"/users/{alice['id']}/passkeys/{laptop['id']}").status_code == 204  # the API token too
+
+
+def test_owner_cannot_remove_a_members_only_way_in_or_their_own(https):
+    owner, alice = make_user("olivia"), make_user("alice", "operator")
+    _, pk = register(session_client(alice))
+    with https.db.tx() as db:  # a passkey-only member
+        db.execute("UPDATE users SET password_hash = '' WHERE id = ?", (alice["id"],))
+    boss = session_client(owner)
+    r = boss.delete(f"/users/{alice['id']}/passkeys/{pk['id']}")
+    assert r.status_code == 409 and "set a new password" in r.json()["detail"]
+    _, mine = register(boss)
+    r = boss.delete(f"/users/{owner['id']}/passkeys/{mine['id']}")
+    assert r.status_code == 409 and "Account" in r.json()["detail"]
+
+
 def test_deleting_a_member_removes_their_passkeys(https, client):
     alice = make_user("alice", "viewer")
     key, _ = register(session_client(alice))
