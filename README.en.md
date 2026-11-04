@@ -138,8 +138,8 @@ always `{"detail": "..."}`.
 
 | role | can do |
 |---|---|
-| `viewer` | See status, queue, playlists, quick phrases, schedules, radio favourites and files; play on "This device" |
-| `operator` | viewer + announce, play, set volume, pause/resume/stop, control the queue, edit playlists, quick phrases and schedules, radio and podcasts, upload files, live talk |
+| `viewer` | See status, queue, shared playlists and quick phrases · skip/back/pick a track in the speaker's queue · search music and play on "This device" · upload files and make their own (personal) playlists |
+| `operator` | viewer + announce, play, set volume, pause/resume/stop, control the queue, edit shared playlists, quick phrases and schedules, radio and podcasts, upload shared files, live talk |
 | `admin` | operator + manage members, settings, speaker discovery, activity log, rename or delete any uploaded file |
 
 The web UI calls `admin` "Owner".
@@ -212,18 +212,34 @@ A new admin without a passkey can still sign in with a password, but `/auth/stat
 
 | Method | Path | Role | Body | Does |
 |---|---|---|---|---|
-| GET · POST | `/playlists` | viewer · operator | `{"name"}` | List playlists · create one |
-| GET · PATCH · DELETE | `/playlists/{id}` | viewer · operator | `{"name"}` | Get with items · rename · delete |
-| POST | `/playlists/{id}/items` | operator | `{"kind": "youtube"\|"url"\|"tts"\|"radio"\|"podcast"\|"file", "source", "title", "lang", "thumbnail", "duration", "content_type"}` | Add an item (at most 500 per playlist) |
-| DELETE | `/playlists/{id}/items/{item_id}` | operator | – | Remove an item |
-| PUT | `/playlists/{id}/order` | operator | `{"item_ids": [...]}` | Reorder (must list every id exactly, else `409`) |
+| GET · POST | `/playlists` | viewer | `{"name", "personal": false}` | List the playlists you can see · create one |
+| GET · PATCH · DELETE | `/playlists/{id}` | viewer | `{"name"}` | Get with items · rename · delete |
+| POST | `/playlists/{id}/items` | viewer | `{"kind": "youtube"\|"url"\|"tts"\|"radio"\|"podcast"\|"file", "source", "title", "lang", "thumbnail", "duration", "content_type"}` | Add an item (at most 500 per playlist) |
+| DELETE | `/playlists/{id}/items/{item_id}` | viewer | – | Remove an item |
+| PUT | `/playlists/{id}/order` | viewer | `{"item_ids": [...]}` | Reorder (must list every id exactly, else `409`) |
 | POST | `/playlists/{id}/play` | operator | `{"start_index": 0, "shuffle": false, "repeat": "off"\|"all"\|"one"}` | Play the whole playlist as the queue |
 | GET · PATCH | `/queue` | viewer · operator | `{"shuffle", "repeat"}` | Get the queue (`null` if none) · change shuffle/repeat |
-| POST | `/queue/next` · `/queue/prev` · `/queue/jump` | operator | `{"index"}` (jump only) | Skip |
+| POST | `/queue/next` · `/queue/prev` · `/queue/jump` | viewer | `{"index"}` (jump only) | Skip |
 | POST | `/queue/clear` | operator | – | Clear the queue and stop |
 | GET · POST | `/phrases` | viewer · operator | `{"text", "lang"}` | Quick phrases (the web UI sends them to `/say`) |
 | DELETE | `/phrases/{id}` | operator | – | Delete a quick phrase |
 
+- Personal playlists: `owner_id` is the owner's id (`null` = shared; every playlist from before schema 6 is shared).
+  Results carry `owner_id`, `owner_name`, `mine` and `can_edit` (whether the caller may edit it).
+  - Viewers can only create personal playlists. Operators and admins create shared ones unless they send
+    `"personal": true` (the API token can't create personal ones, `400`).
+  - Who sees them: shared ones everyone; personal ones only their owner and admins (operators don't see other
+    people's). Anything you can't see answers `404`.
+  - Editing (rename, delete, add/remove/reorder items): shared ones need operator or above (viewers get `403`);
+    personal ones need their owner or an admin.
+  - `/playlists/{id}/play` (plays on the speaker) is still operator and needs a playlist you can see. Schedules only
+    play shared playlists.
+  - A `file` item must be a file the playlist's owner can see (a shared playlist takes shared files only; a personal
+    one takes shared files or the owner's own), else `400`.
+  - Deleting a member deletes their personal playlists and files (files on disk too) and turns off schedules that
+    played those playlists.
+- Viewers drive the speaker's queue only with next/prev/jump (logged like an operator's). Shuffle/repeat, clearing,
+  stop and volume still need operator.
 - A `youtube` item takes a URL, a video id or search words (first result). A `url` item must be an http(s) link and
   needs a `title`. A `tts` item is at most 1000 characters.
 - A `radio` item takes a radio-browser station uuid or a stream URL (stream URLs need a `title`). A `podcast` item
@@ -265,18 +281,23 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 
 | Method | Path | Role | Body / query | Does |
 |---|---|---|---|---|
-| GET | `/radio/search?q=&country=TH&tag=&limit=20` | operator | – | Search stations on [radio-browser.info](https://www.radio-browser.info) (most listened first, `limit` up to 50) |
+| GET | `/radio/search?q=&country=TH&tag=&limit=20` | viewer | – | Search stations on [radio-browser.info](https://www.radio-browser.info) (most listened first, `limit` up to 50) |
 | GET · POST | `/radio/favorites` | viewer · operator | `{"uuid"}` or `{"url", "name"}` | Favourite stations · add one (same radio-browser station twice `409`) |
 | DELETE | `/radio/favorites/{id}` | operator | – | Remove a favourite |
 | POST | `/radio/play` | operator | `{"favorite_id"}` or `{"uuid"}` or `{"url", "name"}`, plus `"volume"` | Play radio live (clears the queue) |
-| GET | `/podcasts/search?q=&country=TH&limit=20` | operator | – | Search shows with the iTunes Search API; results include `feed_url` |
-| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | operator | – | Read the RSS feed: show details and latest episodes (`limit` up to 200) |
+| GET | `/podcasts/search?q=&country=TH&limit=20` | viewer | – | Search shows with the iTunes Search API; results include `feed_url` |
+| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | viewer | – | Read the RSS feed: show details and latest episodes (`limit` up to 200) |
 | POST | `/podcasts/play` | operator | `{"url", "title", "thumbnail", "content_type", "volume"}` | Play one episode (clears the queue) |
-| GET | `/files` | viewer | – | `{"items", "used", "quota", "max_size", "types"}` |
-| POST | `/files?name=<file name>&duration=<seconds>` | operator | The audio file itself as the body (not a form) | Upload |
-| PATCH · DELETE | `/files/{id}` | operator (own files) · admin (any file) | `{"title"}` · – | Rename · delete |
+| GET | `/files` | viewer | – | `{"items", "used", "quota", "max_size", "types"}` (files you can see) |
+| POST | `/files?name=<file name>&duration=<seconds>&personal=1` | viewer | The audio file itself as the body (not a form) | Upload |
+| PATCH · DELETE | `/files/{id}` | viewer (by the file's rights) | `{"title"}` · – | Rename · delete |
 | POST | `/files/{id}/play` | operator | `{"volume"}` | Play a file (clears the queue) |
 
+- Personal files follow the playlist rules: a viewer's upload is always personal; operators and admins upload shared
+  files unless `personal=1`. You see shared files and your own (admins see all); others answer `404`. Each file has
+  `owner_id`, `owner_name`, `mine`, `can_edit`, `uploader_id` and `uploader`.
+- Renaming or deleting: a personal file by its owner or an admin; a shared file by the operator who uploaded it or an
+  admin (viewers get `403`). The storage quota is still shared by everyone.
 - Uploads are recognised from their content (mp3, aac, m4a, ogg/opus, wav, flac, webm), not from the name. Other
   types get `415`, too large `413`, quota full `507`.
 - Files are stored in `media/` next to `data.db` (`MEDIA_DIR`), up to 50 MB each (`UPLOAD_MAX_MB`) and 2000 MB in
@@ -295,28 +316,34 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 | POST | `/local/resolve` | viewer | `{"kind", "source", "title", "lang", "thumbnail", "duration", "content_type"}` (same as a playlist item) | `{"kind", "url", "proxy_url", "content_type", "title", "duration", "thumbnail", "live"}` |
 | POST | `/local/played` | viewer | `{"title"}` | `204`, logs a `device play` activity entry |
 | GET | `/local/stream?u=&t=&exp=&sig=` | signed link (from `proxy_url`) | – | Relays the source as a stream |
+| GET | `/local/hls?u=&exp=&sig=` | signed link (from `proxy_url`) | – | An HLS playlist with its links turned into signed relay links |
 
 - In the web UI, choose "This device" from the speaker name button. Now Playing, Music and Playlists then play in
   that browser's `<audio>` element instead of on the speaker (queue, shuffle, repeat, seeking, volume and lock-screen
   controls via Media Session run in the browser). The choice is stored per browser in `localStorage`
   (`spk.output`) and doesn't change what anyone else hears.
-- Viewers can use it, since it only plays on their own device. Endpoints that drive the speaker still need operator.
-  A viewer only gets YouTube tracks that are already in the server's cache (`403` otherwise), because a download
-  costs the server's disk and bandwidth.
+- Viewers can use it, including YouTube tracks the server hasn't downloaded yet, since it only plays on their own
+  device. Endpoints that drive the speaker still need operator. A `file` item must be a file the caller can see, else
+  `404`.
 - `/local/resolve` doesn't contact the speaker and doesn't log (the browser calls it ahead for the next track and
   again when a link expires). The browser calls `/local/played` once per play request (a playlist is logged by its
   name, not per track, and seeking isn't logged). YouTube is downloaded into the same cache and returned as a signed
   `/yt/...` link (a path relative to this server); text returns `/tts.mp3?...`; files return `/media/...`; radio,
   podcasts and links return the source URL.
-- `proxy_url` (radio, podcasts and external links, except HLS) is a signed `/local/stream` link: the server fetches
+- `proxy_url` (radio, podcasts and external links) is a signed `/local/stream` link (`/local/hls` for HLS): the server fetches
   the source and passes the bytes on as they arrive, without storing them. The browser uses it only when needed: an
   `http://` stream on an `https://` page (mixed content, iPhone Safari), a type `canPlayType` says it can't play, or
   when the direct link fails. The relay accepts only http(s) to public hosts (private, loopback and link-local
   addresses are refused, on every redirect), passes content-type and Range on, refuses non-audio responses, cuts a
   stream after 30 seconds of silence, ends each relay at 512 MB or 6 hours, and allows 8 streams at once (`503`
-  beyond that).
-- Announcements, live talk and schedules always play on the speaker. HLS plays only in Safari (the relay doesn't
-  handle HLS). On iOS you have to tap before any sound, and background playback lasts only while the page keeps
+  beyond that). It reads SHOUTcast v1 stations that answer `ICY 200 OK`, and connects only to the public addresses
+  it checked (no DNS rebinding).
+- HLS: `/local/hls` fetches the playlist (at most 512 KB) and turns every URI into a signed link (variant playlists
+  through `/local/hls`; segments, keys and init sections through `/local/stream`). It plays in Safari and recent
+  Chrome; a browser that can't play HLS shows a message to play it on the speaker instead.
+- A live stream that ends or drops (including the relay's 6-hour cut) reconnects by itself with a fresh link after
+  1, 2, 4, 8 and 16 seconds, at most 5 times in a row; 60 seconds of playing resets the count.
+- Announcements, live talk and schedules always play on the speaker. On iOS you have to tap before any sound, and background playback lasts only while the page keeps
   playing.
 
 ### Live talk
