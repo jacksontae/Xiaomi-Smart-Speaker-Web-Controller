@@ -226,7 +226,10 @@
   :root[data-os="android"] .phd { margin-top: -32px; padding: 32px 0 12px; }
   :root[data-os="android"] .phd .pt { font-size: 34px; }
   :root[data-os="android"] .phd-r .help-btn { display: none; } /* Help is in the rail */
-  :root[data-os="android"] .phd::before { background: var(--md-bar); box-shadow: none; }
+  /* flat Material bar flush with the rail (same surface colour), not the floating glass bar */
+  :root[data-os="android"] .phd::before { inset: 0 -24px; border: 0; border-radius: 0; background: var(--md-bar); box-shadow: none; }
+  :root[data-os="android"] .phd::after { content: none; }
+  :root[data-os="android"][data-scrolled] .phd .pt { transform: scale(.7); }
 
   :root[data-os="android"] .nowbar { left: var(--rail); bottom: calc(16px + var(--safe-b)); width: min(560px, calc(100% - var(--rail) - 48px)); }
   :root[data-os="android"] .toasts, :root[data-os="android"] body:has(.tabdock) .toasts { --toast-bottom: 24px; left: calc(var(--rail) + 24px); right: 24px; }
