@@ -1,6 +1,7 @@
 fastapi>=0.162
 uvicorn>=0.54
 httpx>=0.28
+httpcore>=1.0  # the stream relay's own connections (app.py RelayBackend)
 pydantic>=2.14
 PyChromecast>=14.0
 paho-mqtt==2.1.0
