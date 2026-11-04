@@ -1,5 +1,7 @@
 # Xiaomi-Smart-Speaker-Web-Controller
 
+[English](README.en.md) | ภาษาไทย
+
 [![CI](https://github.com/jacksontae/Xiaomi-Smart-Speaker-Web-Controller/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jacksontae/Xiaomi-Smart-Speaker-Web-Controller/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -9,8 +11,9 @@ Control a Google Cast speaker such as the **Xiaomi Mi Smart Speaker** from your 
 text-to-speech announcements, YouTube audio, volume and playback control, through an HTTP API and a small web UI.
 The service talks to the speaker over the local network with the Cast protocol, and the speaker fetches audio from the service.
 
-> **Status:** the macOS service (Python) works today. Relay firmware for ESP32 and ESP8266 builds (see [firmware/](firmware/README.md)) but is not yet hardware-tested; Linux is in progress.
-> English docs are short for now; the detailed guide below is in Thai.
+> **Status:** the Python service runs on macOS (LaunchAgent) and in Docker on a Linux VM. The relay firmware
+> (see [firmware/](firmware/README.md)) is tested on an ESP32 (`esp32dev`) over plain MQTT and MQTT over WebSocket;
+> ESP32-S3 and ESP8266 build but are not yet tested on hardware. Full English guide: [README.en.md](README.en.md).
 
 HTTP API และหน้าเว็บสำหรับสั่ง Google Cast speaker (เช่น Xiaomi Mi Smart Speaker) ให้ประกาศข้อความและเล่นเสียงจาก YouTube
 ผ่านโปรโตคอล Cast ในวง LAN โดยไม่ต้องพึ่ง Google Assistant ลำโพงดึงไฟล์เสียงทั้งหมดจาก service นี้
@@ -37,7 +40,7 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 ./speakerctl status      # สถานะ service และลำโพง
 ./speakerctl restart
 ./speakerctl stop | start
-./speakerctl logs        # ดู log แบบ follow
+./speakerctl logs [n]    # ดู log แบบ follow (แสดง n บรรทัดล่าสุดก่อน ค่าเริ่มต้น 50) · log อยู่ที่ service.log
 ./speakerctl config      # แก้ config.json แล้วรีสตาร์ท
 ./speakerctl token       # แสดง API token · --rotate เพื่อออก token ใหม่ (ของเดิมใช้ไม่ได้ทันที)
 ./speakerctl uninstall   # เลิกเปิดอัตโนมัติ
@@ -45,15 +48,32 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 
 หน้าควบคุม: http://<ip เครื่องนี้>:8090/ · เอกสาร API: http://<ip>:8090/docs
 
+## ติดตั้ง (Docker บน VM)
+
+ถ้า service อยู่นอกวง LAN ของลำโพง ใช้ `deploy/remote/` (Docker Compose: service, Mosquitto, `cloudflared`, backup รายคืน)
+แล้วสั่งลำโพงผ่าน ESP32 relay ทาง MQTT ขั้นตอนอยู่ในหัวข้อ Remote deployment ด้านล่าง
+
+- ใน container `config.json`, `data.db`, `media/` และ cache YouTube อยู่ใน volume `speaker-data` ที่ `/data`
+- API token สร้างตอนเปิดครั้งแรก ดูเพื่อใช้กับ `/auth/setup` (สร้าง admin คนแรก):
+
+```bash
+docker compose -f deploy/remote/docker-compose.yml exec speaker-service \
+  python -c "import json; print(json.load(open('/data/config.json'))['api_token'])"
+```
+
+- ใส่ `CLOUDFLARE_TUNNEL_TOKEN` ใน `deploy/remote/.env` (คู่กับ `PUBLIC_BASE_URL`, `MQTT_PASSWORD`) แล้ว `chmod 600`
+- พอร์ต 8090 ผูกกับ loopback ของ VM (`127.0.0.1:8090`) เท่านั้น จะเปิดหน้าเว็บโดยไม่ผ่าน tunnel ใช้ SSH tunnel: `ssh -L 8090:127.0.0.1:8090 <vm>`
+- `cloudflared` ต้องรันจาก compose file (ชื่อ `speaker-service`, `mosquitto` รู้จักเฉพาะใน compose network) ถ้าติดตั้ง `cloudflared` บน host ด้วย tunnel จะตอบ `502`
+
 ## ตั้งค่า
 
 แก้ได้ 3 ทาง: หน้าเว็บ (หัวข้อ "ตั้งค่า"), `POST /settings`, หรือแก้ `config.json` ตรงแล้ว `./speakerctl restart`
 
 | key | ค่าเริ่มต้น | ความหมาย |
 |---|---|---|
-| `speaker_ip` | `192.0.2.10` | IP ลำโพง (กด "ค้นหา" ในหน้าเว็บเพื่อเลือกจากลำโพงในวง LAN) |
-| `speaker_name` | `Air Purifier speaker` | ชื่อที่แสดง |
-| `port` | `8090` | พอร์ตของ service (เปลี่ยนแล้วรีสตาร์ทเอง) |
+| `speaker_ip` | `192.0.2.10` | IP หรือ hostname ของลำโพง (กด "ค้นหา" ในหน้าเว็บเพื่อเลือกจากลำโพงในวง LAN) |
+| `speaker_name` | `Air Purifier speaker` | ชื่อที่แสดง (1–64 ตัวอักษร) |
+| `port` | `8090` | พอร์ตของ service 1024–65535 (เปลี่ยนแล้วรีสตาร์ทเอง) |
 | `default_volume` | `null` | ระดับเสียงที่ตั้งก่อนประกาศหรือเล่น 0–1, `null` = ไม่เปลี่ยน |
 | `tts_lang` | `th` | ภาษาเริ่มต้นของ `/say` |
 | `cache_keep` | `20` | จำนวนเพลง YouTube ที่เก็บใน `cache/` |
@@ -61,7 +81,7 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 | `resume_after_say` | `true` | ประกาศเสร็จแล้วเล่นเพลง YouTube ที่ค้างอยู่ต่อจากจุดเดิม (ย้อน 1 วินาที) |
 | `talk_max_seconds` | `120` | พูดสดได้นานสุดกี่วินาทีต่อครั้ง (10–600) |
 | `transport` | `cast` | `cast` = สั่งลำโพงตรงในวง LAN · `mqtt` = สั่งผ่าน ESP32 relay (ดู Remote deployment) |
-| `mqtt` | ดู `config.example.json` | broker ของ relay: `host`, `port`, `tls`, `username`, `password`, `base_topic`, `client_id` |
+| `mqtt` | ดู `config.example.json` | broker ของ relay: `host`, `port`, `tls`, `ca_file`, `username`, `password`, `base_topic`, `client_id` · เวลา: `keepalive`, `offline_after`, `status_refresh`, `command_timeout`, `play_timeout`, `reconnect_min`, `reconnect_max` |
 | `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.0.2.20:8090` · host ของ URL นี้คือ RP ID ของ passkey |
 | `google_client_id` | `null` | OAuth client ID สำหรับ "Sign in with Google" เช่น `1234-abc.apps.googleusercontent.com` (ไม่ใช่ความลับ) |
 | `google_signin` | `false` | เจ้าของ (admin) เปิด/ปิดการล็อกอินด้วย Google · เปิดได้เมื่อมี `google_client_id` แล้ว |
@@ -84,9 +104,9 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 - **บัญชีผู้ใช้ (หน้าเว็บ)** ล็อกอินแล้วได้ cookie `sid` (`HttpOnly`, `SameSite=Strict`, อายุ 30 วันนับจากใช้งานล่าสุด)
   - คำขอที่เปลี่ยนข้อมูล (POST/PUT/PATCH/DELETE) ด้วย cookie ต้องส่ง header `X-Requested-With: speaker-web` ไม่งั้นได้ `403`
   - ครั้งแรกที่ยังไม่มีผู้ใช้ หน้าเว็บจะให้ใส่ API token เพื่อสร้างบัญชี admin คนแรก (`POST /auth/setup`)
-  - รหัสผ่านอย่างน้อย 8 ตัว เก็บแบบ scrypt · ล็อกอินผิด 5 ครั้งใน 5 นาที (ต่อ IP + ชื่อผู้ใช้) จะได้ `429` พร้อม `Retry-After`
-- ไฟล์เสียงที่ลำโพงดึง (`/tts.mp3`, `/yt/...`) ไม่ใช้ header เพราะลำโพงส่งไม่ได้ แต่ใช้ลิงก์ที่เซ็นด้วย HMAC ของ token และหมดอายุใน 6 ชั่วโมงแทน
-- ข้อมูลผู้ใช้ เพลย์ลิสต์ ข้อความด่วน และบันทึกกิจกรรม เก็บใน SQLite ที่ `data.db` (เปลี่ยนที่ได้ด้วย env `DATA_PATH`)
+  - รหัสผ่าน 8–256 ตัว เก็บแบบ scrypt · ล็อกอินผิด 5 ครั้งใน 5 นาที (ต่อ IP + ชื่อผู้ใช้) จะได้ `429` พร้อม `Retry-After`
+- ไฟล์เสียงที่ลำโพงดึง (`/tts.mp3`, `/yt/...`, `/media/...`, `/talk/...`) ไม่ใช้ header เพราะลำโพงส่งไม่ได้ แต่ใช้ลิงก์ที่เซ็นด้วย HMAC ของ token และหมดอายุใน 6 ชั่วโมงแทน
+- ข้อมูลผู้ใช้ เพลย์ลิสต์ ข้อความด่วน ตารางเวลา สถานีโปรด ข้อมูลไฟล์อัปโหลด และบันทึกกิจกรรม เก็บใน SQLite ที่ `data.db` (เปลี่ยนที่ได้ด้วย env `DATA_PATH`)
 
 ### สิทธิ์ (role)
 
@@ -117,6 +137,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 
 ชื่อผู้ใช้ 3–32 ตัว `a-z 0-9 . _ -` · ลบ ปิด หรือลดสิทธิ์ตัวเองไม่ได้ และต้องเหลือ admin ที่เปิดใช้อย่างน้อย 1 คน (`409`)
 ปิดบัญชีหรือเปลี่ยนรหัสผ่านจะออกจากระบบทุกเครื่องของคนนั้น
+`/me/*`, `/auth/password` และ `/auth/logout-all` ต้องเป็นบัญชีผู้ใช้ เรียกด้วย API token ได้ `400`
 
 #### Sign in with Google
 
@@ -135,14 +156,14 @@ service ตรวจลายเซ็น ID token กับ key ของ Googl
 `credential` คือ `PublicKeyCredential` ที่แปลงเป็น JSON (ฟิลด์ binary เป็น base64url เหมือน `credential.toJSON()`)
 challenge ใช้ได้ครั้งเดียวและหมดอายุใน 5 นาที · ตรวจ sign counter (ค่าไม่เพิ่ม = key ถูกคัดลอก ปฏิเสธ) · ผิด 5 ครั้งใน 5 นาที (ต่อ IP) ได้ `429`
 ลบ passkey สุดท้ายไม่ได้ถ้าเป็นวิธีล็อกอินเดียวที่เหลือ หรือเป็น admin ขณะเปิด `passkey_required_for_admins` (`409`)
-เมื่อเปิด `passkey_required_for_admins` admin ที่มี passkey ล็อกอินด้วยรหัสผ่านไม่ได้ (`403`) · admin ใหม่ที่ยังไม่มี passkey
+เมื่อเปิด `passkey_required_for_admins` admin ที่มี passkey ล็อกอินด้วยรหัสผ่านหรือ Google ไม่ได้ (`403`) · admin ใหม่ที่ยังไม่มี passkey
 ยังล็อกอินด้วยรหัสผ่านได้ แต่ `/auth/state` จะมี `"passkey_required": true` ให้หน้าเว็บพาไปเพิ่ม · API token ใช้ได้เสมอ (ทางกู้คืน)
 
 ### ลำโพง
 
 | Method | Path | สิทธิ์ | Body | หน้าที่ |
 |---|---|---|---|---|
-| GET | `/status` | viewer | – | แอป เพลง (มี `media.thumbnail`) ระดับเสียง และคิว (`queue`) |
+| GET | `/status` | viewer | – | แอป เพลง (มี `media.thumbnail`) ระดับเสียง คิว (`queue`) และ `talking` · admin ได้ `relay` ด้วย |
 | POST | `/say` | operator | `{"text": "...", "lang": "th", "volume": 0.4}` | ประกาศข้อความ (TTS) |
 | POST | `/youtube` | operator | `{"query": "คำค้น หรือ URL", "volume": 0.3}` | เล่นเสียงจาก YouTube (ล้างคิว) |
 | GET | `/youtube/search?q=...&limit=8` | operator | – | ค้นหา YouTube (ไม่ดาวน์โหลด) |
@@ -151,7 +172,7 @@ challenge ใช้ได้ครั้งเดียวและหมดอ�
 | POST | `/pause` · `/resume` · `/stop` | operator | – | ควบคุมการเล่น (`stop` ล้างคิวด้วย) |
 | GET · POST | `/settings` | admin | `{"default_volume": 0.4}` | ดู · แก้ตั้งค่า |
 | GET | `/speakers` | admin | – | ค้นหาลำโพง Cast ในวง LAN |
-| GET | `/activity?limit=50&before_id=` | admin | – | บันทึกกิจกรรม ใหม่สุดก่อน (เก็บ 5000 รายการล่าสุด) |
+| GET | `/activity?limit=50&before_id=` | admin | – | บันทึกกิจกรรม ใหม่สุดก่อน (`limit` ไม่เกิน 500 · เก็บ 5000 รายการล่าสุด) |
 
 ### เพลย์ลิสต์และคิว
 
@@ -159,7 +180,7 @@ challenge ใช้ได้ครั้งเดียวและหมดอ�
 |---|---|---|---|---|
 | GET · POST | `/playlists` | viewer | `{"name", "personal": false}` | รายการเพลย์ลิสต์ที่เห็นได้ · สร้างใหม่ |
 | GET · PATCH · DELETE | `/playlists/{id}` | viewer | `{"name"}` | ดูพร้อมรายการ · เปลี่ยนชื่อ · ลบ |
-| POST | `/playlists/{id}/items` | viewer | `{"kind": "youtube"\|"url"\|"tts"\|"radio"\|"podcast"\|"file", "source", "title", "lang", "thumbnail", "duration", "content_type"}` | เพิ่มรายการ |
+| POST | `/playlists/{id}/items` | viewer | `{"kind": "youtube"\|"url"\|"tts"\|"radio"\|"podcast"\|"file", "source", "title", "lang", "thumbnail", "duration", "content_type"}` | เพิ่มรายการ (ไม่เกิน 500 รายการต่อเพลย์ลิสต์ เกิน `409`) |
 | DELETE | `/playlists/{id}/items/{item_id}` | viewer | – | ลบรายการ |
 | PUT | `/playlists/{id}/order` | viewer | `{"item_ids": [...]}` | เรียงใหม่ (ต้องครบทุก id พอดี ไม่งั้น `409`) |
 | POST | `/playlists/{id}/play` | operator | `{"start_index": 0, "shuffle": false, "repeat": "off"\|"all"\|"one"}` | เล่นทั้งเพลย์ลิสต์เป็นคิว |
@@ -173,7 +194,7 @@ challenge ใช้ได้ครั้งเดียวและหมดอ�
   - viewer สร้างได้เฉพาะแบบส่วนตัว · operator/admin สร้างแบบแชร์ เว้นแต่ส่ง `"personal": true` (API token สร้างแบบส่วนตัวไม่ได้ `400`)
   - เห็นได้: แบบแชร์ทุกคน · แบบส่วนตัวเฉพาะเจ้าของและ admin (operator ไม่เห็นของคนอื่น) ที่มองไม่เห็นตอบ `404` เสมอ
   - แก้ (เปลี่ยนชื่อ ลบ เพิ่ม/ลบ/เรียงรายการ): แบบแชร์ต้อง operator ขึ้นไป (viewer ได้ `403`) · แบบส่วนตัวเจ้าของหรือ admin
-  - `/playlists/{id}/play` (เล่นที่ลำโพง) ยังเป็น operator และต้องมองเห็นเพลย์ลิสต์นั้น · ตารางเวลาเลือกได้เฉพาะเพลย์ลิสต์ที่ผู้ตั้งมองเห็น
+  - `/playlists/{id}/play` (เล่นที่ลำโพง) ยังเป็น operator และต้องมองเห็นเพลย์ลิสต์นั้น · ตารางเวลาเล่นได้เฉพาะเพลย์ลิสต์ที่แชร์ (แบบส่วนตัวได้ `400`)
   - รายการ `file` ต้องเป็นไฟล์ที่เจ้าของเพลย์ลิสต์มองเห็น (แบบแชร์ใส่ได้แค่ไฟล์แชร์ แบบส่วนตัวใส่ไฟล์แชร์หรือไฟล์ของเจ้าของ) ไม่งั้น `400`
   - ลบสมาชิกแล้ว เพลย์ลิสต์และไฟล์ส่วนตัวของเขา (รวมไฟล์บนดิสก์) ถูกลบด้วย ตารางเวลาที่เล่นเพลย์ลิสต์นั้นถูกปิด
 - viewer คุมคิวของลำโพงได้แค่ next/prev/jump (ลง activity เหมือน operator) ส่วน shuffle/repeat ล้างคิว หยุด และเสียงยังเป็น operator
@@ -191,12 +212,29 @@ curl -X POST localhost:8090/youtube -H "Authorization: Bearer $TOKEN" -H 'Conten
 curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"shuffle":true,"repeat":"all"}'
 ```
 
+### ตารางเวลา
+
+| Method | Path | สิทธิ์ | Body | หน้าที่ |
+|---|---|---|---|---|
+| GET | `/schedules` | viewer | – | `{"timezone", "now", "items"}` |
+| POST | `/schedules` | operator | `{"name", "enabled", "action", "text", "lang", "playlist_id", "shuffle", "volume", "time", "days", "date"}` | สร้างตารางเวลา |
+| PATCH · DELETE | `/schedules/{id}` | operator | ฟิลด์ข้างบน (ใส่เฉพาะที่จะแก้) · – | แก้ · ลบ |
+| POST | `/schedules/{id}/run` | operator | – | ทดสอบเล่นทันที (ไม่สนเวลาและ `enabled` · `next_run` ไม่เปลี่ยน) |
+
+- `action` เป็น `say` (ต้องมี `text`, `lang` ไม่ใส่ก็ได้) หรือ `playlist` (ต้องมี `playlist_id`, `shuffle` ไม่ใส่ก็ได้) · `volume` 0–1 ไม่ใส่ก็ได้ · `name` ไม่เกิน 80 ตัวอักษร
+- เล่นได้เฉพาะเพลย์ลิสต์ที่แชร์ (แบบส่วนตัวได้ `400`)
+- `time` เป็น `HH:MM` (24 ชั่วโมง) ตามเขตเวลาของ server (env `TZ` ถ้าไม่มีใช้ของระบบ ถ้าไม่มีอีกใช้ UTC)
+- `days` คือวันในสัปดาห์ `0` (จันทร์) ถึง `6` (อาทิตย์) สำหรับตารางที่ทำซ้ำ · `days` ว่าง = ครั้งเดียวในวันที่ `date` (`YYYY-MM-DD`) ห้ามเป็นอดีต เล่นแล้วปิดตัวเอง
+- service ตรวจตารางที่ถึงเวลาทุก 15 วินาที · ช้าเกิน 5 นาที (เช่น service ปิดอยู่) จะข้ามและบันทึกเป็น `missed`
+- แต่ละรายการมี `next_run`, `last_run`, `last_result` (`ok`, `missed` หรือข้อความ error)
+- ตารางแบบเพลย์ลิสต์แทนที่คิวเดิมและเล่นแบบ repeat off · ถ้า `shuffle` เริ่มจากรายการสุ่ม
+
 ### แหล่งเพลง: วิทยุ พอดแคสต์ ไฟล์ของฉัน
 
 | Method | Path | สิทธิ์ | Body / query | หน้าที่ |
 |---|---|---|---|---|
 | GET | `/radio/search?q=&country=TH&tag=&limit=20` | viewer | – | ค้นสถานีจาก [radio-browser.info](https://www.radio-browser.info) (เรียงตามความนิยม) |
-| GET · POST | `/radio/favorites` | viewer · operator | `{"uuid"}` หรือ `{"url", "name"}` | สถานีโปรด · เพิ่ม (ซ้ำ `409`) |
+| GET · POST | `/radio/favorites` | viewer · operator | `{"uuid"}` หรือ `{"url", "name"}` | สถานีโปรด · เพิ่ม (สถานี radio-browser เดียวกันซ้ำ `409` · ลิงก์ stream ของตัวเองซ้ำได้) |
 | DELETE | `/radio/favorites/{id}` | operator | – | ลบสถานีโปรด |
 | POST | `/radio/play` | operator | `{"favorite_id"}` หรือ `{"uuid"}` หรือ `{"url", "name"}` + `"volume"` | เล่นวิทยุแบบ LIVE (ล้างคิว) |
 | GET | `/podcasts/search?q=&country=TH&limit=20` | viewer | – | ค้นรายการจาก iTunes Search API ได้ `feed_url` |
@@ -222,25 +260,28 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 | POST | `/local/resolve` | viewer | `{"kind", "source", "title", "lang", "thumbnail", "duration", "content_type"}` (เหมือน item ของเพลย์ลิสต์) | `{"kind", "url", "proxy_url", "content_type", "title", "duration", "thumbnail", "live"}` |
 | POST | `/local/played` | viewer | `{"title"}` | 204, ลง activity `device play` |
 | GET | `/local/stream?u=&t=&exp=&sig=` | ลิงก์เซ็น (จาก `proxy_url`) | - | relay สตรีมต้นทางแบบ streaming |
+| GET | `/local/hls?u=&exp=&sig=` | ลิงก์เซ็น (จาก `proxy_url`) | - | เพลย์ลิสต์ HLS ที่เปลี่ยนลิงก์ข้างในเป็นลิงก์ relay ที่เซ็นแล้ว |
 
 - ในเว็บ เลือก "This device" จากปุ่มชื่อลำโพง หน้าเล่นอยู่ เพลง และเพลย์ลิสต์ จะเล่นใน `<audio>` ของเบราว์เซอร์นั้นแทนลำโพง (คิว สุ่ม เล่นวน เลื่อนตำแหน่ง ระดับเสียง และปุ่มบนหน้าจอล็อกผ่าน Media Session ทำในเบราว์เซอร์) จำค่าไว้ต่อเครื่องใน `localStorage` (`spk.output`) ไม่เปลี่ยนสิ่งที่คนอื่นได้ยิน
 - ผู้ชม (viewer) ใช้ได้ด้วย รวมถึงดาวน์โหลด YouTube ที่ server ยังไม่มี เพราะเล่นแค่ที่เครื่องตัวเอง ส่วน endpoint ที่สั่งลำโพงยังเป็น operator ขึ้นไป · รายการ `file` ต้องเป็นไฟล์ที่ผู้เรียกมองเห็น ไม่งั้น `404`
 - `/local/resolve` ไม่ติดต่อลำโพงและไม่ลง activity (เบราว์เซอร์เรียกล่วงหน้าสำหรับเพลงถัดไป และเรียกซ้ำเมื่อลิงก์หมดอายุ) เบราว์เซอร์เรียก `/local/played` หนึ่งครั้งต่อการกดเล่น (เพลย์ลิสต์ลงชื่อเพลย์ลิสต์ ไม่ลงทุกเพลง ไม่ลงตอนเลื่อนตำแหน่ง): YouTube ดาวน์โหลดเข้า cache เดิมแล้วคืนลิงก์เซ็น `/yt/...` (path สัมพัทธ์กับ server นี้) ข้อความคืน `/tts.mp3?...` ไฟล์คืน `/media/...` ส่วนวิทยุ พอดแคสต์ และลิงก์คืน URL ต้นทาง
-- `proxy_url` (วิทยุ พอดแคสต์ ลิงก์ภายนอก ยกเว้น HLS) คือลิงก์เซ็นของ `/local/stream` ที่ server ดึงต้นทางแล้วส่งต่อทันทีโดยไม่เก็บ เบราว์เซอร์ใช้เมื่อจำเป็นเท่านั้น: สตรีม `http://` บนหน้า `https://` (mixed content, iPhone Safari), ชนิดไฟล์ที่ `canPlayType` บอกว่าเล่นไม่ได้ หรือเล่นลิงก์ตรงไม่ขึ้น relay รับเฉพาะ http(s) ไปยัง host สาธารณะ (ปฏิเสธ private/loopback/link-local ตรวจทุก redirect), ส่งต่อ content-type/Range, ปฏิเสธที่ไม่ใช่เสียง, เงียบ 30 วินาทีตัด, จำกัด 512 MB หรือ 6 ชั่วโมงต่อครั้ง และพร้อมกันได้ 8 สตรีม
-- ประกาศ พูดสด และตารางเวลาออกที่ลำโพงเสมอ · HLS เล่นได้เฉพาะ Safari (relay ไม่รองรับ HLS) · iOS ต้องแตะก่อนจึงมีเสียง และเล่นเบื้องหลังได้เท่าที่หน้าเว็บยังเล่นอยู่
+- `proxy_url` (วิทยุ พอดแคสต์ ลิงก์ภายนอก) คือลิงก์เซ็นของ `/local/stream` (หรือ `/local/hls` สำหรับ HLS) ที่ server ดึงต้นทางแล้วส่งต่อทันทีโดยไม่เก็บ เบราว์เซอร์ใช้เมื่อจำเป็นเท่านั้น: สตรีม `http://` บนหน้า `https://` (mixed content, iPhone Safari), ชนิดไฟล์ที่ `canPlayType` บอกว่าเล่นไม่ได้ หรือเล่นลิงก์ตรงไม่ขึ้น relay รับเฉพาะ http(s) ไปยัง host สาธารณะ (ปฏิเสธ private/loopback/link-local ตรวจทุก redirect), ส่งต่อ content-type/Range, ปฏิเสธที่ไม่ใช่เสียง, เงียบ 30 วินาทีตัด, จำกัด 512 MB หรือ 6 ชั่วโมงต่อครั้ง และพร้อมกันได้ 8 สตรีม (เกินได้ `503`) · อ่านสถานี SHOUTcast v1 ที่ตอบ `ICY 200 OK` ได้ · เชื่อมต่อเฉพาะ IP สาธารณะที่ตรวจแล้ว (กัน DNS rebinding)
+- HLS: `/local/hls` ดึงเพลย์ลิสต์ (ไม่เกิน 512 KB) แล้วเปลี่ยน URI ทุกตัวเป็นลิงก์เซ็น (เพลย์ลิสต์ย่อยผ่าน `/local/hls` segment/key/init ผ่าน `/local/stream`) เล่นได้ใน Safari และ Chrome รุ่นใหม่ เบราว์เซอร์ที่เล่น HLS ไม่ได้จะขึ้นข้อความให้เปิดที่ลำโพงแทน
+- สตรีม LIVE ที่จบหรือหลุด (รวมที่ relay ตัดตอนครบ 6 ชั่วโมง) ต่อใหม่เองด้วยลิงก์ใหม่ หลัง 1, 2, 4, 8, 16 วินาที ไม่เกิน 5 ครั้งติดกัน เล่นได้ 60 วินาทีแล้วนับใหม่
+- ประกาศ พูดสด และตารางเวลาออกที่ลำโพงเสมอ · iOS ต้องแตะก่อนจึงมีเสียง และเล่นเบื้องหลังได้เท่าที่หน้าเว็บยังเล่นอยู่
 
 ### พูดสด (live talk)
 
 หน้าเว็บอัดเสียงจากไมค์ด้วย MediaRecorder แล้วส่งเป็นชิ้นๆ ทาง `WebSocket /talk` server แปลงเป็น MP3 ด้วย ffmpeg
 แล้วให้ลำโพงเล่นลิงก์ `/talk/<id>/live` แบบ LIVE เสียงจะช้ากว่าจริงประมาณ 2–5 วินาที และลำโพงพูดกลับไม่ได้ (ไม่มีไมค์ให้ใช้)
 
-- ยืนยันตัวตนด้วย cookie `sid` (operator ขึ้นไป) และ `Origin` ต้องเป็นโดเมนเดียวกัน · script ใช้ header `Authorization: Bearer <token>` ได้
+- ยืนยันตัวตนด้วย cookie `sid` (operator ขึ้นไป) และ `Origin` ต้องเป็นโดเมนเดียวกัน (host ของคำขอหรือ host ของ `public_base_url`) · script ใช้ header `Authorization: Bearer <token>` ได้
 - พูดได้ทีละคน คนที่สองได้ `{"type": "error", "code": "busy"}` · ระหว่างพูดเพลงหยุด พูดจบแล้วเล่นต่อเหมือนหลังประกาศ
-- `GET /talk/status` (operator) บอกว่า server มี ffmpeg ไหม (`available`) และใครกำลังพูด (`active`) · `/status` มี `talking`
+- `GET /talk/status` (operator) บอกว่า server มี ffmpeg ไหม (`available`) พูดได้นานสุดกี่วินาที (`max_seconds`) และใครกำลังพูด (`active`) · `/status` มี `talking`
 
 | ทิศทาง | ข้อความ | ความหมาย |
 |---|---|---|
-| → | `{"type": "start", "mime": "audio/webm;codecs=opus", "chime": true, "volume": 0.6}` | ข้อความแรก (ภายใน 10 วินาที) `mime` รับ `audio/webm`, `audio/ogg`, `audio/mp4` (Safari) |
+| → | `{"type": "start", "mime": "audio/webm;codecs=opus", "chime": true, "volume": 0.6}` | ข้อความแรก (ภายใน 10 วินาที) `mime` รับ `audio/webm`, `video/webm`, `audio/ogg`, `audio/mp4` (Safari), `audio/x-m4a` |
 | ← | `{"type": "ready", "id", "max_seconds", "format"}` | เริ่มส่งเสียง (binary frame ของ MediaRecorder) ได้ |
 | ← | `{"type": "live"}` | ลำโพงเริ่มเล่นสตรีมแล้ว (หลังเสียง chime ถ้าเปิด) |
 | → | `{"type": "ping"}` · `{"type": "stop"}` | ได้ `{"type": "pong"}` · จบการพูด |
@@ -267,12 +308,18 @@ the VM's own ports; the relay reaches the broker over `wss://` through the tunne
 2. **Tunnel.** Create a Cloudflare Tunnel with two public hostnames:
    `speaker.example.com` → `http://speaker-service:8090` (web UI and the signed media paths) and
    `mqtt.example.com` → `http://mosquitto:9001` (Cloudflare carries WebSockets; it terminates TLS).
-3. **Service.** `cp deploy/remote/.env.example deploy/remote/.env`, fill it in (`PUBLIC_BASE_URL` =
-   `https://speaker.example.com`, `MQTT_PASSWORD` = the `speaker-service` password), then
-   `docker compose -f deploy/remote/docker-compose.yml up -d --build`.
+   These names only resolve inside the compose network, so run `cloudflared` from the compose file; a `cloudflared`
+   installed on the host answers 502.
+3. **Service.** `cp deploy/remote/.env.example deploy/remote/.env` (then `chmod 600`), fill it in
+   (`PUBLIC_BASE_URL` = `https://speaker.example.com`, `MQTT_PASSWORD` = the `speaker-service` password,
+   `CLOUDFLARE_TUNNEL_TOKEN`), then `docker compose -f deploy/remote/docker-compose.yml up -d --build`.
+   For the first admin, read the API token as shown in "ติดตั้ง (Docker บน VM)".
 4. **Relay.** Flash `firmware/` to an ESP32 next to the speaker (see `firmware/README.md`) and set the
    broker to `wss://mqtt.example.com` with the `relay-1` login. The firmware trusts the public root CAs
    Cloudflare uses; no CA upload is needed. ESP8266 can't do MQTT over WebSocket.
+
+The service's port is bound to the VM's loopback (`127.0.0.1:8090`) only. To reach the web UI other than through
+the tunnel, use an SSH tunnel (`ssh -L 8090:127.0.0.1:8090 <vm>`).
 
 A managed broker (HiveMQ Cloud, EMQX Cloud, ...) still works: point `MQTT_HOST`/`MQTT_PORT`/`MQTT_TLS` at it
 instead of the `mosquitto` service, and give the relay its host, port 8883 and TLS.
@@ -280,8 +327,8 @@ instead of the `mosquitto` service, and give the relay its host, port 8883 and T
 Settings can also live in `config.json` (`"transport": "mqtt"`, an `mqtt` block, `public_base_url`).
 The environment variables `SPEAKER_TRANSPORT`, `PUBLIC_BASE_URL`, `MQTT_HOST`, `MQTT_PORT`, `MQTT_TLS`,
 `MQTT_CA_FILE`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_BASE_TOPIC` and `MQTT_CLIENT_ID` override it and
-are never written back to the file. The MQTT password is never returned by `/settings` or written to the
-activity log.
+are never written back to the file. The MQTT password is never returned by `/settings` (only `password_set`) or
+written to the activity log.
 
 How it behaves:
 
@@ -352,7 +399,7 @@ keep your own copy of them (they hold secrets, so not in git).
 - `volume` ใน body เป็นค่าที่ไม่ต้องใส่ก็ได้
 - `say` ขัดเพลง YouTube ที่ service เล่นอยู่แล้วกลับมาเล่นต่อให้เอง (ประกาศติดกันหลายครั้งก็ได้) ถ้าระหว่างนั้นสั่ง `stop`, `youtube` หรือ `play` จะไม่กลับไปเล่นเพลงเดิม
 - แอปอื่นที่ลำโพงเล่นอยู่ (เช่น Spotify) จะหยุดและไม่กลับมาเล่นต่อ
-- YouTube ถูกดาวน์โหลดเก็บไว้ใน `cache/` (เก็บ 20 ไฟล์ล่าสุด) เพราะ YouTube ไม่ยอมให้ proxy stream ตรง
+- YouTube ถูกดาวน์โหลดเก็บไว้ใน `cache/` (เก็บล่าสุดตาม `cache_keep` ค่าเริ่มต้น 20 ไฟล์) เพราะ YouTube ไม่ยอมให้ proxy stream ตรง
 - **โฆษณา YouTube:** service ดาวน์โหลดเฉพาะสตรีมเสียง (`YT_FORMAT`) ด้วย yt-dlp โฆษณาที่ YouTube แทรกจึงไม่เคยเล่น
   ที่อาจเหลือคือช่วงที่ครีเอเตอร์พูดโฆษณาเองในวิดีโอ ตั้ง `yt_skip_segments` (หน้า "ตั้งค่าลำโพง" เฉพาะเจ้าของ) ให้ yt-dlp
   ดึงช่วงจาก SponsorBlock (sponsor.ajay.app ฐานข้อมูลสาธารณะ) แล้วตัดด้วย ffmpeg หลังดาวน์โหลด ชื่อไฟล์ cache มีแท็กของหมวดที่ตัด
@@ -368,13 +415,13 @@ keep your own copy of them (they hold secrets, so not in git).
 ## โครงสร้างโปรเจกต์
 
 ```
-app.py                 FastAPI service: TTS, YouTube cache, คิว, settings, API ทั้งหมด
+app.py                 FastAPI service: TTS, YouTube cache, คิว, ตารางเวลา, settings, API ทั้งหมด
 talk.py                พูดสด: ffmpeg แปลงเสียงไมค์เป็น MP3 สตรีม เสียง chime
 transport.py           ช่องทางสั่งลำโพง: Cast ตรง (pychromecast) หรือผ่าน ESP32 relay ทาง MQTT
 auth.py                รหัสผ่าน (scrypt), session token, จำกัดการล็อกอินผิด
 google_signin.py       ตรวจ ID token ของ "Sign in with Google" (ลายเซ็น, aud, iss, exp)
 passkeys.py            passkey (WebAuthn): RP จาก public_base_url, challenge ใช้ครั้งเดียว, ตรวจ response
-store.py               SQLite: ผู้ใช้ session เพลย์ลิสต์ ข้อความด่วน กำหนดการ สถานีโปรด ไฟล์อัปโหลด บันทึกกิจกรรม
+store.py               SQLite: ผู้ใช้ session เพลย์ลิสต์ ข้อความด่วน ตารางเวลา สถานีโปรด ไฟล์อัปโหลด บันทึกกิจกรรม
 player.py              คิวเพลง (ลำดับเล่น shuffle repeat)
 static/                หน้าเว็บควบคุม
 speakerctl             จัดการ LaunchAgent บน macOS
