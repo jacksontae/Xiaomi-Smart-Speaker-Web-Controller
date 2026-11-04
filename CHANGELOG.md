@@ -15,8 +15,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Owners unlink a member's Google account and remove their passkeys in Members, for a lost phone or a Google
   account that isn't theirs any more (`GET /users/{id}/passkeys`, `DELETE /users/{id}/passkeys/{pid}`,
   `DELETE /users/{id}/google`). The member is signed out of every device; the API won't take away their only way in.
+- Seek on the speaker: operators drag the Now page's progress bar (or use the arrow keys) and one `POST /seek`
+  is sent when they let go. `/status` media has `seekable` (false for live streams and for a relay before
+  protocol 2).
+- Relay firmware 0.2.0 (not tested on hardware): a `seek` command (`POST /api/seek`, `{"cmd":"seek"}`) and
+  status `proto` 2.
 
 ### Fixed
+- Relay firmware: a play onto a cold speaker runs step by step from the main loop, so MQTT, HTTP and status
+  keep running while the speaker starts (it used to block for up to ~40 s).
 - On iPad, desktop and iPhone in landscape the scrolled page header is a floating glass bar instead of a flat strip
   that ran into the sidebar, and the sidebar clears the iPhone notch in landscape.
 - The relay plays SHOUTcast v1 stations that answer `ICY 200 OK`.
