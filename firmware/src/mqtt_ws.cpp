@@ -97,6 +97,7 @@ void WsMqtt::onEvent(void* arg, const char*, int32_t id, void* data) {
             self->connected_ = true;
             self->justConnected_ = true;
             break;
+        case MQTT_EVENT_BEFORE_CONNECT:  // a (re)connect attempt starts, so we can't be connected
         case MQTT_EVENT_DISCONNECTED:
             self->connected_ = false;
             break;
@@ -114,6 +115,11 @@ void WsMqtt::onEvent(void* arg, const char*, int32_t id, void* data) {
             break;
         }
         case MQTT_EVENT_ERROR:
+            // Transport errors and refusals end the connection (esp-mqtt also sends DISCONNECTED, but don't
+            // rely on it); other error types (e.g. a failed subscribe in newer esp-mqtt) don't.
+            if (ev->error_handle && (ev->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT ||
+                                     ev->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED))
+                self->connected_ = false;
             if (ev->error_handle && ev->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
                 Serial.printf("[mqtt] transport error (tls 0x%x, errno %d)\n", ev->error_handle->esp_tls_last_esp_err,
                               ev->error_handle->esp_transport_sock_errno);

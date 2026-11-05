@@ -11,6 +11,7 @@
 
 #include "cast_client.h"
 #include "config.h"
+#include "conn_watchdog.h"
 #include "mqtt_ws.h"
 #include "platform.h"
 
@@ -27,6 +28,8 @@ static const uint32_t kWifiTimeoutMs = 20000;
 static const uint32_t kStatusEveryMs = 30000;
 static const uint32_t kStatusMinGapMs = 1000;  // on-change status is rate-limited to one per second
 static const int kProtocol = 2;               // bump when the MQTT JSON shape changes (2: "seek")
+// Left in RTC memory before a watchdog restart, so the next boot reports why (low byte: 1 Wi-Fi, 2 MQTT).
+static const uint32_t kRestartNoteMagic = 0x57D06000;
 
 Config config;
 CastClient cast;
@@ -47,6 +50,8 @@ uint32_t lastMqttTry = 0;
 uint32_t lastStatus = 0;
 uint32_t statusSeq = 0;
 uint32_t publishedChanges = 0;
+connwd::Watchdog watchdog;
+const char* resetReason = "unknown";  // for the status JSON; "watchdog_wifi"/"watchdog_mqtt" after our own restart
 
 // The play that CastClient is still driving (one at a time) and who waits for its result.
 struct PendingPlay {
@@ -609,6 +614,7 @@ static void publishStatus() {
     doc["ip"] = WiFi.localIP().toString();
     doc["rssi"] = WiFi.RSSI();
     doc["heap"] = ESP.getFreeHeap();
+    doc["reset_reason"] = resetReason;
     cast.status(doc["speaker"].to<JsonObject>());  // cached; never blocks the loop on the speaker
     publishJson(config.baseTopic() + "/status", doc, true);
 }
@@ -625,9 +631,52 @@ static bool resetRequested() {
     return false;
 }
 
+static void readResetReason() {
+    resetReason = resetReasonName();
+    uint32_t note = readRestartNote();
+    writeRestartNote(0);
+    if (!strcmp(resetReason, "software") && note == (kRestartNoteMagic | 1)) resetReason = "watchdog_wifi";
+    if (!strcmp(resetReason, "software") && note == (kRestartNoteMagic | 2)) resetReason = "watchdog_mqtt";
+}
+
+static void watchdogRestart(uint32_t note, const char* why) {
+    Serial.printf("[%s] restarting\n", why);
+    writeRestartNote(kRestartNoteMagic | note);
+    delay(100);  // let Serial drain
+    ESP.restart();
+}
+
+// Recovers from a Wi-Fi or MQTT client that stays down (see conn_watchdog.h).
+static void loopWatchdog() {
+    connwd::View v;
+    v.wifiUp = WiFi.status() == WL_CONNECTED;
+    v.mqttWanted = config.mqttHost.length() > 0;
+    v.mqttUp = mqttConnected();
+    switch (watchdog.step(v, millis())) {
+        case connwd::Action::ReconnectWifi:
+            Serial.printf("[wifi] still not connected (status %d); joining \"%s\" again\n", (int)WiFi.status(),
+                          config.wifiSsid.c_str());
+            WiFi.disconnect();
+            WiFi.begin(config.wifiSsid.c_str(), config.wifiPass.c_str());
+            break;
+        case connwd::Action::RestartNoWifi:
+            Serial.printf("[wifi] no Wi-Fi for %u min\n", (unsigned)(connwd::kWifiRestartMs / 60000));
+            watchdogRestart(1, "wifi");
+            break;
+        case connwd::Action::RestartNoMqtt:
+            Serial.printf("[mqtt] no broker connection for %u min with Wi-Fi up\n",
+                          (unsigned)(connwd::kMqttRestartMs / 60000));
+            watchdogRestart(2, "mqtt");
+            break;
+        default:
+            break;
+    }
+}
+
 void setup() {
     Serial.begin(115200);
-    Serial.printf("\nSpeaker Relay %s\n", RELAY_VERSION);
+    readResetReason();
+    Serial.printf("\nSpeaker Relay %s (reset: %s)\n", RELAY_VERSION, resetReason);
     if (!mountFs()) Serial.println("[fs] LittleFS mount failed");
     if (resetRequested()) {
         Serial.println("[setup] BOOT held: settings wiped");
@@ -645,7 +694,19 @@ void setup() {
     // settings from anyone nearby). Keep retrying the saved network; hold BOOT at power-on to reconfigure.
     setStationHostname(config.deviceName.c_str());  // must precede WiFi.mode() to reach DHCP
     WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
+    WiFi.setAutoReconnect(true);  // not enough on its own: the core gives up after some disconnect reasons
+#if defined(ESP32)
+    // The core logs disconnect reasons only at a debug level we don't build with; print each new one.
+    static volatile uint8_t lastReason = 0;
+    WiFi.onEvent(
+        [](WiFiEvent_t, WiFiEventInfo_t info) {
+            uint8_t reason = info.wifi_sta_disconnected.reason;
+            if (reason != lastReason) Serial.printf("[wifi] disconnected (reason %u)\n", reason);
+            lastReason = reason;
+        },
+        ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t) { lastReason = 0; }, ARDUINO_EVENT_WIFI_STA_GOT_IP);
+#endif
     WiFi.begin(config.wifiSsid.c_str(), config.wifiPass.c_str());
     uint32_t start = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - start < kWifiTimeoutMs) delay(200);
@@ -653,6 +714,7 @@ void setup() {
         Serial.printf("[wifi] can't join \"%s\" yet; retrying in the background\n", config.wifiSsid.c_str());
     startApi();
     setupMqtt();
+    watchdog.begin(millis());
 }
 
 void loop() {
@@ -678,6 +740,7 @@ void loop() {
     deliverPlayResult();
     loopMqtt();
     publishStatus();
+    loopWatchdog();
 }
 
 // loop() minus the web server (its handler is what is waiting), for an HTTP play in progress.
