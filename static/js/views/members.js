@@ -5,16 +5,19 @@
 // tablets in landscape (>= 960 px) get the list | editor panes.
 // Server: GET/POST /users, PATCH/DELETE /users/{id}. Guards come back as 409 (yourself, last enabled owner).
 // Google accounts and passkeys are linked by each member in their own Account page, so here they are read-only.
-import { h, append, icon, iconBtn, field, passwordInput, busy, segmented, tip, toast } from '../ui.js';
+import { h, append, icon, iconBtn, field, passwordInput, busy, segmented, tip, toast, headerSub } from '../ui.js';
 import { register, t, roleLabel } from '../i18n.js';
 import { errorText } from '../api.js';
-import { card, badge, linkRow, tile, switchInput, settingRow, phoneBack, fmtWhen, gMark, toneOf, initialOf } from '../kit.js';
+import { card, badge, linkRow, tile, switchInput, settingRow, phoneBack, fmtWhen, gMark, toneStyle, initialOf } from '../kit.js';
 import { isAndroid } from '../prefs.js';
 import { kitCss, fab, fullDialog } from '../android-kit.js';
 import { glyph } from '../icons.js';
 
 register({
   en: {
+    // the header's context line (Android)
+    'mem.ctxAll': (n) => (n === 1 ? '1 person, active' : `${n} people, all active`),
+    'mem.ctxOff': (n, o) => `${n} people, ${o} disabled`,
     'mem.add': 'Add member', 'mem.addShort': 'Add', 'mem.you': '(you)', 'mem.list': 'Members',
     'mem.lastActive': (w) => `Last active ${w}`, 'mem.never': 'Hasn\'t signed in yet', 'mem.cantSign': 'Can\'t sign in anymore',
     'mem.password': 'Password', 'mem.hasPk': 'Has a passkey', 'mem.noPk': 'No passkey yet', 'mem.disabled': 'Disabled',
@@ -58,6 +61,8 @@ register({
     'mem.yours': 'Your account', 'mem.others': 'Other people',
   },
   th: {
+    'mem.ctxAll': (n) => (n === 1 ? '1 คน ใช้งานได้' : `${n} คน ใช้งานได้ทุกคน`),
+    'mem.ctxOff': (n, o) => `${n} คน ปิดใช้งานอยู่ ${o} คน`,
     'mem.add': 'เพิ่มสมาชิก', 'mem.addShort': 'เพิ่ม', 'mem.you': '(คุณ)', 'mem.list': 'รายชื่อสมาชิก',
     'mem.lastActive': (w) => `เข้าใช้ล่าสุด${w}`, 'mem.never': 'ยังไม่เคยเข้าใช้', 'mem.cantSign': 'เข้าระบบไม่ได้แล้ว',
     'mem.password': 'รหัสผ่าน', 'mem.hasPk': 'มีพาสคีย์', 'mem.noPk': 'ยังไม่มีพาสคีย์', 'mem.disabled': 'ปิดใช้งาน',
@@ -145,8 +150,9 @@ export function render(ctx) {
   // Android tablets (AT_Members): the same link is a row of the Your account card; members.css picks one by width
   const mineMethods = android ? h('div', { class: 'm-mine-methods', role: 'listitem' },
     linkRow({ href: '#/auth', title: t('mem.methods'), sub: t('mem.methodsAll'), lead: tile(icon('lock'), 'plain') })) : null;
+  const head = phoneBack(ctx.header({ title: t('nav.members'), back: { href: '#/account', label: t('nav.account') }, actions }));
   const node = h('div', { class: 'page m-page' },
-    phoneBack(ctx.header({ title: t('nav.members'), back: { href: '#/account', label: t('nav.account') }, actions })),
+    head,
     h('div', { class: 'm-grid' }, h('div', { class: 'm-left' }, ...lists, methods), pane));
   fab(ctx, { icon: glyph('user-plus'), label: t('mem.add'), onclick: () => addMember(), replaces: plus });
 
@@ -174,7 +180,7 @@ export function render(ctx) {
       type: 'button', class: 'm-row', role: 'listitem', 'aria-current': desk() && u.id === selected ? 'true' : null,
       onclick: () => open(u.id),
     },
-    h('span', { class: 'avatar', style: { background: toneOf(u.id) }, 'aria-hidden': 'true' }, initialOf(u.display_name)),
+    h('span', { class: 'avatar', style: toneStyle(u.id), 'aria-hidden': 'true' }, initialOf(u.display_name)),
     h('span', { class: 'm-tx' },
       h('span', { class: 'm-name' }, u.display_name, self ? ` ${t('mem.you')}` : ''),
       h('span', { class: 'm-seen' }, h('b', {}, u.username), ' ', seen),
@@ -184,6 +190,8 @@ export function render(ctx) {
   }
 
   function paintList() {
+    const off = users.filter((u) => u.disabled).length;
+    headerSub(head, !users.length ? '' : off ? t('mem.ctxOff', users.length, off) : t('mem.ctxAll', users.length));
     const shown = android ? users.filter((u) => u.id !== me.id) : users;
     list.replaceChildren(...(shown.length ? shown.map(rowOf) : [h('p', { class: 'c-empty' }, t('mem.empty'))]));
     if (!android) return;
@@ -250,7 +258,7 @@ export function render(ctx) {
     });
 
     const head = sheet ? null : h('div', { class: 'm-ed-head' },
-      h('span', { class: 'avatar lg', style: { background: toneOf(u.id) }, 'aria-hidden': 'true' }, initialOf(u.display_name)),
+      h('span', { class: 'avatar lg', style: toneStyle(u.id), 'aria-hidden': 'true' }, initialOf(u.display_name)),
       h('div', { class: 'm-ed-ht' }, h('p', { class: 'm-ed-name' }, u.display_name), h('p', { class: 'small' }, t('mem.usernameLine', u.username))),
       isAndroid() ? save : null);
 

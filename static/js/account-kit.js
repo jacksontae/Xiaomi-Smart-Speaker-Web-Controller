@@ -9,7 +9,8 @@ import { get as getPref, set as setPref, motionReduced, onChange as onPrefs } fr
 import { googleCredential } from './signin.js';
 import { createPasskey, createError, passkeyCapable, deviceName } from './passkey-offer.js';
 import { glyph } from './icons.js';
-import { card, badge, tile, gMark, fmtDay, fmtWhen, toneOf, initialOf, settingRow, linkRow } from './kit.js';
+import { card, badge, tile, gMark, fmtDay, fmtWhen, toneStyle, initialOf, settingRow, linkRow, switchInput } from './kit.js';
+import { hearing as hearTalkie, setHearing as setHearTalkie } from './talkie.js';
 
 register({
   en: {
@@ -42,6 +43,7 @@ register({
     'ca.mHelpSys': (on) => (on ? 'Your device asks for less motion, so animations are off.' : 'Your device allows motion, so animations are on.'),
     'ca.mHelpOn': 'Animations are off in this app.', 'ca.mHelpOff': 'Animations are on in this app.',
     'ca.tour': 'Show quick tour again', 'ca.tourSub': 'A short walk through Now playing and the main pages.',
+    'ca.talkie': 'Hear Talkie on this device', 'ca.talkieSub': 'Play other members’ Walkie talks live while the Walkie is open here.',
     'ca.deviceOnly': 'Saved on this device only.',
   },
   th: {
@@ -74,6 +76,7 @@ register({
     'ca.mHelpSys': (on) => (on ? 'เครื่องนี้ตั้งให้ลดการเคลื่อนไหว ภาพเคลื่อนไหวจึงปิดอยู่' : 'เครื่องนี้ไม่ได้ลดการเคลื่อนไหว ภาพเคลื่อนไหวจึงเปิดอยู่'),
     'ca.mHelpOn': 'ภาพเคลื่อนไหวในแอปปิดอยู่', 'ca.mHelpOff': 'ภาพเคลื่อนไหวในแอปเปิดอยู่',
     'ca.tour': 'ดูทัวร์แนะนำอีกครั้ง', 'ca.tourSub': 'พาดูหน้าเล่นอยู่และหน้าหลักต่าง ๆ แบบสั้น ๆ',
+    'ca.talkie': 'ฟังทอล์คกี้บนอุปกรณ์นี้', 'ca.talkieSub': 'เล่นเสียงวอล์กกี้ของสมาชิกคนอื่นสดๆ ขณะเปิดวอล์กกี้บนเครื่องนี้',
     'ca.deviceOnly': 'บันทึกไว้เฉพาะในอุปกรณ์นี้',
   },
 });
@@ -86,7 +89,7 @@ export async function freshAuth(ctx) {
 /** Avatar, name (with the pencil when ctx is given), username and role. */
 export function profileHead(user, ctx) {
   return h('div', { class: 'ca-head' },
-    h('span', { class: 'avatar lg', style: { background: toneOf(user.id) }, 'aria-hidden': 'true' }, initialOf(user.display_name)),
+    h('span', { class: 'avatar lg', style: toneStyle(user.id), 'aria-hidden': 'true' }, initialOf(user.display_name)),
     h('div', { class: 'ca-head-tx' }, ctx ? nameLine(ctx, user) : h('p', { class: 'ca-name' }, user.display_name), h('p', { class: 'small' }, t('ca.username', user.username))),
     badge(roleLabel(user.role), user.role === 'admin' ? '' : 'plain'));
 }
@@ -299,5 +302,7 @@ export function appPrefsCard(ctx, { split = false } = {}) {
   // replay the first-run quick tour on the Now page (js/tour.js)
   const tourRow = linkRow({ title: t('ca.tour'), sub: t('ca.tourSub'), onclick: () => import('./tour.js').then((m) => m.replay({ user: ctx.user })) });
   tourRow.classList.add('c-tour');
-  return split ? [...blocks.map((b) => card(b)), card(tourRow)] : [card(...blocks, tourRow)];
+  // Talkie (talkie.js): other members' walkie talks play here live (with the Walkie open) unless this is off
+  const talkieRow = settingRow({ title: t('ca.talkie'), sub: t('ca.talkieSub'), control: switchInput(hearTalkie(), setHearTalkie) });
+  return split ? [...blocks.map((b) => card(b)), card(talkieRow), card(tourRow)] : [card(...blocks, talkieRow, tourRow)];
 }

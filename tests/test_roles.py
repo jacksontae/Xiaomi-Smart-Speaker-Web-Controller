@@ -5,9 +5,10 @@ from fastapi.routing import APIRoute
 
 # (method, path) -> minimum role; None = public. Adding a route without listing it here fails the suite.
 # Viewers may also edit their own personal playlists and files (checked per row, 403/404 in the handler), skip
-# through the speaker's queue, and search music sources for This device.
+# through the speaker's queue, search music sources for This device, and follow podcasts (personal to each member).
 ROLE_TABLE = {
     ("GET", "/auth/state"): None,
+    ("GET", "/about"): None,
     ("POST", "/auth/setup"): None,
     ("POST", "/auth/login"): None,
     ("POST", "/auth/logout"): "viewer",
@@ -15,6 +16,8 @@ ROLE_TABLE = {
     ("POST", "/auth/password"): "viewer",
     ("POST", "/auth/google"): None,
     ("PATCH", "/me"): "viewer",
+    ("DELETE", "/me"): "viewer",
+    ("GET", "/me/export"): "viewer",
     ("POST", "/me/google"): "viewer",
     ("DELETE", "/me/google"): "viewer",
     ("POST", "/auth/passkey/options"): None,
@@ -76,6 +79,10 @@ ROLE_TABLE = {
     ("GET", "/podcasts/search"): "viewer",
     ("GET", "/podcasts/episodes"): "viewer",
     ("POST", "/podcasts/play"): "operator",
+    ("GET", "/podcasts/subs"): "viewer",
+    ("POST", "/podcasts/subs"): "viewer",
+    ("POST", "/podcasts/subs/{sub_id}/seen"): "viewer",
+    ("DELETE", "/podcasts/subs/{sub_id}"): "viewer",
     ("GET", "/files"): "viewer",
     ("POST", "/files"): "viewer",
     ("PATCH", "/files/{file_id}"): "viewer",
@@ -85,6 +92,11 @@ ROLE_TABLE = {
     ("POST", "/local/resolve"): "viewer",
     ("POST", "/local/played"): "viewer",
     ("GET", "/talk/status"): "operator",
+    # Talkie: every member talks to every other one (the /talkie WebSocket checks the same way).
+    ("GET", "/talkie/live/{talk_id}"): "viewer",
+    ("GET", "/talkie/clips"): "viewer",
+    ("GET", "/talkie/clips/{clip_id}.mp3"): "viewer",
+    ("DELETE", "/talkie/clips/{clip_id}"): "viewer",  # and only its author
     # Fetched by the speaker with signed URLs, or the public web UI.
     ("GET", "/tts.mp3"): "signed",
     ("GET", "/yt/{filename}"): "signed",
@@ -137,7 +149,8 @@ def test_role_table_covers_every_route(app):
 
 def _url(path):
     return path.format(user_id=999, playlist_id=999, item_id=999, phrase_id=999, schedule_id=999,
-                       passkey_id=999, favorite_id=999, file_id=999, filename="x.m4a")
+                       passkey_id=999, favorite_id=999, file_id=999, sub_id=999, filename="x.m4a",
+                       talk_id="x", clip_id="x")
 
 
 def _call(client, method, path):

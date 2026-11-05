@@ -16,6 +16,8 @@ register({
     'pref.deviceNote': 'These settings are for you on this device only.',
     'pref.methodsSub': 'Google, passkeys and passwords for everyone',
     'pref.pwSub': 'Changing it signs out your other devices.',
+    'pref.about': 'About', 'pref.aboutApp': 'About this app',
+    'pref.aboutSub': (v) => (v ? `Version ${v}, privacy and licenses` : 'Version, privacy and licenses'),
   },
   th: {
     'pref.account': 'บัญชี', 'pref.app': 'แอป', 'pref.speaker': 'ลำโพง',
@@ -23,6 +25,8 @@ register({
     'pref.deviceNote': 'การตั้งค่าเหล่านี้ใช้กับคุณบนเครื่องนี้เท่านั้น',
     'pref.methodsSub': 'Google พาสคีย์ และรหัสผ่านของทุกคน',
     'pref.pwSub': 'เปลี่ยนแล้ว อุปกรณ์อื่นที่เข้าบัญชีนี้อยู่จะถูกออกจากระบบ',
+    'pref.about': 'เกี่ยวกับ', 'pref.aboutApp': 'เกี่ยวกับแอปนี้',
+    'pref.aboutSub': (v) => (v ? `เวอร์ชัน ${v} ความเป็นส่วนตัว และสัญญาอนุญาต` : 'เวอร์ชัน ความเป็นส่วนตัว และสัญญาอนุญาต'),
   },
 });
 
@@ -51,11 +55,14 @@ export function large(ctx, auth, title) {
     settingRow({ title: t('ca.password'), sub: t('pref.pwSub'), control: pwBtn }),
     googleRow(ctx, auth, user, { title: t('ca.gLinkedTitle') }));
   const pk = passkeySection(ctx, auth);
+  const aboutSub = h('span', {}, t('pref.aboutSub'));
+  ctx.api('/about', { signal: ctx.signal }).then((a) => { aboutSub.textContent = t('pref.aboutSub', a.version); }).catch(() => {});
   const left = h('div', { class: 'c-col' },
     caption(t('pref.account')), acctCard,
     pk ? [caption(t('ca.passkeys')), pk.card, pk.note] : null,
     ctx.can('admin') ? [caption(roleLabel('admin')), card(linkRow({ href: '#/auth', title: t('nav.auth'), sub: t('pref.methodsSub'), lead: tile(icon('lock'), 'plain') }))] : null);
   const right = h('div', { class: 'c-col' }, caption(t('pref.app')), appPrefsCard(ctx), h('p', { class: 'c-note' }, t('pref.deviceNote')),
-    ctx.can('admin') ? [caption(t('pref.speaker')), card(linkRow({ href: '#/settings', title: t('nav.settings'), sub: t('pref.speakerSub'), lead: tile(glyph('gear'), 'lamp') }))] : null);
+    ctx.can('admin') ? [caption(t('pref.speaker')), card(linkRow({ href: '#/settings', title: t('nav.settings'), sub: t('pref.speakerSub'), lead: tile(glyph('gear'), 'lamp') }))] : null,
+    caption(t('pref.about')), card(linkRow({ href: '#/about', title: t('pref.aboutApp'), sub: aboutSub, lead: tile(icon('info'), 'plain') })));
   return h('div', { class: 'page p-page' }, ctx.header({ title }), h('div', { class: 'c-cols' }, left, right));
 }

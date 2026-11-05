@@ -3,7 +3,7 @@
 // language, resume after announcements), Storage (YouTube cache, SponsorBlock segment removal), Connection (transport + relay health read-only,
 // API token info, port). Language/appearance live in App settings (per device). One Save for the page.
 // The API token can't be changed over the API (the server refuses); the page says where to rotate it.
-import { h, icon, busy, segmented, toast } from '../ui.js';
+import { h, icon, busy, segmented, toast, headerSub } from '../ui.js';
 import { register, t } from '../i18n.js';
 import { errorText } from '../api.js';
 import { caption, card, settingRow, switchInput, linkRow, tile, phoneBack, fmtWhen } from '../kit.js';
@@ -11,7 +11,12 @@ import { glyph } from '../icons.js';
 
 register({
   en: {
+    // the header's context line (Android)
+    'set.ctxOk': 'Speaker connected', 'set.ctxOff': 'Can\'t reach the speaker',
+    'set.ctxDirty': 'You have unsaved changes', 'set.ctxPending': 'Speaker changed, not saved yet',
     'set.speaker': 'Speaker', 'set.name': 'Speaker name', 'set.nameHelp': 'Shown in the app and in Activity.',
+    'set.contact': 'Contact for members', 'set.contactPh': 'e.g. it@example.com or a LINE id',
+    'set.contactHelp': 'Shown on the About page to signed-in members, so they know who to ask about this server. Leave it empty to hide it.',
     'set.ip': 'Speaker address (IP)', 'set.ipHelp': 'The speaker\'s address on this network, like 192.0.2.10.',
     'set.connectedAt': (ip) => `Connected at ${ip}`, 'set.offline': 'Can\'t reach the speaker right now.',
     'set.checking': 'Checking the speaker…',
@@ -49,7 +54,11 @@ register({
     'set.lang.th': 'ไทย', 'set.lang.en': 'English', 'set.lang.ja': '日本語',
   },
   th: {
+    'set.ctxOk': 'ลำโพงเชื่อมต่ออยู่', 'set.ctxOff': 'ติดต่อลำโพงไม่ได้',
+    'set.ctxDirty': 'มีการแก้ไขที่ยังไม่บันทึก', 'set.ctxPending': 'เปลี่ยนลำโพงแล้ว รอบันทึก',
     'set.speaker': 'ลำโพง', 'set.name': 'ชื่อลำโพง', 'set.nameHelp': 'แสดงในแอปและในประวัติการใช้งาน',
+    'set.contact': 'ช่องทางติดต่อเจ้าของ', 'set.contactPh': 'เช่น it@example.com หรือ LINE id',
+    'set.contactHelp': 'แสดงในหน้าเกี่ยวกับแอปให้สมาชิกที่เข้าสู่ระบบแล้วเห็น จะได้รู้ว่าต้องถามใครเรื่องเซิร์ฟเวอร์นี้ เว้นว่างไว้เพื่อซ่อน',
     'set.ip': 'ที่อยู่ลำโพง (IP)', 'set.ipHelp': 'ที่อยู่ของลำโพงในเครือข่ายนี้ เช่น 192.0.2.10',
     'set.connectedAt': (ip) => `เชื่อมต่ออยู่ที่ ${ip}`, 'set.offline': 'ตอนนี้ติดต่อลำโพงไม่ได้',
     'set.checking': 'กำลังตรวจลำโพง…',
@@ -108,8 +117,9 @@ export function render(ctx) {
   const left = h('div', { class: 'c-col' });
   const right = h('div', { class: 'c-col' });
   const bottomSave = h('button', { type: 'button', class: 'btn primary big wide c-phone-only', disabled: true, onclick: () => save() }, t('common.save'));
+  const head = phoneBack(ctx.header({ title: t('nav.settings'), back: { href: '#/account', label: t('nav.account') }, actions: h('div', { class: 'c-save c-large-only' }, dirtyNote, saveBtn) }));
   const node = h('div', { class: 'page s-page' },
-    phoneBack(ctx.header({ title: t('nav.settings'), back: { href: '#/account', label: t('nav.account') }, actions: h('div', { class: 'c-save c-large-only' }, dirtyNote, saveBtn) })),
+    head,
     err, h('div', { class: 'c-cols c-reorder' }, left, right), bottomSave);
   let statusLine = null;
   let relayLine = null;
@@ -117,6 +127,7 @@ export function render(ctx) {
   const fieldErr = {
     speaker_name: h('p', { class: 'small form-error', id: 's-name-err' }),
     speaker_ip: h('p', { class: 'small form-error', id: 's-ip-err' }),
+    owner_contact: h('p', { class: 'small form-error', id: 's-contact-err' }),
   };
   const fieldInput = {};
   function showFieldErr(k, msg) {
@@ -136,6 +147,12 @@ export function render(ctx) {
   function paintDirty() {
     const dirty = Object.keys(draft).length > 0;
     saveBtn.disabled = !dirty; bottomSave.disabled = !dirty; dirtyNote.hidden = !dirty;
+    paintSub();
+  }
+  /** Header context line: unsaved changes first (the speaker's name or address apart), else the speaker's state. */
+  function paintSub() {
+    if (Object.keys(draft).length) headerSub(head, t('speaker_name' in draft || 'speaker_ip' in draft ? 'set.ctxPending' : 'set.ctxDirty'));
+    else headerSub(head, ctx.statusError ? t('set.ctxOff') : ctx.status ? t('set.ctxOk') : '');
   }
 
   function build() {
@@ -173,6 +190,12 @@ export function render(ctx) {
       }));
       speakerKids.push(h('div', { class: 'c-stack' }, h('label', { class: 'c-title', for: 's-ip' }, t('set.ip')), ip, fieldErr.speaker_ip, h('p', { class: 'small' }, t('set.ipHelp')), scan, found));
     }
+    // how members reach the owner: the About page shows it to signed-in members (empty = hidden)
+    const contact = h('input', { class: 'input', id: 's-contact', value: val('owner_contact') || '', maxLength: 120, autocomplete: 'off', spellcheck: false, placeholder: t('set.contactPh'),
+      oninput: () => { showFieldErr('owner_contact', ''); set('owner_contact', contact.value.trim() || null); } });
+    fieldInput.owner_contact = contact;
+    showFieldErr('owner_contact', '');
+    speakerKids.push(h('div', { class: 'c-stack' }, h('label', { class: 'c-title', for: 's-contact' }, t('set.contact')), contact, fieldErr.owner_contact, h('p', { class: 'small' }, t('set.contactHelp'))));
     const speakerCard = card(...speakerKids);
 
     /* sound */
@@ -246,6 +269,7 @@ export function render(ctx) {
   }
 
   function paintStatus() {
+    paintSub();
     if (!statusLine) return;
     const s = ctx.status, e = ctx.statusError;
     statusLine.className = e ? 'small form-error' : 'small';
@@ -285,7 +309,7 @@ export function render(ctx) {
         err.textContent = errorText(e, ctx.user);
         // the server validates too (422): put its detail under the field it names
         const d = e.status === 422 ? e.detail || '' : '';
-        const k = /speaker_ip|\bip\b|address|host/i.test(d) ? 'speaker_ip' : /speaker_name|name/i.test(d) ? 'speaker_name' : null;
+        const k = /owner_contact/.test(d) ? 'owner_contact' : /speaker_ip|\bip\b|address|host/i.test(d) ? 'speaker_ip' : /speaker_name|name/i.test(d) ? 'speaker_name' : null;
         if (k) showFieldErr(k, e.detail);
       }
     }));

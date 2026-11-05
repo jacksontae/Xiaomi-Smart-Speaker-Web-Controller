@@ -14,6 +14,7 @@
 .phd { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; min-height: 44px; }
 .phd .pt { min-width: 0; font-size: 32px; line-height: 1.25; font-weight: 700; overflow-wrap: break-word; }
 .phd-back { display: inline-flex; align-items: center; gap: 2px; min-height: 44px; margin: -8px 0 -4px -6px; font-size: 15px; font-weight: 600; text-decoration: none; }
+.phd-sub { display: none; } /* the context line under the title: Android only (android.css) */
 .phd-r { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 0 1 auto; }
 .phd-r .spchip, .phd-r .help-btn { display: none; }
 
@@ -184,3 +185,53 @@ html, body { overflow-x: clip; }
 }
 /* long unbroken text (URLs, long Thai runs, names) wraps instead of widening the page */
 .page { min-width: 0; overflow-wrap: break-word; }
+
+/* Talkie (shell.js, "This device" only): the count of voice messages not played yet on the nav item, and the "join the
+   Walkie" chip on every page but Talkie. The chip sits at the top centre (iPad/desktop) or just above the tab bar
+   (phone), never over the bottom controls (Android FAB, Now Bar); content and toasts make room for it. */
+.tw-unread { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px;
+  border-radius: 10px; background: var(--danger-bg); color: var(--on-danger); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.tab .tw-navb { position: absolute; top: 3px; left: calc(50% + 4px); min-width: 18px; height: 18px; font-size: 11px; padding: 0 5px; box-shadow: 0 0 0 2px var(--surface); z-index: 2; }
+.nv .tw-navb { margin-left: auto; }
+.tw-hint { position: fixed; z-index: 45; top: calc(var(--safe-t) + 8px); left: 0; right: 0; margin-inline: auto; width: max-content; max-width: calc(100% - 32px);
+  display: inline-flex; align-items: center; min-height: 40px; border-radius: var(--pill); font: 600 14px/1.2 var(--font);
+  background: var(--glass-strong, var(--surface)); color: var(--ink); border: 1px solid var(--glass-edge, var(--line));
+  -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5); box-shadow: var(--glass-shadow); }
+.tw-unread[hidden], .tw-hint[hidden], .tw-hint-x[hidden] { display: none; }
+.tw-hint-go { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 6px 0 14px; color: inherit; text-decoration: none; min-width: 0; }
+.tw-hint-lead { display: flex; flex: 0 0 auto; }
+.tw-hint-mic { width: 18px; height: 18px; color: var(--accent); }
+.tw-hint-faces { display: flex; flex: 0 0 auto; }
+.tw-hint-av { width: 22px; height: 22px; font-size: 10px; box-shadow: 0 0 0 2px var(--surface); }
+.tw-hint-av + .tw-hint-av { margin-left: -6px; }
+.tw-hint-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tw-hint-join { flex: 0 0 auto; padding: 5px 12px; border-radius: var(--pill); background: var(--accent); color: var(--on-accent); }
+.tw-hint-x { flex: 0 0 auto; width: 34px; height: 40px; border: 0; background: transparent; color: var(--ink-3); display: flex; align-items: center; justify-content: center; padding-right: 4px; }
+.tw-hint.talking { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.tw-hint.talking .tw-hint-join { background: var(--on-accent); color: var(--accent); }
+.tw-hint.talking .tw-hint-av { box-shadow: 0 0 0 2px var(--accent); }
+@media (min-width: 744px) { .tw-hint { top: calc(var(--safe-t) + 22px); } }
+@media (max-width: 743px) {
+  .tw-hint { top: auto; bottom: calc(var(--safe-b) + 92px); }
+  body:has(.tw-hint:not([hidden])) .main { padding-bottom: calc(172px + var(--safe-b)); }
+  body:has(.tw-hint:not([hidden])) .toasts { --toast-bottom: 148px; }
+}
+.tw-bars { display: inline-flex; align-items: center; gap: 3px; height: 18px; flex: 0 0 auto; }
+.tw-bars i { display: block; width: 3px; height: 40%; border-radius: 2px; background: currentColor; animation: tw-bar 1s ease-in-out infinite; }
+.tw-bars i:nth-child(2) { animation-delay: -.3s; } .tw-bars i:nth-child(3) { animation-delay: -.6s; }
+.tw-bars i:nth-child(4) { animation-delay: -.15s; } .tw-bars i:nth-child(5) { animation-delay: -.45s; }
+@keyframes tw-bar { 0%, 100% { height: 30%; } 50% { height: 100%; } }
+:root[data-motion="reduce"] .tw-bars i { animation: none; height: 70%; }
+:root[data-os="android"] .tw-unread { background: var(--md-error); color: var(--md-on-error); }
+:root[data-os="android"] .tab .tw-navb { top: 6px; left: calc(50% + 6px); box-shadow: none; }
+:root[data-os="android"] .tw-hint { border-radius: 20px; background: var(--md-surface-container-high, var(--md-surface)); border: 0; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-os="android"] .tw-hint-mic { color: var(--md-primary); }
+:root[data-os="android"] .tw-hint-join { background: var(--md-primary); color: var(--md-on-primary); }
+:root[data-os="android"] .tw-hint.talking { background: var(--md-primary); color: var(--md-on-primary); }
+:root[data-os="android"] .tw-hint.talking .tw-hint-join { background: var(--md-on-primary); color: var(--md-primary); }
+@media (max-width: 743px) {
+  :root[data-os="android"] .tw-hint { bottom: calc(var(--safe-b) + 88px); }
+  :root[data-os="android"][data-nowbar] .tw-hint { bottom: calc(var(--safe-b) + 144px); } /* stacked above the Now Bar */
+  :root[data-os="android"] body:has(.tw-hint:not([hidden])) .toasts { --toast-bottom: 144px; }
+}

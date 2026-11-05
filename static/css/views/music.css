@@ -19,6 +19,13 @@
 .mu-show { display: flex; align-items: center; gap: 14px; padding: 4px 4px 0; }
 .mu-show .tb-th { width: 64px; height: 64px; border-radius: 16px; }
 .mu-show-t { font-size: 20px; font-weight: 700; line-height: 1.3; }
+.mu-show-tx { flex: 1 1 auto; min-width: 0; }
+.mu-follow { flex: 0 0 auto; }
+.mu-follow[aria-pressed="true"] { color: var(--accent); }
+
+/* podcast subscriptions: "N new" on a followed show, "New" before an episode's date */
+.mu-sub .c-badge { flex: 0 0 auto; }
+.tb-s > .mu-new { min-height: 20px; margin-inline-end: 8px; padding: 0 8px; font-size: 12px; vertical-align: 1px; }
 
 /* my files */
 .mu-fhead { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -58,6 +65,10 @@
 :root[data-os="android"] .mu .tb-rb.soft { background: transparent; box-shadow: inset 0 0 0 1px var(--md-outline); color: var(--md-on-surface-variant); }
 :root[data-os="android"] .mu .tb-rb.soft:hover { background: color-mix(in srgb, var(--md-state) 6%, transparent); }
 :root[data-os="android"] .mu .tb-row.on .tb-t { color: var(--md-primary); }
+/* follow: outlined pill, tonal while following; "New" a roomier tonal chip so it doesn't touch the date */
+:root[data-os="android"] .mu-follow { border-radius: 20px; min-height: 40px; }
+:root[data-os="android"] .mu-follow[aria-pressed="true"] { border-color: transparent; background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+:root[data-os="android"] .tb-s > .mu-new { min-height: 22px; margin-inline-end: 10px; padding: 0 10px; border-radius: 6px; }
 @media (min-width: 744px) {
   :root[data-os="android"] .mu .tb-search { max-width: 680px; }
 }

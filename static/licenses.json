@@ -1,0 +1,383 @@
+{
+ "app": {
+  "name": "Speaker Web Controller",
+  "license": "MIT",
+  "text": "licenses/speaker-web-controller.txt"
+ },
+ "groups": [
+  {
+   "id": "browser",
+   "items": [
+    {
+     "name": "Anuphan",
+     "version": "",
+     "license": "OFL-1.1",
+     "url": "https://github.com/cadsondemak/Anuphan",
+     "copyleft": true,
+     "text": "fonts/OFL.txt",
+     "copyright": "Copyright 2019 The Anuphan Project Authors",
+     "kind": "font"
+    }
+   ]
+  },
+  {
+   "id": "server",
+   "items": [
+    {
+     "name": "Python",
+     "version": "",
+     "license": "PSF-2.0",
+     "url": "https://docs.python.org/3/license.html",
+     "text": "licenses/python.txt"
+    },
+    {
+     "name": "FFmpeg",
+     "version": "",
+     "license": "LGPL-2.1-or-later / GPL",
+     "url": "https://ffmpeg.org/legal.html",
+     "copyleft": true,
+     "kind": "program"
+    },
+    {
+     "name": "Node.js",
+     "version": "",
+     "license": "MIT",
+     "url": "https://nodejs.org",
+     "kind": "program"
+    },
+    {
+     "name": "fastapi",
+     "version": "0.162.0",
+     "license": "MIT",
+     "url": "https://github.com/fastapi/fastapi",
+     "text": "licenses/fastapi.txt"
+    },
+    {
+     "name": "starlette",
+     "version": "1.10.0",
+     "license": "BSD-3-Clause",
+     "url": "https://github.com/Kludex/starlette",
+     "text": "licenses/starlette.txt"
+    },
+    {
+     "name": "annotated-doc",
+     "version": "0.0.5",
+     "license": "MIT",
+     "url": "https://github.com/fastapi/annotated-doc",
+     "text": "licenses/annotated-doc.txt"
+    },
+    {
+     "name": "opentelemetry-api",
+     "version": "1.45.2",
+     "license": "Apache-2.0",
+     "url": "https://github.com/open-telemetry/opentelemetry-python",
+     "text": "licenses/opentelemetry-api.txt"
+    },
+    {
+     "name": "uvicorn",
+     "version": "0.54.0",
+     "license": "BSD-3-Clause",
+     "url": "https://uvicorn.dev/",
+     "text": "licenses/uvicorn.txt"
+    },
+    {
+     "name": "click",
+     "version": "8.5.0",
+     "license": "BSD-3-Clause",
+     "url": "https://click.palletsprojects.com/",
+     "text": "licenses/click.txt"
+    },
+    {
+     "name": "h11",
+     "version": "0.16.0",
+     "license": "MIT",
+     "url": "https://github.com/python-hyper/h11",
+     "text": "licenses/h11.txt"
+    },
+    {
+     "name": "websockets",
+     "version": "17.3",
+     "license": "BSD-3-Clause",
+     "url": "https://github.com/python-websockets/websockets",
+     "text": "licenses/websockets.txt"
+    },
+    {
+     "name": "httpx",
+     "version": "0.28.1",
+     "license": "BSD-3-Clause",
+     "url": "https://www.python-httpx.org",
+     "text": "licenses/httpx.txt"
+    },
+    {
+     "name": "httpcore",
+     "version": "1.0.9",
+     "license": "BSD-3-Clause",
+     "url": "https://www.encode.io/httpcore",
+     "text": "licenses/httpcore.txt"
+    },
+    {
+     "name": "anyio",
+     "version": "4.16.0",
+     "license": "MIT",
+     "url": "https://anyio.readthedocs.io/",
+     "text": "licenses/anyio.txt"
+    },
+    {
+     "name": "idna",
+     "version": "3.20",
+     "license": "BSD-3-Clause",
+     "url": "https://github.com/kjd/idna",
+     "text": "licenses/idna.txt"
+    },
+    {
+     "name": "certifi",
+     "version": "2026.10.23",
+     "license": "MPL-2.0",
+     "url": "https://github.com/certifi/python-certifi",
+     "copyleft": true,
+     "text": "licenses/certifi.txt"
+    },
+    {
+     "name": "pydantic",
+     "version": "2.14.2",
+     "license": "MIT",
+     "url": "https://github.com/pydantic/pydantic",
+     "text": "licenses/pydantic.txt"
+    },
+    {
+     "name": "pydantic_core",
+     "version": "2.50.2",
+     "license": "MIT",
+     "url": "https://github.com/pydantic/pydantic",
+     "text": "licenses/pydantic-core.txt"
+    },
+    {
+     "name": "annotated-types",
+     "version": "0.8.0",
+     "license": "MIT",
+     "url": "https://github.com/annotated-types/annotated-types",
+     "text": "licenses/annotated-types.txt"
+    },
+    {
+     "name": "typing-inspection",
+     "version": "0.4.4",
+     "license": "MIT",
+     "url": "https://github.com/pydantic/typing-inspection",
+     "text": "licenses/typing-inspection.txt"
+    },
+    {
+     "name": "typing_extensions",
+     "version": "4.16.0",
+     "license": "PSF-2.0",
+     "url": "https://typing-extensions.readthedocs.io/",
+     "text": "licenses/typing-extensions.txt"
+    },
+    {
+     "name": "PyChromecast",
+     "version": "14.1.1",
+     "license": "MIT",
+     "url": "https://github.com/home-assistant-libs/pychromecast",
+     "text": "licenses/pychromecast.txt"
+    },
+    {
+     "name": "casttube",
+     "version": "0.2.1",
+     "license": "MIT",
+     "url": "https://github.com/ur1katz/casttube",
+     "text": "licenses/casttube.txt"
+    },
+    {
+     "name": "protobuf",
+     "version": "7.36.2",
+     "license": "BSD-3-Clause",
+     "url": "https://developers.google.com/protocol-buffers/",
+     "text": "licenses/protobuf.txt"
+    },
+    {
+     "name": "zeroconf",
+     "version": "0.153.0",
+     "license": "LGPL-2.1-or-later",
+     "url": "https://python-zeroconf.readthedocs.io",
+     "copyleft": true,
+     "text": "licenses/zeroconf.txt"
+    },
+    {
+     "name": "ifaddr",
+     "version": "0.2.0",
+     "license": "MIT",
+     "url": "https://github.com/pydron/ifaddr",
+     "text": "licenses/ifaddr.txt"
+    },
+    {
+     "name": "paho-mqtt",
+     "version": "2.1.0",
+     "license": "EPL-2.0 OR BSD-3-Clause",
+     "url": "https://eclipse.dev/paho/",
+     "text": "licenses/paho-mqtt.txt"
+    },
+    {
+     "name": "yt-dlp",
+     "version": "2026.10.26",
+     "license": "Unlicense",
+     "url": "https://github.com/yt-dlp/yt-dlp",
+     "text": "licenses/yt-dlp.txt"
+    },
+    {
+     "name": "yt-dlp-ejs",
+     "version": "0.8.0",
+     "license": "Unlicense AND MIT AND ISC",
+     "url": "https://github.com/yt-dlp/ejs",
+     "text": "licenses/yt-dlp-ejs.txt"
+    },
+    {
+     "name": "brotli",
+     "version": "1.2.1",
+     "license": "MIT",
+     "url": "https://github.com/google/brotli",
+     "text": "licenses/brotli.txt"
+    },
+    {
+     "name": "mutagen",
+     "version": "1.48.1",
+     "license": "GPL-2.0-or-later",
+     "url": "https://mutagen.readthedocs.io",
+     "copyleft": true,
+     "text": "licenses/mutagen.txt"
+    },
+    {
+     "name": "pycryptodomex",
+     "version": "3.24.1",
+     "license": "BSD-2-Clause",
+     "url": "https://www.pycryptodome.org",
+     "text": "licenses/pycryptodomex.txt"
+    },
+    {
+     "name": "requests",
+     "version": "2.34.2",
+     "license": "Apache-2.0",
+     "url": "https://requests.readthedocs.io",
+     "text": "licenses/requests.txt"
+    },
+    {
+     "name": "urllib3",
+     "version": "2.8.0",
+     "license": "MIT",
+     "url": "https://urllib3.readthedocs.io",
+     "text": "licenses/urllib3.txt"
+    },
+    {
+     "name": "charset-normalizer",
+     "version": "3.5.2",
+     "license": "MIT",
+     "url": "https://charset-normalizer.readthedocs.io/",
+     "text": "licenses/charset-normalizer.txt"
+    },
+    {
+     "name": "PyJWT",
+     "version": "2.15.1",
+     "license": "MIT",
+     "url": "https://github.com/jpadilla/pyjwt",
+     "text": "licenses/pyjwt.txt"
+    },
+    {
+     "name": "cryptography",
+     "version": "50.0.2",
+     "license": "Apache-2.0 OR BSD-3-Clause",
+     "url": "https://cryptography.io/",
+     "text": "licenses/cryptography.txt"
+    },
+    {
+     "name": "cffi",
+     "version": "2.1.1",
+     "license": "MIT-0",
+     "url": "https://cffi.readthedocs.io/",
+     "text": "licenses/cffi.txt"
+    },
+    {
+     "name": "pycparser",
+     "version": "3.12",
+     "license": "BSD-3-Clause",
+     "url": "https://github.com/eliben/pycparser",
+     "text": "licenses/pycparser.txt"
+    },
+    {
+     "name": "webauthn",
+     "version": "3.0.1",
+     "license": "BSD-3-Clause",
+     "url": "https://github.com/duo-labs/py_webauthn",
+     "text": "licenses/webauthn.txt"
+    },
+    {
+     "name": "cbor2",
+     "version": "6.2.0.post2",
+     "license": "MIT",
+     "url": "https://github.com/agronholm/cbor2",
+     "text": "licenses/cbor2.txt"
+    },
+    {
+     "name": "pyOpenSSL",
+     "version": "26.4.0",
+     "license": "Apache-2.0",
+     "url": "https://pyopenssl.org/",
+     "text": "licenses/pyopenssl.txt"
+    },
+    {
+     "name": "pyasn1",
+     "version": "0.6.5",
+     "license": "BSD-2-Clause",
+     "url": "https://github.com/pyasn1/pyasn1",
+     "text": "licenses/pyasn1.txt"
+    },
+    {
+     "name": "pyasn1_modules",
+     "version": "0.4.2",
+     "license": "BSD-2-Clause",
+     "url": "https://github.com/pyasn1/pyasn1-modules",
+     "text": "licenses/pyasn1-modules.txt"
+    }
+   ]
+  },
+  {
+   "id": "firmware",
+   "items": [
+    {
+     "name": "ArduinoJson",
+     "version": "7.4.3",
+     "license": "MIT",
+     "url": "https://arduinojson.org",
+     "text": "licenses/arduinojson.txt"
+    },
+    {
+     "name": "PubSubClient",
+     "version": "2.8",
+     "license": "MIT",
+     "url": "https://github.com/knolleary/pubsubclient",
+     "text": "licenses/pubsubclient.txt"
+    },
+    {
+     "name": "Arduino core for ESP32",
+     "version": "",
+     "license": "LGPL-2.1",
+     "url": "https://github.com/espressif/arduino-esp32",
+     "copyleft": true,
+     "text": "licenses/arduino-cores-lgpl-2-1.txt"
+    },
+    {
+     "name": "Arduino core for ESP8266",
+     "version": "",
+     "license": "LGPL-2.1",
+     "url": "https://github.com/esp8266/Arduino",
+     "copyleft": true,
+     "text": "licenses/arduino-cores-lgpl-2-1.txt"
+    },
+    {
+     "name": "Root CA certificates",
+     "version": "",
+     "license": "Public",
+     "url": "https://github.com/jacksontae/Xiaomi-Smart-Speaker-Web-Controller/blob/main/firmware/certs/mqtt-roots.pem",
+     "kind": "certs"
+    }
+   ]
+  }
+ ]
+}

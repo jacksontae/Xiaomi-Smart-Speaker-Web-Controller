@@ -1,5 +1,5 @@
 """SQLite storage for accounts, passkeys, sessions, playlists, quick phrases, schedules, radio favourites,
-uploaded files and the activity log.
+uploaded files, podcast subscriptions, Talkie clips and the activity log.
 
 Every call opens its own short-lived connection, so the store is safe to use from any thread.
 Writes that check-then-change (last-admin guard, reorder, first-run setup) run in one
@@ -14,9 +14,11 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 SESSION_TTL = 30 * 24 * 3600
-ACTIVITY_KEEP = 5000
+ACTIVITY_KEEP = 5000  # newest activity rows kept...
+ACTIVITY_MAX_AGE = 90 * 24 * 3600  # ...and none older than this (seconds)
+PRUNE_EVERY = 3600  # seconds between sweeps of old activity rows and expired sessions
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -168,6 +170,34 @@ MIGRATIONS = {
         "ALTER TABLE media_files ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE",
         "CREATE INDEX IF NOT EXISTS media_files_owner ON media_files(owner_id)",
     ],
+    7: [
+        # Podcast subscriptions: personal (each member follows their own shows). latest_at = newest episode seen
+        # in the feed so far, seen_at = when the member last opened the show (episodes after it count as new).
+        """CREATE TABLE IF NOT EXISTS podcast_subs (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            feed_url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            author TEXT,
+            artwork TEXT,
+            latest_at TEXT,
+            seen_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (user_id, feed_url)
+        )""",
+    ],
+    8: [
+        # Talkie: the recordings of the walkie-talkie between members, kept for a day (the MP3s live in the data
+        # folder, `file` is the name there). id = the talk's id, which listeners already know from its live frame.
+        """CREATE TABLE IF NOT EXISTS talkie_clips (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            seconds REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            file TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS talkie_clips_created ON talkie_clips(created_at)",
+    ],
 }
 USER_SELECT = "SELECT u.*, EXISTS (SELECT 1 FROM passkeys p WHERE p.user_id = u.id) AS has_passkey FROM users u"
 SCHEDULE_COLUMNS = (
@@ -193,6 +223,11 @@ FILE_SELECT = (
     " m.created_at FROM media_files m LEFT JOIN users u ON u.id = m.uploaded_by"
     " LEFT JOIN users o ON o.id = m.owner_id"
 )
+SUB_COLUMNS = "id, feed_url, title, author, artwork, latest_at, seen_at, created_at"
+CLIP_SELECT = (
+    "SELECT c.id, c.user_id, u.display_name AS name, c.seconds, c.created_at, c.file"
+    " FROM talkie_clips c JOIN users u ON u.id = c.user_id"
+)
 PLAYLIST_COLUMNS = "p.id, p.name, p.updated_at, p.owner_id, o.display_name AS owner_name"
 PLAYLIST_FROM = "playlists p LEFT JOIN users o ON o.id = p.owner_id"
 
@@ -203,6 +238,10 @@ class Conflict(Exception):
 
 def now_iso():
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _iso(timestamp):
+    return datetime.fromtimestamp(timestamp, UTC).isoformat(timespec="seconds")
 
 
 def _schedule(row):
@@ -257,6 +296,7 @@ class Store:
         self.path = Path(path)
         self._coalesce = {}  # (actor, action) -> (row id, time) of the last coalesced activity row
         self._coalesce_lock = threading.Lock()
+        self._pruned = None  # time.monotonic() of the last prune()
         db = sqlite3.connect(self.path, timeout=10)
         try:
             db.execute("PRAGMA journal_mode = WAL")  # readers don't block the writer; persists in the file
@@ -272,6 +312,7 @@ class Store:
                     db.execute(statement)
             if version < SCHEMA_VERSION:
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        self.prune()
 
     @contextmanager
     def tx(self, immediate=False):
@@ -288,6 +329,19 @@ class Store:
             raise
         finally:
             db.close()
+
+    def prune(self, force=True):
+        """Delete expired sessions and activity rows older than ACTIVITY_MAX_AGE. Without force, at most once
+        every PRUNE_EVERY seconds (cheap enough to call on every write)."""
+        mono = time.monotonic()
+        if not force and self._pruned is not None and mono - self._pruned < PRUNE_EVERY:
+            return
+        self._pruned = mono
+        now = time.time()
+        cutoff = datetime.fromtimestamp(now - ACTIVITY_MAX_AGE, UTC).isoformat(timespec="seconds")
+        with self.tx() as db:
+            db.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+            db.execute("DELETE FROM activity WHERE at < ?", (cutoff,))
 
     def schema_version(self):
         with self.tx() as db:
@@ -375,6 +429,64 @@ class Store:
             )
             db.execute("DELETE FROM users WHERE id = ?", (user_id,))  # cascades to their playlists and files
             return [f["stored_name"] for f in files]
+
+    def export_user(self, user_id, current_session=None):
+        """Everything stored about one member, for their own download (GET /me/export): no key material, no session
+        token hashes, no file bytes, nothing about other members. A session's last use is known to the hour (the
+        cookie is refreshed at most hourly). Activity rows are matched by display name (`actor` is free text), so
+        they are left out while another member shares that name."""
+        with self.tx() as db:
+            user = _user(db.execute(f"{USER_SELECT} WHERE u.id = ?", (user_id,)).fetchone())
+            if user is None:
+                return None
+            sessions = db.execute(
+                "SELECT token_hash, created_at, expires_at FROM sessions WHERE user_id = ? AND expires_at >= ?"
+                " ORDER BY created_at, rowid", (user_id, time.time()),
+            ).fetchall()
+            passkeys = db.execute("SELECT * FROM passkeys WHERE user_id = ? ORDER BY id", (user_id,)).fetchall()
+            playlists = []
+            for p in db.execute(
+                "SELECT id, name, created_at, updated_at FROM playlists WHERE owner_id = ? ORDER BY id", (user_id,)
+            ).fetchall():
+                items = db.execute(
+                    "SELECT kind, title, source, duration, lang FROM playlist_items WHERE playlist_id = ?"
+                    " ORDER BY position, id", (p["id"],),
+                ).fetchall()
+                playlists.append({k: p[k] for k in ("name", "created_at", "updated_at")}
+                                 | {"items": [dict(i) for i in items]})
+            files = db.execute(
+                "SELECT title, original_name, content_type, size, duration, owner_id IS NOT NULL AS personal,"
+                " created_at FROM media_files WHERE owner_id = ? OR uploaded_by = ? ORDER BY created_at, id",
+                (user_id, user_id),
+            ).fetchall()
+            subs = db.execute(
+                "SELECT feed_url, title, author, artwork, latest_at, seen_at, created_at FROM podcast_subs"
+                " WHERE user_id = ? ORDER BY title COLLATE NOCASE, id", (user_id,),
+            ).fetchall()
+            clips = db.execute(
+                "SELECT id, seconds, created_at FROM talkie_clips WHERE user_id = ? ORDER BY created_at", (user_id,)
+            ).fetchall()
+            shared_name = db.execute(
+                "SELECT 1 FROM users WHERE display_name = ? AND id != ?", (user["display_name"], user_id)
+            ).fetchone()
+            activity = [] if shared_name else db.execute(
+                "SELECT at, action, detail FROM activity WHERE actor = ? ORDER BY id", (user["display_name"],)
+            ).fetchall()
+        return {
+            "profile": {k: user[k] for k in ("username", "display_name", "role", "created_at", "last_login_at",
+                                             "google_email")},
+            "passkeys": [{k: v for k, v in _passkey(r).items() if k != "id"} for r in passkeys],
+            "sessions": [
+                {"created_at": r["created_at"], "last_seen_at": _iso(r["expires_at"] - SESSION_TTL),
+                 "expires_at": _iso(r["expires_at"]), "current": r["token_hash"] == current_session}
+                for r in sessions
+            ],
+            "playlists": playlists,
+            "files": [dict(r) | {"personal": bool(r["personal"])} for r in files],
+            "podcast_subscriptions": [dict(r) for r in subs],
+            "talkie_clips": [dict(r) for r in clips],
+            "activity": [dict(r) for r in activity],
+        }
 
     @staticmethod
     def _check_other_admin(db, user_id):
@@ -513,13 +625,20 @@ class Store:
             rows = db.execute(
                 f"""SELECT {PLAYLIST_COLUMNS},
                           (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id) AS item_count,
+                          (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id AND i.kind != 'tts')
+                              AS media_count,
                           (SELECT COALESCE(SUM(duration), 0) FROM playlist_items i WHERE i.playlist_id = p.id)
                               AS total_duration,
                           (SELECT thumbnail FROM playlist_items i WHERE i.playlist_id = p.id
                               AND thumbnail IS NOT NULL ORDER BY position, id LIMIT 1) AS cover
                    FROM {PLAYLIST_FROM} ORDER BY p.name COLLATE NOCASE, p.id"""
             ).fetchall()
-        return [dict(r) | {"total_duration": float(r["total_duration"])} for r in rows]
+        # tts_only: every item is an announcement (the Playlists page files it under Announcements; empty is music)
+        return [
+            {k: v for k, v in dict(r).items() if k != "media_count"}
+            | {"total_duration": float(r["total_duration"]), "tts_only": bool(r["item_count"]) and not r["media_count"]}
+            for r in rows
+        ]
 
     def get_playlist(self, playlist_id, db=None):
         if db is None:
@@ -760,6 +879,91 @@ class Store:
             db.execute("DELETE FROM media_files WHERE id = ?", (file_id,))
             return row
 
+    # --- Podcast subscriptions (personal: every call names the member) ---
+
+    def list_subs(self, user_id):
+        with self.tx() as db:
+            return [dict(r) for r in db.execute(
+                f"SELECT {SUB_COLUMNS} FROM podcast_subs WHERE user_id = ? ORDER BY title COLLATE NOCASE, id",
+                (user_id,),
+            )]
+
+    def get_sub(self, user_id, sub_id=None, feed_url=None, db=None):
+        """The member's subscription by id or by feed URL, or None."""
+        if db is None:
+            with self.tx() as db:
+                return self.get_sub(user_id, sub_id, feed_url, db)
+        column, value = ("id", sub_id) if sub_id is not None else ("feed_url", feed_url)
+        row = db.execute(
+            f"SELECT {SUB_COLUMNS} FROM podcast_subs WHERE user_id = ? AND {column} = ?", (user_id, value)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def add_sub(self, user_id, feed_url, title, author=None, artwork=None, latest_at=None):
+        """Follow a show; following it again keeps the row (and when it was last seen) and refreshes its details."""
+        now = now_iso()
+        with self.tx(immediate=True) as db:
+            db.execute(
+                "INSERT INTO podcast_subs (user_id, feed_url, title, author, artwork, latest_at, seen_at, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (user_id, feed_url) DO UPDATE SET title = excluded.title,"
+                " author = COALESCE(excluded.author, author), artwork = COALESCE(excluded.artwork, artwork),"
+                " latest_at = COALESCE(excluded.latest_at, latest_at)",
+                (user_id, feed_url, title, author, artwork, latest_at, now, now),
+            )
+            return self.get_sub(user_id, feed_url=feed_url, db=db)
+
+    def set_sub_latest(self, sub_id, latest_at):
+        with self.tx() as db:
+            db.execute("UPDATE podcast_subs SET latest_at = ? WHERE id = ?", (latest_at, sub_id))
+
+    def mark_sub_seen(self, user_id, sub_id):
+        with self.tx() as db:
+            db.execute("UPDATE podcast_subs SET seen_at = ? WHERE user_id = ? AND id = ?", (now_iso(), user_id, sub_id))
+            return self.get_sub(user_id, sub_id, db=db)
+
+    def delete_sub(self, user_id, sub_id):
+        with self.tx() as db:
+            return db.execute("DELETE FROM podcast_subs WHERE user_id = ? AND id = ?", (user_id, sub_id)).rowcount > 0
+
+    # --- Talkie clips ---
+
+    def add_clip(self, clip_id, user_id, seconds, file):
+        with self.tx() as db:
+            db.execute(
+                "INSERT INTO talkie_clips (id, user_id, seconds, created_at, file) VALUES (?, ?, ?, ?, ?)",
+                (clip_id, user_id, seconds, now_iso(), file),
+            )
+            return self.get_clip(clip_id, db=db)
+
+    def get_clip(self, clip_id, db=None):
+        if db is None:
+            with self.tx() as db:
+                return self.get_clip(clip_id, db)
+        row = db.execute(f"{CLIP_SELECT} WHERE c.id = ?", (clip_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_clips(self, since):
+        """Clips recorded at or after `since` (ISO, UTC), newest first, with the talker's name."""
+        with self.tx() as db:
+            return [dict(r) for r in db.execute(
+                f"{CLIP_SELECT} WHERE c.created_at >= ? ORDER BY c.created_at DESC, c.rowid DESC", (since,),
+            )]
+
+    def delete_clip(self, clip_id):
+        with self.tx() as db:
+            return db.execute("DELETE FROM talkie_clips WHERE id = ?", (clip_id,)).rowcount > 0
+
+    def user_clip_files(self, user_id):
+        with self.tx() as db:
+            return [r[0] for r in db.execute("SELECT file FROM talkie_clips WHERE user_id = ?", (user_id,))]
+
+    def expire_clips(self, before):
+        """Delete clips recorded before `before` (ISO, UTC); returns their file names."""
+        with self.tx(immediate=True) as db:
+            files = [r[0] for r in db.execute("SELECT file FROM talkie_clips WHERE created_at < ?", (before,))]
+            db.execute("DELETE FROM talkie_clips WHERE created_at < ?", (before,))
+            return files
+
     # --- Activity ---
 
     def log(self, actor, action, detail=None, coalesce=0):
@@ -782,6 +986,7 @@ class Store:
                 "DELETE FROM activity WHERE id <= (SELECT id FROM activity ORDER BY id DESC LIMIT 1 OFFSET ?)",
                 (ACTIVITY_KEEP,),
             )
+        self.prune(force=False)
 
     def activity(self, limit=50, before_id=None):
         with self.tx() as db:

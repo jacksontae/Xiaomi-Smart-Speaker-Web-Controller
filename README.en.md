@@ -32,7 +32,9 @@ without the LaunchAgent: `./.venv/bin/python app.py`.
 ## Run
 
 The service starts every time you log in to the Mac (LaunchAgent `~/Library/LaunchAgents/local.speaker-service.plist`)
-and is restarted if the process dies. Output goes to `service.log` in the repository folder.
+and is restarted if the process dies. Output goes to `service.log` in the repository folder. The web server's
+access log is off (its lines would hold client addresses and full query strings), so `service.log` has only
+start-up messages, warnings and errors.
 
 ```bash
 ./speakerctl status      # service state and the speaker's /status
@@ -85,6 +87,8 @@ Three ways to change them: the web UI ("Settings"), `POST /settings`, or edit `c
 | `google_signin` | `false` | Owner (admin) switch for Google sign-in; needs `google_client_id` |
 | `passkey_signin` | `true` | Allow passkey sign-in (works only when `public_base_url` is `https://` or `http://localhost`) |
 | `passkey_required_for_admins` | `false` | Admins who have a passkey must sign in with it (can be turned on only once every admin has one) |
+| `owner_contact` | `null` | How members reach the owner, e.g. `it@example.com` or a LINE id (up to 120 characters); shown on the About page to signed-in members only |
+| `cookie_secure` | `"auto"` | `Secure` flag of the `sid` cookie. `"auto"`: set when the request came over https, or to the host of an `https://` `public_base_url` (a TLS-terminating proxy such as Cloudflare Tunnel that forwards plain http). `true`: always (then sign in only over https or `http://localhost`). `false`: never. Env `COOKIE_SECURE` |
 
 `api_token` is also stored in `config.json` but is never returned by `GET /settings` and can't be changed through
 the API.
@@ -103,6 +107,7 @@ Environment variables used by the service:
 | `DATA_PATH` | `./data.db` | SQLite database |
 | `CACHE_DIR` | `./cache` | YouTube cache |
 | `MEDIA_DIR` | `media/` next to `data.db` | Uploaded files |
+| `TALKIE_DIR` | `talkie/` next to `data.db` | Talkie clips (kept 24 hours) |
 | `UPLOAD_MAX_MB` · `UPLOAD_QUOTA_MB` | `50` · `2000` | Size limit per upload · for all uploads together |
 | `YT_FORMAT` | `bestaudio[ext=m4a]/bestaudio` | yt-dlp format |
 | `FFMPEG` | `ffmpeg` | ffmpeg binary (live talk, SponsorBlock cuts) |
@@ -123,7 +128,7 @@ always `{"detail": "..."}`.
     `./speakerctl token`.
   - `GET /settings` doesn't return it and the API can't change it; use `./speakerctl token --rotate`.
 - **User accounts (web UI):** signing in sets the `sid` cookie (`HttpOnly`, `SameSite=Strict`, valid 30 days from
-  last use).
+  last use; `Secure` over https, see `cookie_secure`). Expired sessions are deleted at start-up and hourly.
   - Requests that change data (POST/PUT/PATCH/DELETE) with the cookie must send `X-Requested-With: speaker-web`,
     or they get `403`.
   - While there are no users, the web UI asks for the API token to create the first admin (`POST /auth/setup`).
@@ -138,7 +143,7 @@ always `{"detail": "..."}`.
 
 | role | can do |
 |---|---|
-| `viewer` | See status, queue, shared playlists and quick phrases · skip/back/pick a track in the speaker's queue · search music and play on "This device" · upload files and make their own (personal) playlists |
+| `viewer` | See status, queue, shared playlists and quick phrases · skip/back/pick a track in the speaker's queue · search music and play on "This device" · upload files and make their own (personal) playlists · Talkie |
 | `operator` | viewer + announce, play, set volume, pause/resume/stop, control the queue, edit shared playlists, quick phrases and schedules, radio and podcasts, upload shared files, live talk |
 | `admin` | operator + manage members, settings, speaker discovery, activity log, rename or delete any uploaded file |
 
@@ -149,6 +154,7 @@ The web UI calls `admin` "Owner".
 | Method | Path | Role | Body | Does |
 |---|---|---|---|---|
 | GET | `/auth/state` | anyone | – | `{"needs_setup", "user", "methods": {"password", "google", "passkey"}}`, plus `google_client_id` when Google is on (and `passkey_required` when an admin must add a passkey) |
+| GET | `/about` | anyone | – | `{"version", "build"}` (app version, static build id), plus `server: {"speaker", "transport", "owner_contact"}` when signed in |
 | POST | `/auth/setup` | anyone (only while there are no users) | `{"api_token", "username", "display_name", "password"}` | Create the first admin and sign in (wrong token `401`, users already exist `409`) |
 | POST | `/auth/login` | anyone | `{"username", "password"}` | Sign in, set the cookie |
 | POST | `/auth/logout` · `/auth/logout-all` | signed in | – | Sign out this device · all devices |
@@ -160,12 +166,14 @@ The web UI calls `admin` "Owner".
 | POST | `/me/passkeys/options` | signed in | – | `{"publicKey"}` for `navigator.credentials.create()` |
 | GET · POST | `/me/passkeys` | signed in | `{"credential", "name"}` | List · add your own passkeys |
 | PATCH · DELETE | `/me/passkeys/{id}` | signed in | `{"name"}` · – | Rename · delete a passkey |
+| GET | `/me/export` | signed in | – | Download your own data as JSON (`speaker-my-data-YYYY-MM-DD.json`): profile, passkey names, sessions, personal playlists and files (names and sizes), podcast subscriptions, Talkie clips, your activity |
+| DELETE | `/me` | signed in | `{"confirm": "<your username>"}` | Delete your own account with everything personal and sign out (wrong username `400`, the only owner `409`) |
 | GET · POST | `/users` | admin | `{"username", "display_name", "password", "role"}` | List · add members |
 | PATCH · DELETE | `/users/{id}` | admin | `{"display_name", "role", "password", "disabled"}` (only the fields to change) | Edit · delete a member |
 
-Usernames are 3–32 characters of `a-z 0-9 . _ -`. You can't delete, disable or demote yourself, and at least one
-enabled admin must remain (`409`). Disabling an account or changing its password signs that member out everywhere.
-The `/me/*`, `/auth/password` and `/auth/logout-all` endpoints need a user account; the API token gets `400`.
+Usernames are 3–32 characters of `a-z 0-9 . _ -`. You can't delete (except with `DELETE /me`), disable or demote
+yourself, and at least one enabled admin must remain (`409`). Disabling an account or changing its password signs that member out everywhere.
+The `/me`, `/me/*`, `/auth/password` and `/auth/logout-all` endpoints need a user account; the API token gets `400`.
 
 #### Sign in with Google
 
@@ -206,7 +214,7 @@ A new admin without a passkey can still sign in with a password, but `/auth/stat
 | POST | `/pause` · `/resume` · `/stop` | operator | – | Playback control (`stop` also clears the queue) |
 | GET · POST | `/settings` | admin | `{"default_volume": 0.4}` | Read · change settings (partial update) |
 | GET | `/speakers` | admin | – | Find Cast speakers on the LAN |
-| GET | `/activity?limit=50&before_id=` | admin | – | Activity log, newest first (`limit` up to 500; the newest 5000 entries are kept) |
+| GET | `/activity?limit=50&before_id=` | admin | – | Activity log, newest first (`limit` up to 500; the newest 5000 entries from the last 90 days are kept) |
 
 ### Playlists and queue
 
@@ -286,7 +294,10 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 | DELETE | `/radio/favorites/{id}` | operator | – | Remove a favourite |
 | POST | `/radio/play` | operator | `{"favorite_id"}` or `{"uuid"}` or `{"url", "name"}`, plus `"volume"` | Play radio live (clears the queue) |
 | GET | `/podcasts/search?q=&country=TH&limit=20` | viewer | – | Search shows with the iTunes Search API; results include `feed_url` |
-| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | viewer | – | Read the RSS feed: show details and latest episodes (`limit` up to 200) |
+| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | viewer | – | Read the RSS feed: show details and latest episodes (`limit` up to 200), plus the caller's `subscription` (or `null`) |
+| GET · POST | `/podcasts/subs` | viewer | `{"feed_url", "title", "author", "artwork"}` | Your followed shows (personal) with `new_count` · follow one (again is fine: same row; without `title` the feed is read) |
+| POST | `/podcasts/subs/{id}/seen` | viewer | – | You opened the show: its episodes so far stop counting as new |
+| DELETE | `/podcasts/subs/{id}` | viewer | – | Unfollow |
 | POST | `/podcasts/play` | operator | `{"url", "title", "thumbnail", "content_type", "volume"}` | Play one episode (clears the queue) |
 | GET | `/files` | viewer | – | `{"items", "used", "quota", "max_size", "types"}` (files you can see) |
 | POST | `/files?name=<file name>&duration=<seconds>&personal=1` | viewer | The audio file itself as the body (not a form) | Upload |
@@ -370,6 +381,47 @@ them to MP3 with ffmpeg and has the speaker play the link `/talk/<id>/live` as a
 
 To test by hand: `python tests/manual/talk_stream.py --url ws://127.0.0.1:8090/talk --token $TOKEN --file clip.webm`
 
+### Talkie
+
+A walkie-talkie between the members of this server. While "This device" is the music output, the Announce page is
+the Talkie, for every role, with two tabs:
+
+- **Walkie**: hold the button to talk live to everyone who has the Walkie open (about 1–2 seconds behind), one at a
+  time (separate from live talk on the speaker). Heard once, not kept. The members show as cards: who talks, who
+  listens, and who is online but can't hear. Other pages show a small "2 on Walkie · Join" chip while others are in it.
+- **Voice messages**: hold to record a message for everyone, kept 24 hours, never played live; several members may
+  record at once. "Not played yet" per device, with the count on the tab and the nav item. Members delete their own
+  (with Undo).
+
+Each device can turn the Walkie's sound off in App settings ("Hear Talkie on this device").
+
+- `WebSocket /talkie`: the web app keeps it open on every page while signed in. Authentication: the `sid` cookie
+  (any role) and a same-site `Origin`, as for `/talk`; the API token is refused (`4403`). The server re-checks the
+  session on every `ping` and `start`.
+- Recordings go through ffmpeg like live talk; clips are MP3 files in `talkie/` next to `data.db` (`TALKIE_DIR`).
+  Talks shorter than 0.5 seconds keep no clip, a talk ends after 60 seconds, clips older than 24 hours are deleted,
+  and deleting a member deletes their clips. Only deleting a message goes to the activity log.
+
+| Method | Path | Role | Body | Does |
+|---|---|---|---|---|
+| GET | `/talkie/clips` | viewer | – | The last 24 hours' clips, newest first: `id`, `user_id`, `name`, `seconds`, `created_at`, `url` |
+| GET | `/talkie/clips/{id}.mp3` | viewer | – | A clip's MP3 (Range requests work) |
+| GET | `/talkie/live/{id}` | viewer | – | The walkie talk going on as one MP3 response from its start, ending when the talk does (a plain `<audio>` plays it); `403` unless one of the caller's tabs is in the room |
+| DELETE | `/talkie/clips/{id}` | viewer | – | Delete a message of your own (`403` for anyone else's, owners included) |
+
+| Direction | Message | Meaning |
+|---|---|---|
+| ← | `{"type": "hello", "me", "online": [{"id", "name", "in_room"}], "live": {"id", "user_id", "name", "url"?} \| null, "clips"}` | On connect (`/talkie?room=0\|1`: out of or in the Walkie room) |
+| ← | `{"type": "online", "online"}` | Someone opened or closed the app, or entered or left the room (several tabs count once) |
+| → | `{"type": "room", "in": true \| false}` | The Walkie opened or closed: only connections in the room get `url` and may talk live |
+| → | `{"type": "start", "mime", "mode"}` | Talk (same `mime` values as `/talk`); `mode` is required: `walkie` (live, not kept) or `message` (kept, never live) |
+| ← | `{"type": "ready", "id", "max_seconds"}` | Send MediaRecorder binary frames, then `{"type": "stop"}` |
+| ← | `{"type": "error", "code", "detail"}` | Not started; the socket stays open. `code`: `busy`, `not_in_room`, `bad_request`, `unavailable` (no ffmpeg), `transcoder_error` |
+| ← | `{"type": "live", "id", "user_id", "name", "url"?}` | To everyone else: a walkie talk started; `url` (to play) only in the room |
+| ← | `{"type": "ended", "id", "user_id", "reason", "clip"}` | The talk ended (`stopped`, `disconnected`, `left_room`, `max_length`, `idle`, `too_large`, `transcoder_error`): to everyone for a walkie talk, to the talker for a message; `clip` is `null` when nothing was kept |
+| ← | `{"type": "clip", "clip"}` / `{"type": "clip_deleted", "id"}` | To everyone: a message was kept / deleted by its author |
+| → | `{"type": "ping"}` | Answered with `{"type": "pong"}` |
+
 ## Remote deployment (ESP32 relay + self-hosted MQTT + Cloudflare Tunnel)
 
 Use this when the service runs somewhere other than the speaker's LAN (e.g. a VM without a fixed IP).
@@ -405,7 +457,7 @@ instead of the `mosquitto` service, and give the relay its host, port 8883 and T
 
 Settings can also live in `config.json` (`"transport": "mqtt"`, an `mqtt` block, `public_base_url`).
 The environment variables `SPEAKER_TRANSPORT`, `PUBLIC_BASE_URL`, `MQTT_HOST`, `MQTT_PORT`, `MQTT_TLS`,
-`MQTT_CA_FILE`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_BASE_TOPIC` and `MQTT_CLIENT_ID` override it and
+`MQTT_CA_FILE`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_BASE_TOPIC`, `MQTT_CLIENT_ID` and `COOKIE_SECURE` override it and
 are never written back to the file. The MQTT password is never returned by `/settings` (only `password_set`) or
 written to the activity log.
 
@@ -556,6 +608,8 @@ config.example.json    Example settings (copied to config.json)
 ## Contributing
 
 Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first (PRs go to the `dev` branch).
+After adding or upgrading a dependency, regenerate the Licenses page with
+`python scripts/gen_licenses.py --venv <a venv with requirements.txt installed>` (see `--help`).
 Report security problems as described in [SECURITY.md](SECURITY.md). Everyone follows the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 

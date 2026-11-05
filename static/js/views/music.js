@@ -1,9 +1,10 @@
 // Music (boards YouTube / T_YouTube / D_YouTube): one page, four sources in a segmented control —
-// YouTube search, internet radio (directory + favourites), podcasts (search or RSS link -> episodes) and
-// "My files" (upload with progress, rename, delete). Every result plays on the speaker or goes into a playlist.
+// YouTube search, internet radio (directory + favourites), podcasts (search or RSS link -> episodes, and the
+// shows the member follows) and "My files" (upload with progress, rename, delete). Every result plays on the
+// speaker or goes into a playlist.
 // Spotify is not offered this round and Joox / Apple Music can't be: a Help link explains (no fake buttons).
 // The source is part of the hash (#/music/radio) so other pages can link straight to one.
-import { h, icon, iconBtn, field, busy, segmented, helpLink } from '../ui.js';
+import { h, icon, iconBtn, field, busy, segmented, helpLink, headerSub } from '../ui.js';
 import { register, t, fmtDur, lang } from '../i18n.js';
 import { errorText, ApiError } from '../api.js';
 import {
@@ -11,10 +12,14 @@ import {
   playTracker, trackPlay, pickPlaylist, ibtn, deleteLater, isPending, undoDelete, isUrl, epMeta, fileMeta, size, androidSearch, here,
 } from '../media-kit.js';
 import { isAndroid } from '../prefs.js';
+import { badge, sameDay } from '../kit.js';
 import { glyph } from '../icons.js';
 
 register({
   en: {
+    // the header's context line (Android): what's playing, else what the page is for
+    'music.ctxIdle': 'Pick a source, then play it on the speaker', 'music.ctxIdle.here': 'Pick a source, then play it on this device',
+    'music.ctxPlaying': (x) => `Speaker is playing ${x}`, 'music.ctxPlaying.here': (x) => `Playing ${x} on this device`,
     'music.sources': 'Music source',
     'music.src.youtube': 'YouTube', 'music.src.radio': 'Radio', 'music.src.podcasts': 'Podcasts', 'music.src.files': 'My files',
     'music.whyJoox': 'Why isn’t Spotify, Joox or Apple Music here?', 'music.whyJooxShort': 'Where are Spotify, Joox and Apple Music?',
@@ -28,6 +33,9 @@ register({
     'music.podResults': (q) => `Podcasts matching “${q}”`, 'music.allResults': 'All results',
     'music.episodesOf': (x) => `Episodes: ${x}`, 'music.noEpisodes': 'This feed has no audio episodes.',
     'music.openShow': (x) => `Show episodes of ${x}`,
+    'music.following': 'Following', 'music.followOn': 'Following', 'music.followOff': 'Follow',
+    'music.newN': (n) => `${n} new`, 'music.newEp': 'New', 'music.latest': (d) => `Latest ${d}`,
+    'music.allFollowed': 'All followed shows',
     'music.filesNote': (types, max) => `Audio files up to ${max} MB (${types}). They’re stored on the speaker server.`,
     'music.used': (used, quota) => `${used} of ${quota} used`,
     'music.upload': 'Upload', 'music.filesTitle': 'Uploaded files', 'music.edit': 'Edit', 'music.done': 'Done',
@@ -44,6 +52,8 @@ register({
     'music.filesPrivate': 'Files you upload are private: only you and the owner can see them.',
   },
   th: {
+    'music.ctxIdle': 'เลือกแหล่งเพลง แล้วเล่นที่ลำโพงได้ทันที', 'music.ctxIdle.here': 'เลือกแหล่งเพลง แล้วเล่นที่อุปกรณ์นี้ได้ทันที',
+    'music.ctxPlaying': (x) => `ลำโพงกำลังเล่น ${x}`, 'music.ctxPlaying.here': (x) => `กำลังเล่น ${x} ที่อุปกรณ์นี้`,
     'music.sources': 'แหล่งเพลง',
     'music.src.youtube': 'YouTube', 'music.src.radio': 'วิทยุ', 'music.src.podcasts': 'พอดแคสต์', 'music.src.files': 'ไฟล์ของฉัน',
     'music.whyJoox': 'ทำไมไม่มี Spotify, Joox หรือ Apple Music', 'music.whyJooxShort': 'Spotify, Joox และ Apple Music อยู่ไหน',
@@ -57,6 +67,9 @@ register({
     'music.podResults': (q) => `พอดแคสต์ที่ตรงกับ “${q}”`, 'music.allResults': 'ผลการค้นหาทั้งหมด',
     'music.episodesOf': (x) => `ตอนของ ${x}`, 'music.noEpisodes': 'ฟีดนี้ไม่มีตอนที่เป็นเสียง',
     'music.openShow': (x) => `ดูตอนของ ${x}`,
+    'music.following': 'กำลังติดตาม', 'music.followOn': 'ติดตามอยู่', 'music.followOff': 'ติดตาม',
+    'music.newN': (n) => `ใหม่ ${n} ตอน`, 'music.newEp': 'ใหม่', 'music.latest': (d) => `ตอนล่าสุด ${d}`,
+    'music.allFollowed': 'ทั้งหมดที่ติดตาม',
     'music.filesNote': (types, max) => `ไฟล์เสียงไม่เกิน ${max} MB (${types}) ไฟล์จะเก็บไว้ที่เซิร์ฟเวอร์ลำโพง`,
     'music.used': (used, quota) => `ใช้ไป ${used} จาก ${quota}`,
     'music.upload': 'อัปโหลด', 'music.filesTitle': 'ไฟล์ที่อัปโหลดไว้', 'music.edit': 'แก้ไข', 'music.done': 'เสร็จ',
@@ -81,12 +94,13 @@ const SOURCES = [
   { id: 'files', icon: 'file' },
 ];
 // Kept between visits (module scope): the last search of each source, so coming back shows the same results.
-const memo = { source: 'youtube', yt: null, radio: { q: '' }, pod: null };
+const memo = { source: 'youtube', yt: null, radio: { q: '' }, pod: null, subs: null };
 // "Add to playlist": the playlist-add glyph on Android (A_YouTube), the plus elsewhere
 const ADD_IC = () => (isAndroid() ? 'playlist-add' : 'plus');
 
 export async function render(ctx) {
-  await Promise.all([ctx.css('views/media.css'), ctx.css('views/music.css')]);
+  // common.css: the c-badge of the podcast counts
+  await Promise.all([ctx.css('views/common.css'), ctx.css('views/media.css'), ctx.css('views/music.css')]);
   const asked = ctx.params[0];
   let source = SOURCES.some((s) => s.id === asked) ? asked : memo.source;
   const tracker = playTracker(ctx);
@@ -104,8 +118,9 @@ export async function render(ctx) {
     },
   });
 
+  const head = ctx.header({ title: t('nav.music'), actions: why('mu-why-lg'), sub: here('music.ctxIdle') });
   const node = h('div', { class: 'page mu' },
-    ctx.header({ title: t('nav.music'), actions: why('mu-why-lg') }),
+    head,
     seg, panel, why('mu-why-ph'));
 
   function show() {
@@ -115,7 +130,15 @@ export async function render(ctx) {
     panel.classList.remove('enter'); void panel.offsetWidth; panel.classList.add('enter');
   }
   show();
-  return { node, onStatus: (s) => tracker.onStatus(s) };
+  return {
+    node,
+    onStatus(s) {
+      tracker.onStatus(s);
+      const m = s.status && !s.error && s.status.media;
+      const playing = m && m.title && m.title !== 'Announcement' && (m.state === 'PLAYING' || m.state === 'BUFFERING');
+      headerSub(head, playing ? here('music.ctxPlaying', m.title) : here('music.ctxIdle'));
+    },
+  };
 }
 
 /* ---------- shared row builders ---------- */
@@ -249,12 +272,52 @@ function radioPane(ctx, tracker) {
 }
 
 /* ---------- Podcasts ---------- */
+// "Following": the member's own subscriptions (personal, like their playlists) with a count of episodes
+// published since they last opened the show; opening one marks it seen.
+function dayLabel(iso) {
+  const d = new Date(iso), now = new Date();
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (sameDay(d, now)) return t('c.today');
+  if (sameDay(d, y)) return t('c.yesterday');
+  return d.toLocaleDateString(lang() === 'th' ? 'th-TH-u-ca-gregory' : 'en-GB', { day: 'numeric', month: 'short' });
+}
 function podcastPane(ctx, tracker) {
   const out = h('div', { class: 'mu-out', 'aria-live': 'polite' });
+  const subsBox = h('div', { class: 'mu-block mu-subs' });
+  const hint = note(t('music.podHint'), 'mu-hint');
   const m = () => memo.pod;
+
+  function paintSubs() {
+    const subs = memo.subs || [];
+    const inShow = !!(m() && m().show && !m().error);
+    subsBox.hidden = inShow || !subs.length;
+    hint.hidden = inShow;
+    subsBox.replaceChildren(...(subs.length ? [sectionLabel(t('music.following')), h('div', { class: 'list tb-list tb-grid' }, subs.map((s) => {
+      const n = s.new_count;
+      const label = n ? `${t('music.openShow', s.title)}, ${t('music.newN', n)}` : t('music.openShow', s.title);
+      const open = h('button', { type: 'button', class: 'mu-rowbtn', 'aria-label': label, onclick: () => openFeed(s, true) });
+      const sub = [s.author, s.latest_at && t('music.latest', dayLabel(s.latest_at))].filter(Boolean).join(' · ');
+      const row = mediaRow({
+        th: thumb('podcast', { img: s.artwork }), title: s.title, sub, cls: 'tb-tap mu-sub', props: { 'data-feed': s.feed_url },
+        actions: [n ? badge(t('music.newN', n), 'mu-count') : null, icon('chev-right', 'sm tb-chev')].filter(Boolean),
+      });
+      row.prepend(open);
+      return row;
+    }))] : []));
+  }
+  async function loadSubs() {
+    try {
+      memo.subs = await ctx.api('/podcasts/subs', { signal: ctx.signal });
+    } catch (e) {
+      if (e.name !== 'AbortError') ctx.fail(e);
+      return;
+    }
+    if (subsBox.isConnected) paintSubs();
+  }
 
   function paint() {
     const p = m();
+    paintSubs();
     if (!p) { out.replaceChildren(); return; }
     if (p.loading) { out.replaceChildren(spinnerLine(t('tb.searching', p.loading))); return; }
     if (p.error) { out.replaceChildren(errBox(p.error, p.retry)); return; }
@@ -267,13 +330,41 @@ function podcastPane(ctx, tracker) {
       return row;
     })));
   }
+  function followButton(p, title) {
+    const btn = h('button', { type: 'button', class: 'btn mu-follow' });
+    const draw = () => {
+      btn.setAttribute('aria-pressed', String(!!p.sub));
+      btn.replaceChildren(...(p.sub ? [icon('check', 'xs'), t('music.followOn')] : [t('music.followOff')]));
+    };
+    btn.addEventListener('click', () => busy(btn, async () => {
+      try {
+        if (p.sub) {
+          await ctx.api(`/podcasts/subs/${p.sub.id}`, { method: 'DELETE' });
+          p.sub = null;
+        } else {
+          const f = p.feed;
+          p.sub = await ctx.api('/podcasts/subs', { body: { feed_url: p.show.feed_url, title: title.slice(0, 200) || p.show.feed_url.slice(0, 200), author: f.author || p.show.author || null, artwork: f.artwork || p.show.artwork || null } });
+        }
+        loadSubs();
+      } catch (e) { ctx.fail(e); }
+      if (btn.isConnected) { draw(); btn.focus({ preventScroll: true }); }
+    }));
+    draw();
+    return btn;
+  }
   function episodesView(p) {
     const f = p.feed;
     const title = f.title || p.show.title || '';
-    const back = p.shows ? h('button', { type: 'button', class: 'linkbtn', onclick: () => { memo.pod = { q: p.q, shows: p.shows }; paint(); } }, icon('back', 'xs'), t('music.allResults')) : null;
+    const back = p.fromSubs
+      ? h('button', { type: 'button', class: 'linkbtn', onclick: () => { memo.pod = p.shows ? { q: p.q, shows: p.shows } : null; paint(); } }, icon('back', 'xs'), t('music.allFollowed'))
+      : p.shows ? h('button', { type: 'button', class: 'linkbtn', onclick: () => { memo.pod = { q: p.q, shows: p.shows }; paint(); } }, icon('back', 'xs'), t('music.allResults')) : null;
+    // new = published after the member's previous visit (seen_at as it was before this one)
+    const isNew = (ep) => p.seenAt && ep.published && new Date(ep.published) > new Date(p.seenAt);
     const rows = f.episodes.map((ep) => {
-      const sub = epMeta(ep);
-      const row = mediaRow({ th: thumb('podcast', { img: ep.thumbnail }), title: ep.title, sub });
+      const meta = epMeta(ep);
+      const sub = isNew(ep) ? [badge(t('music.newEp'), 'mu-new'), meta] : meta;
+      const row = mediaRow({ th: thumb('podcast', { img: ep.thumbnail }), title: ep.title, sub: '' });
+      row.sub.replaceChildren(...[].concat(sub));
       const play = playButton(ctx, tracker, `pod:${ep.url}`, ep.title,
         () => ctx.api('/podcasts/play', { body: { url: ep.url, title: ep.title.slice(0, 200), thumbnail: ep.thumbnail, content_type: ep.content_type } }), row, sub);
       const add = roundBtn(ADD_IC(), t('tb.addX', ep.title), () => pickPlaylist(ctx, {
@@ -283,26 +374,35 @@ function podcastPane(ctx, tracker) {
       return row;
     });
     return h('div', { class: 'mu-block' }, back,
-      h('div', { class: 'mu-show' }, thumb('podcast', { img: f.artwork }), h('div', {}, h('h2', { class: 'mu-show-t' }, title), f.author ? h('p', { class: 'small' }, f.author) : null)),
+      h('div', { class: 'mu-show' }, thumb('podcast', { img: f.artwork }),
+        h('div', { class: 'mu-show-tx' }, h('h2', { class: 'mu-show-t' }, title), f.author ? h('p', { class: 'small' }, f.author) : null),
+        followButton(p, title)),
       sectionLabel(t('music.episodesOf', title)),
       rows.length ? h('div', { class: 'list tb-list tb-grid' }, rows) : note(t('music.noEpisodes')));
   }
-  async function openFeed(show) {
+  async function openFeed(show, fromSubs = false) {
     const prev = m();
     const shows = prev && prev.shows, q = prev && prev.q;
-    memo.pod = { q, shows, loading: show.title || show.feed_url };
+    memo.pod = { q, shows, show, fromSubs, loading: show.title || show.feed_url };
     paint();
     try {
       const feed = await ctx.api(`/podcasts/episodes?feed=${encodeURIComponent(show.feed_url)}&limit=40`, { signal: ctx.signal });
-      memo.pod = { q, shows, show, feed };
+      const sub = feed.subscription;
+      memo.pod = { q, shows, show, fromSubs, feed, sub, seenAt: sub && sub.seen_at };
+      if (sub) {
+        // opened: its episodes so far stop counting as new (the badges stay for this visit)
+        ctx.api(`/podcasts/subs/${sub.id}/seen`, { method: 'POST' })
+          .then(() => { const s = (memo.subs || []).find((x) => x.id === sub.id); if (s) s.new_count = 0; })
+          .catch(() => {});
+      }
     } catch (e) {
       if (e.name === 'AbortError') return;
-      memo.pod = { q, shows, error: sourceError(e, ctx.user, 'feed'), retry: () => openFeed(show) };
+      memo.pod = { q, shows, show, fromSubs, error: sourceError(e, ctx.user, 'feed'), retry: () => openFeed(show, fromSubs) };
     }
     if (out.isConnected) { paint(); out.scrollIntoView({ block: 'nearest', behavior: ctx.motionReduced() ? 'auto' : 'smooth' }); }
   }
   async function search(q, btn) {
-    if (!q) { memo.pod = null; out.replaceChildren(note(t('tb.typeFirst'))); return; }
+    if (!q) { memo.pod = null; paintSubs(); out.replaceChildren(note(t('tb.typeFirst'))); return; }
     if (isUrl(q)) { memo.pod = null; openFeed({ feed_url: q, title: '' }); return; }
     memo.pod = { q, loading: q };
     paint();
@@ -318,8 +418,9 @@ function podcastPane(ctx, tracker) {
   }
   const { form, input } = searchForm({ label: t('music.podLabel'), placeholder: t('music.podPh'), button: t('music.podFind'), value: (m() && m().q) || '', onSearch: search });
   paint();
+  loadSubs();
   autofocus(input);
-  return h('div', { class: 'mu-pane' }, form, note(t('music.podHint'), 'mu-hint'), out);
+  return h('div', { class: 'mu-pane' }, form, subsBox, hint, out);
 }
 
 /* ---------- My files ---------- */

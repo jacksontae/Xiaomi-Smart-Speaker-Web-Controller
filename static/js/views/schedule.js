@@ -5,7 +5,7 @@
 // side panel. Times are the speaker's (server's) time zone, which GET /schedules reports. Viewers read only.
 // Android look (A_Schedule / AT_Schedule): New schedule is an extended FAB on phones and the editor a full-screen
 // dialog (android-kit.js); tablets in landscape (>= 960px) put the list and the editor side by side.
-import { h, icon, field, busy, segmented, tip } from '../ui.js';
+import { h, icon, field, busy, segmented, tip, headerSub } from '../ui.js';
 import { register, t, locale } from '../i18n.js';
 import { errorText } from '../api.js';
 import { errBox, note, spinnerLine, playlistMeta, TTS_LANGS, langNative } from '../media-kit.js';
@@ -23,6 +23,9 @@ register({
     'sched.noneOp': 'Nothing scheduled yet. Set an announcement for opening time, or a playlist for lunch.',
     'sched.pickHint': 'Pick an item on the left to edit it, or make a new one.',
     'sched.today': 'Today', 'sched.later': 'Coming up', 'sched.off': 'Off',
+    // the header's context line (Android): what's still to run today, else the next run
+    'sched.ctxToday': (n, tm) => `${n} more today, next at ${tm}`, 'sched.ctxNext': (w) => `Nothing more today, next ${w}`,
+    'sched.ctxNone': 'Nothing scheduled',
     'sched.soon': (m) => `in ${m} min`, 'sched.turnOn': (x) => `Turn on ${x}`, 'sched.editX': (x, tm) => `Edit ${x} at ${tm}`,
     'sched.missed': (w) => `Didn’t play ${w}: the server was off or busy at that time`,
     'sched.failed': (w, why) => `Didn’t play ${w}: ${why}`, 'sched.played': (w) => `Played ${w}`,
@@ -61,6 +64,8 @@ register({
     'sched.noneOp': 'ยังไม่มีรายการตั้งเวลา ลองตั้งประกาศตอนเปิดร้าน หรือเพลย์ลิสต์ช่วงพักเที่ยง',
     'sched.pickHint': 'เลือกรายการทางซ้ายเพื่อแก้ไข หรือตั้งเวลาใหม่',
     'sched.today': 'วันนี้', 'sched.later': 'ถัดไป', 'sched.off': 'ปิดอยู่',
+    'sched.ctxToday': (n, tm) => `วันนี้เหลืออีก ${n} รายการ ถัดไป ${tm} น.`, 'sched.ctxNext': (w) => `วันนี้ไม่มีแล้ว รอบถัดไป ${w}`,
+    'sched.ctxNone': 'ยังไม่มีรายการที่ตั้งเวลาไว้',
     'sched.soon': (m) => `อีก ${m} นาที`, 'sched.turnOn': (x) => `เปิดใช้ ${x}`, 'sched.editX': (x, tm) => `แก้ไข ${x} เวลา ${tm}`,
     'sched.missed': (w) => `${w} ไม่ได้เล่น: ตอนนั้นเซิร์ฟเวอร์ปิดอยู่หรือไม่ว่าง`,
     'sched.failed': (w, why) => `${w} เล่นไม่ได้: ${why}`, 'sched.played': (w) => `เล่นแล้ว ${w}`,
@@ -133,11 +138,12 @@ export async function render(ctx) {
   if (newBtn) fab(ctx, { icon: 'plus', label: t('sched.new'), onclick: () => openEditor(null), replaces: newBtn });
   const bar = h('div', { class: 'sc-bar' }, clock, newBtn);
   // Android tablets (AT_Schedule): the mode switch and New schedule head the list column, the editor runs full height
+  const head = ctx.header({ title: t('nav.announce'), actions: sw.headActs });
   const node = desk && isAndroid()
-    ? h('div', { class: 'page sc sc-desk' }, ctx.header({ title: t('nav.announce'), actions: sw.headActs }),
+    ? h('div', { class: 'page sc sc-desk' }, head,
       h('div', { class: 'sc-split' }, h('div', { class: 'sc-left' }, sw.slot, outNote, bar, listEl), pane))
     : h('div', { class: `page sc${desk ? ' sc-desk' : ''}` },
-      ctx.header({ title: t('nav.announce'), actions: sw.headActs }),
+      head,
       sw.slot,
       outNote,
       bar,
@@ -197,6 +203,10 @@ export async function render(ctx) {
       else if (zoned(Date.parse(s.next_run), data.timezone).date === today) groups.today.push(s);
       else groups.later.push(s);
     }
+    const byRun = (a, b) => Date.parse(a.next_run) - Date.parse(b.next_run);
+    const next = [...groups.today].sort(byRun)[0] || [...groups.later].sort(byRun)[0];
+    headerSub(head, groups.today.length ? t('sched.ctxToday', groups.today.length, zoned(Date.parse(next.next_run), data.timezone).time)
+      : next ? t('sched.ctxNext', when(next.next_run)) : t('sched.ctxNone'));
     if (!data.items.length) {
       listEl.replaceChildren(h('div', { class: 'sc-empty glass' }, glyph('clock', 'lg'), note(t(op ? 'sched.noneOp' : 'sched.none'))));
       if (desk && selected !== 'new') { selected = null; paintPane(); }

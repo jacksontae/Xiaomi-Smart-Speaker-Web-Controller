@@ -2,7 +2,7 @@
 // Filters (All / Playback / Account / Failed) apply to what is loaded; "Show older" pages back by id.
 // Phone/iPad: segmented filter on top; desktop: filter list on the left, time column on the left of each row.
 // Android (A_Activity / AT_Activity): filter chips on top and one centred column on every width.
-import { h, icon, segmented, busy } from '../ui.js';
+import { h, icon, segmented, busy, headerSub } from '../ui.js';
 import { register, t, fmtClock } from '../i18n.js';
 import { isAndroid } from '../prefs.js';
 import { tile, phoneBack, fmtDayHead, sameDay } from '../kit.js';
@@ -10,6 +10,8 @@ import { glyph } from '../icons.js';
 
 register({
   en: {
+    // the header's context line (Android): today's entries (n+ while older pages of today aren't loaded)
+    'act.ctxN': (n) => `${n} today`, 'act.ctxNone': 'Nothing yet today',
     'act.all': 'All', 'act.play': 'Playback', 'act.acct': 'Account', 'act.fail': 'Failed', 'act.filter': 'Show only',
     'act.older': 'Show older', 'act.noOlder': 'That\'s everything. Older entries aren\'t kept.',
     'act.empty': 'Nothing like this in the entries shown.', 'act.none': 'Nothing has happened yet.',
@@ -20,7 +22,7 @@ register({
     'act.schedNew': 'Added a schedule', 'act.schedEdit': 'Changed a schedule', 'act.schedDel': 'Deleted a schedule',
     'act.radioFav': 'Saved a station', 'act.radioUnfav': 'Removed a saved station',
     'act.fileUp': 'Uploaded a file', 'act.fileRename': 'Renamed a file', 'act.fileDel': 'Deleted a file',
-    'act.talk': 'Talked live', 'act.device': 'Played on their device',
+    'act.talk': 'Talked live', 'act.device': 'Played on their device', 'act.msgDel': 'Deleted a voice message',
     'act.login': 'Signed in', 'act.loginFail': 'Sign-in failed', 'act.logout': 'Signed out',
     'act.pw': 'Changed their password', 'act.memNew': 'Added a member', 'act.memEdit': 'Changed a member', 'act.memDel': 'Deleted a member',
     'act.gLink': 'Linked a Google account', 'act.gUnlink': 'Unlinked a Google account',
@@ -30,6 +32,7 @@ register({
     'act.d.setup': 'First-time setup', 'act.d.allDevices': 'On all devices',
   },
   th: {
+    'act.ctxN': (n) => `${n} รายการวันนี้`, 'act.ctxNone': 'วันนี้ยังไม่มีรายการ',
     'act.all': 'ทั้งหมด', 'act.play': 'เล่นเสียง', 'act.acct': 'บัญชี', 'act.fail': 'ไม่สำเร็จ', 'act.filter': 'แสดงเฉพาะ',
     'act.older': 'ดูเก่ากว่านี้', 'act.noOlder': 'แสดงถึงรายการเก่าที่สุดแล้ว',
     'act.empty': 'ไม่มีรายการแบบนี้ในช่วงที่แสดงอยู่', 'act.none': 'ยังไม่มีรายการ',
@@ -40,7 +43,7 @@ register({
     'act.schedNew': 'เพิ่มการตั้งเวลา', 'act.schedEdit': 'แก้การตั้งเวลา', 'act.schedDel': 'ลบการตั้งเวลา',
     'act.radioFav': 'บันทึกสถานีวิทยุ', 'act.radioUnfav': 'เอาสถานีวิทยุออก',
     'act.fileUp': 'อัปโหลดไฟล์', 'act.fileRename': 'เปลี่ยนชื่อไฟล์', 'act.fileDel': 'ลบไฟล์',
-    'act.talk': 'พูดสด', 'act.device': 'เล่นที่อุปกรณ์ของตัวเอง',
+    'act.talk': 'พูดสด', 'act.device': 'เล่นที่อุปกรณ์ของตัวเอง', 'act.msgDel': 'ลบข้อความเสียง',
     'act.login': 'เข้าสู่ระบบ', 'act.loginFail': 'เข้าสู่ระบบไม่สำเร็จ', 'act.logout': 'ออกจากระบบ',
     'act.pw': 'เปลี่ยนรหัสผ่าน', 'act.memNew': 'เพิ่มสมาชิก', 'act.memEdit': 'แก้ไขสมาชิก', 'act.memDel': 'ลบสมาชิก',
     'act.gLink': 'เชื่อมบัญชี Google', 'act.gUnlink': 'เลิกเชื่อมบัญชี Google',
@@ -75,6 +78,7 @@ const KINDS = {
   'file delete': ['act.fileDel', own('music'), 'lotus', 'play'],
   talk: ['act.talk', own('mic'), 'accent', 'play'],
   'device play': ['act.device', sprite('phone'), 'lotus', 'play'], // "This device": only they heard it
+  'message delete': ['act.msgDel', own('trash'), 'accent', 'play'], // a Talkie voice message (the rest of Talkie isn't logged)
   'login ok': ['act.login', own('user'), 'plain', 'acct'],
   'login failed': ['act.loginFail', sprite('key'), 'danger', 'fail'],
   logout: ['act.logout', sprite('logout'), 'plain', 'acct'],
@@ -130,8 +134,9 @@ export function render(ctx) {
   const feed = h('div', { class: 'a-feed', 'aria-live': 'polite' });
   const more = h('button', { type: 'button', class: 'btn tonal big a-more', onclick: () => loadMore(more) }, t('act.older'));
   const endNote = h('p', { class: 'small a-end', hidden: true }, t('act.noOlder'));
+  const head = phoneBack(ctx.header({ title: t('nav.activity'), back: { href: '#/account', label: t('nav.account') } }));
   const node = h('div', { class: 'page a-page' },
-    phoneBack(ctx.header({ title: t('nav.activity'), back: { href: '#/account', label: t('nav.account') } })),
+    head,
     seg, h('div', { class: 'a-grid' }, side, h('div', { class: 'a-main' }, feed, more, endNote)));
 
   function setFilter(f) {
@@ -174,6 +179,8 @@ export function render(ctx) {
     const page = await ctx.api(`/activity?limit=${PAGE}${before}`, { signal: ctx.signal });
     entries = entries.concat(page);
     done = page.length < PAGE;
+    const today = entries.filter((e) => sameDay(new Date(e.at), new Date())).length;
+    headerSub(head, today ? t('act.ctxN', today === entries.length && !done ? `${today}+` : today) : t('act.ctxNone'));
     draw();
   }
   function loadMore(btn) {

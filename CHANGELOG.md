@@ -6,6 +6,68 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-05
+
+### Added
+- Podcast subscriptions: every member (viewers too) follows shows with the Follow button on a show's episodes,
+  and finds them under "Following" in Music > Podcasts with a count of episodes published since they last opened
+  the show; those episodes are marked New. Subscriptions are personal and go with the member
+  (`GET`/`POST /podcasts/subs`, `POST /podcasts/subs/{id}/seen`, `DELETE /podcasts/subs/{id}`; `/podcasts/episodes`
+  has the caller's `subscription`). Feeds are read a few at a time and cached for 15 minutes; database schema 7.
+- Talkie, a walkie-talkie between members: while This device is the music output, the Announce page (and its nav
+  label) is Talkie, with two tabs. Walkie: hold to talk live to everyone who has the Walkie open, one at a time,
+  heard once and not kept; the members show as cards (who talks, who listens, who is online but can't hear).
+  Voice messages: hold to record a message kept for 24 hours, with "Not played yet" per device, an unread count on
+  the tab and the nav item, and delete (with Undo) for your own. Other pages show a small "2 on Walkie · Join" chip
+  while others are in the Walkie. 60 seconds at most, the same for every role (to announce on the speaker, switch
+  the output back to it). "Hear Talkie on this device" in App settings (`WebSocket /talkie` with a required
+  `mode`, `walkie` or `message`; `GET /talkie/clips`, `GET /talkie/clips/{id}.mp3`, `GET /talkie/live/{id}`,
+  `DELETE /talkie/clips/{id}`; clips in `TALKIE_DIR`; database schema 8).
+- UI design reference in `docs/design/`: one HTML page with screenshots of every screen on each device, theme and
+  language, for anyone designing on top of the app.
+- About, Privacy and Licenses pages, from Account ("About", with the version; Account & app settings on iPad/desktop) and
+  signed out from "Privacy · About" under the sign-in form. About shows the version and build, this server's speaker,
+  connection and the owner's contact (signed in only), and links to What's new, the security policy and issue
+  reports. Privacy says in plain words what is stored, who can see what, and what goes to other services. Licenses
+  lists the app's MIT license, the required notices and every open-source part with its license text
+  (`static/licenses.json`, `static/licenses/`).
+- `owner_contact` setting (Speaker settings, "Contact for members"): how members reach the owner; About shows it to
+  signed-in members and hides the row when it's empty.
+- `GET /about` (anyone): `version` and `build`; signed in also `server` (`speaker`, `transport`, `owner_contact`).
+- Self-service account data (API only for now): `GET /me/export` downloads the member's own data as JSON
+  (`speaker-my-data-YYYY-MM-DD.json`: profile, passkey names, sessions, personal playlists, uploaded file names and
+  sizes, podcast subscriptions, Talkie clips and their own activity rows; no key material, token hashes or other
+  members), logged as "data export". `DELETE /me` with `{"confirm": "<username>"}` deletes the member's own account
+  with the same cascade as an owner deleting them and signs them out; the only owner gets `409`.
+
+### Changed
+- The version lives in `version.py` (0.6.0), kept equal to `pyproject.toml` (was 0.2.0) and the newest CHANGELOG
+  release by a test; the radio-browser and feed User-Agent says `speaker-service/0.6.0` (was 0.2).
+- Android: a short context line under the big page title says what matters on that page: what the speaker (or This
+  device) is doing on Now, Announce and Music, the playing playlist or how many there are, what's left on the
+  schedule today, members and disabled ones, today's activity, unsaved speaker settings. iOS and desktop don't show it.
+- Playlists are sorted into Music and Announcements (playlists of announcements only) inside My playlists, Shared and
+  Members' playlists. `GET /playlists` items have `tts_only`; empty and mixed playlists count as music.
+- The activity log keeps entries for 90 days at most, besides the newest-5000 cap: older ones are deleted at start-up
+  and at most once an hour while new entries are written. Sign-in addresses stay in full.
+- Expired sessions are deleted at start-up and hourly, not only when someone signs in.
+
+### Fixed
+- Relay firmware 0.2.1: a board that lost Wi-Fi or its MQTT connection could stay offline until power-cycled.
+  A watchdog now rejoins Wi-Fi after 60 s down and restarts the board after 10 minutes without Wi-Fi or without
+  MQTT; its status has `reset_reason` (e.g. `watchdog_wifi`, `watchdog_mqtt`) to show why it last started.
+- Android: a page left before it finished loading no longer leaves its floating button (FAB) on the next page.
+- Android: members' avatars (Members, Account, Talkie) have white initials again; they were dark on the dark
+  member colours and hard to read.
+
+### Security
+- The web server's access log is off (`python app.py` runs uvicorn with `access_log=False`): it wrote each
+  client's address and the full query string (signed media links, searches) to `service.log` or the container
+  log. Start-up messages, warnings and errors still go there.
+- The `sid` cookie is `Secure` behind a TLS-terminating proxy that forwards plain http (Cloudflare Tunnel in the
+  Docker deployment): with the default `cookie_secure: "auto"`, a request to the host of an `https://`
+  `public_base_url` counts as https. `cookie_secure` (`"auto"`, `true`, `false`; env `COOKIE_SECURE`) overrides it.
+
 ## [0.6.0] - 2026-11-05
 
 ### Added

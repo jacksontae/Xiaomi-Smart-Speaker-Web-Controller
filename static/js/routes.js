@@ -47,10 +47,12 @@ export const RANK = { viewer: 0, operator: 1, admin: 2 };
 // section: 'main' = tab bar (phone) + top group of the sidebar; 'admin' = lower sidebar group (phone: Account page);
 // 'none' = reachable by link only. tab: the label in the phone tab bar. parent: the nav item to highlight instead.
 // device: the lowest role while "This device" is this browser's output (Music: viewers play only in their browser).
+// deviceLabel: the nav label (sidebar, tab bar, page title) while "This device" is the output (Announce -> Talkie).
 // css: the stylesheets the view loads with ctx.css(); the router fetches them alongside the module (keep in sync).
+// public: also opens signed out (from the sign-in page), as a screen without the shell (app.js); ctx.user is null then.
 export const ROUTES = [
   { id: 'now', label: 'nav.now', tab: 'tab.now', icon: 'now', min: 'viewer', section: 'main', chip: true, css: ['speaker3d.css', 'views/now.css'], load: () => import('./views/now.js') },
-  { id: 'announce', label: 'nav.announce', tab: 'nav.announce', icon: 'announce', min: 'viewer', section: 'main', css: ['views/announce.css', 'views/modeswitch.css'], load: () => import('./views/announce.js') },
+  { id: 'announce', label: 'nav.announce', tab: 'nav.announce', deviceLabel: 'nav.talkie', icon: 'announce', min: 'viewer', section: 'main', css: ['views/announce.css', 'views/modeswitch.css', 'views/talkie.css', 'views/common.css'], load: () => import('./views/announce.js') },
   { id: 'music', label: 'nav.music', tab: 'nav.music', icon: 'music', min: 'operator', device: 'viewer', section: 'main', css: ['views/media.css', 'views/music.css'], load: () => import('./views/music.js') },
   { id: 'playlists', label: 'nav.playlists', tab: 'nav.playlists', icon: 'playlists', min: 'viewer', section: 'main', css: ['views/media.css', 'views/playlists.css'], load: () => import('./views/playlists.js') },
   { id: 'schedule', label: 'sched.title', icon: 'announce', min: 'viewer', section: 'none', parent: 'announce', css: ['views/media.css', 'views/schedule.css', 'views/modeswitch.css'], load: () => import('./views/schedule.js') },
@@ -60,8 +62,14 @@ export const ROUTES = [
   { id: 'auth', label: 'nav.auth', icon: 'lock', min: 'admin', section: 'none', css: ['views/common.css'], load: () => import('./views/methods.js') },
   { id: 'account', label: 'nav.account', icon: 'user', min: 'viewer', section: 'none', css: ['views/common.css', 'views/prefs.css'], load: () => import('./views/account.js') },
   { id: 'prefs', label: 'nav.prefs', icon: 'user', min: 'viewer', section: 'none', css: ['views/common.css', 'views/prefs.css'], load: () => import('./views/prefs.js') },
+  { id: 'about', label: 'nav.about', icon: 'help', min: 'viewer', section: 'none', public: true, css: ['views/common.css', 'views/policy.css'], load: () => import('./views/about.js') },
+  { id: 'privacy', label: 'nav.privacy', icon: 'help', min: 'viewer', section: 'none', public: true, css: ['views/common.css', 'views/policy.css'], load: () => import('./views/privacy.js') },
+  { id: 'licenses', label: 'nav.licenses', icon: 'help', min: 'viewer', section: 'none', public: true, css: ['views/common.css', 'views/policy.css'], load: () => import('./views/licenses.js') },
   { id: 'help', label: 'nav.help', icon: 'help', min: 'viewer', section: 'none', css: ['views/help.css'], load: () => import('./views/help.js') },
 ];
+
+/** The i18n key of a route's name for the current output: kind 'label' (sidebar, title) or 'tab' (phone tab bar). */
+export const labelKey = (r, output, kind = 'label') => (output === 'device' && r.deviceLabel) || r[kind];
 
 export const href = (id, ...params) => `#/${id === 'now' ? '' : [id, ...params].join('/')}`;
 

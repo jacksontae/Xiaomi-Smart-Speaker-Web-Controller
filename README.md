@@ -40,7 +40,7 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 ./speakerctl status      # สถานะ service และลำโพง
 ./speakerctl restart
 ./speakerctl stop | start
-./speakerctl logs [n]    # ดู log แบบ follow (แสดง n บรรทัดล่าสุดก่อน ค่าเริ่มต้น 50) · log อยู่ที่ service.log
+./speakerctl logs [n]    # ดู log แบบ follow (แสดง n บรรทัดล่าสุดก่อน ค่าเริ่มต้น 50) · log อยู่ที่ service.log (ไม่มี access log มีแค่ข้อความตอนเริ่ม คำเตือน และ error)
 ./speakerctl config      # แก้ config.json แล้วรีสตาร์ท
 ./speakerctl token       # แสดง API token · --rotate เพื่อออก token ใหม่ (ของเดิมใช้ไม่ได้ทันที)
 ./speakerctl uninstall   # เลิกเปิดอัตโนมัติ
@@ -87,6 +87,8 @@ docker compose -f deploy/remote/docker-compose.yml exec speaker-service \
 | `google_signin` | `false` | เจ้าของ (admin) เปิด/ปิดการล็อกอินด้วย Google · เปิดได้เมื่อมี `google_client_id` แล้ว |
 | `passkey_signin` | `true` | เปิดการล็อกอินด้วย passkey (ใช้ได้จริงเมื่อ `public_base_url` เป็น `https://` หรือ `http://localhost`) |
 | `passkey_required_for_admins` | `false` | admin ที่มี passkey ต้องล็อกอินด้วย passkey เท่านั้น (เปิดได้เมื่อ admin ทุกคนมี passkey แล้ว) |
+| `owner_contact` | `null` | ช่องทางติดต่อเจ้าของ เช่น `it@example.com` หรือ LINE id (ไม่เกิน 120 ตัวอักษร) แสดงในหน้าเกี่ยวกับแอปเฉพาะสมาชิกที่เข้าสู่ระบบแล้ว |
+| `cookie_secure` | `"auto"` | flag `Secure` ของ cookie `sid` · `"auto"`: ใส่เมื่อคำขอมาทาง https หรือมาที่ host ของ `public_base_url` ที่เป็น `https://` (proxy ที่ถอด TLS แล้วส่งต่อเป็น http เช่น Cloudflare Tunnel) · `true`: ใส่เสมอ (ล็อกอินได้เฉพาะทาง https หรือ `http://localhost`) · `false`: ไม่ใส่ · env `COOKIE_SECURE` |
 
 ```bash
 TOKEN=$(./speakerctl token)
@@ -101,7 +103,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 - **API token** ส่ง header `Authorization: Bearer <token>` ได้สิทธิ์ `admin` ใช้กับ curl, integration และ firmware relay
   - token สร้างให้อัตโนมัติตอนเปิด service ครั้งแรก เก็บใน `config.json` (สิทธิ์ไฟล์ 600) ดูด้วย `./speakerctl token`
   - `GET /settings` ไม่ส่ง token กลับไป และเปลี่ยน token ผ่าน API ไม่ได้ ใช้ `./speakerctl token --rotate`
-- **บัญชีผู้ใช้ (หน้าเว็บ)** ล็อกอินแล้วได้ cookie `sid` (`HttpOnly`, `SameSite=Strict`, อายุ 30 วันนับจากใช้งานล่าสุด)
+- **บัญชีผู้ใช้ (หน้าเว็บ)** ล็อกอินแล้วได้ cookie `sid` (`HttpOnly`, `SameSite=Strict`, อายุ 30 วันนับจากใช้งานล่าสุด, `Secure` เมื่อใช้ https ดู `cookie_secure`) · session ที่หมดอายุถูกลบตอนเริ่ม service และทุกชั่วโมง
   - คำขอที่เปลี่ยนข้อมูล (POST/PUT/PATCH/DELETE) ด้วย cookie ต้องส่ง header `X-Requested-With: speaker-web` ไม่งั้นได้ `403`
   - ครั้งแรกที่ยังไม่มีผู้ใช้ หน้าเว็บจะให้ใส่ API token เพื่อสร้างบัญชี admin คนแรก (`POST /auth/setup`)
   - รหัสผ่าน 8–256 ตัว เก็บแบบ scrypt · ล็อกอินผิด 5 ครั้งใน 5 นาที (ต่อ IP + ชื่อผู้ใช้) จะได้ `429` พร้อม `Retry-After`
@@ -112,7 +114,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 
 | role | ทำอะไรได้ |
 |---|---|
-| `viewer` | ดูสถานะ คิว เพลย์ลิสต์ที่แชร์ และข้อความด่วน · ข้ามเพลง/ย้อน/เลือกเพลงในคิวของลำโพง · ค้นเพลง เล่นที่อุปกรณ์นี้ · อัปโหลดไฟล์และทำเพลย์ลิสต์ของตัวเอง (ส่วนตัว) |
+| `viewer` | ดูสถานะ คิว เพลย์ลิสต์ที่แชร์ และข้อความด่วน · ข้ามเพลง/ย้อน/เลือกเพลงในคิวของลำโพง · ค้นเพลง เล่นที่อุปกรณ์นี้ · อัปโหลดไฟล์และทำเพลย์ลิสต์ของตัวเอง (ส่วนตัว) · ทอล์คกี้ |
 | `operator` | viewer + ประกาศ เล่น ปรับเสียง หยุด/เล่นต่อ คุมคิว แก้เพลย์ลิสต์ที่แชร์และข้อความด่วน |
 | `admin` | operator + จัดการสมาชิก ตั้งค่า ค้นหาลำโพง ดูบันทึกกิจกรรม |
 
@@ -121,6 +123,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 | Method | Path | สิทธิ์ | Body | หน้าที่ |
 |---|---|---|---|---|
 | GET | `/auth/state` | ทุกคน | – | `{"needs_setup", "user", "methods": {"password", "google", "passkey"}}` + `google_client_id` เมื่อเปิด Google (+ `passkey_required` เมื่อ admin ต้องเพิ่ม passkey) |
+| GET | `/about` | ทุกคน | – | `{"version", "build"}` (เวอร์ชันแอป, build id ของไฟล์ static) + `server: {"speaker", "transport", "owner_contact"}` เมื่อล็อกอินแล้ว |
 | POST | `/auth/setup` | ทุกคน (ตอนยังไม่มีผู้ใช้) | `{"api_token", "username", "display_name", "password"}` | สร้าง admin คนแรกแล้วล็อกอิน (token ผิด `401`, มีผู้ใช้แล้ว `409`) |
 | POST | `/auth/login` | ทุกคน | `{"username", "password"}` | ล็อกอิน ตั้ง cookie |
 | POST | `/auth/logout` · `/auth/logout-all` | ล็อกอินแล้ว | – | ออกจากระบบเครื่องนี้ · ทุกเครื่อง |
@@ -132,12 +135,14 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 | POST | `/me/passkeys/options` | ล็อกอินแล้ว | – | `{"publicKey"}` สำหรับ `navigator.credentials.create()` |
 | GET · POST | `/me/passkeys` | ล็อกอินแล้ว | `{"credential", "name"}` | ดู · เพิ่ม passkey ของตัวเอง |
 | PATCH · DELETE | `/me/passkeys/{id}` | ล็อกอินแล้ว | `{"name"}` · – | เปลี่ยนชื่อ · ลบ passkey |
+| GET | `/me/export` | ล็อกอินแล้ว | – | ดาวน์โหลดข้อมูลของตัวเองเป็น JSON (`speaker-my-data-YYYY-MM-DD.json`): โปรไฟล์ ชื่อ passkey เซสชัน เพลย์ลิสต์และไฟล์ส่วนตัว (ชื่อและขนาด) พอดแคสต์ที่ติดตาม คลิป Talkie และ activity ของตัวเอง |
+| DELETE | `/me` | ล็อกอินแล้ว | `{"confirm": "<ชื่อผู้ใช้ของตัวเอง>"}` | ลบบัญชีตัวเองพร้อมทุกอย่างที่เป็นของส่วนตัว แล้วออกจากระบบ (ชื่อผู้ใช้ไม่ตรง `400`, เป็นเจ้าของคนเดียว `409`) |
 | GET · POST | `/users` | admin | `{"username", "display_name", "password", "role"}` | ดู · เพิ่มสมาชิก |
 | PATCH · DELETE | `/users/{id}` | admin | `{"display_name", "role", "password", "disabled"}` (ใส่เฉพาะที่จะแก้) | แก้ · ลบสมาชิก |
 
-ชื่อผู้ใช้ 3–32 ตัว `a-z 0-9 . _ -` · ลบ ปิด หรือลดสิทธิ์ตัวเองไม่ได้ และต้องเหลือ admin ที่เปิดใช้อย่างน้อย 1 คน (`409`)
+ชื่อผู้ใช้ 3–32 ตัว `a-z 0-9 . _ -` · ลบ (ยกเว้นผ่าน `DELETE /me`) ปิด หรือลดสิทธิ์ตัวเองไม่ได้ และต้องเหลือ admin ที่เปิดใช้อย่างน้อย 1 คน (`409`)
 ปิดบัญชีหรือเปลี่ยนรหัสผ่านจะออกจากระบบทุกเครื่องของคนนั้น
-`/me/*`, `/auth/password` และ `/auth/logout-all` ต้องเป็นบัญชีผู้ใช้ เรียกด้วย API token ได้ `400`
+`/me`, `/me/*`, `/auth/password` และ `/auth/logout-all` ต้องเป็นบัญชีผู้ใช้ เรียกด้วย API token ได้ `400`
 
 #### Sign in with Google
 
@@ -172,7 +177,7 @@ challenge ใช้ได้ครั้งเดียวและหมดอ�
 | POST | `/pause` · `/resume` · `/stop` | operator | – | ควบคุมการเล่น (`stop` ล้างคิวด้วย) |
 | GET · POST | `/settings` | admin | `{"default_volume": 0.4}` | ดู · แก้ตั้งค่า |
 | GET | `/speakers` | admin | – | ค้นหาลำโพง Cast ในวง LAN |
-| GET | `/activity?limit=50&before_id=` | admin | – | บันทึกกิจกรรม ใหม่สุดก่อน (`limit` ไม่เกิน 500 · เก็บ 5000 รายการล่าสุด) |
+| GET | `/activity?limit=50&before_id=` | admin | – | บันทึกกิจกรรม ใหม่สุดก่อน (`limit` ไม่เกิน 500 · เก็บ 5000 รายการล่าสุดภายใน 90 วัน) |
 
 ### เพลย์ลิสต์และคิว
 
@@ -238,7 +243,10 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 | DELETE | `/radio/favorites/{id}` | operator | – | ลบสถานีโปรด |
 | POST | `/radio/play` | operator | `{"favorite_id"}` หรือ `{"uuid"}` หรือ `{"url", "name"}` + `"volume"` | เล่นวิทยุแบบ LIVE (ล้างคิว) |
 | GET | `/podcasts/search?q=&country=TH&limit=20` | viewer | – | ค้นรายการจาก iTunes Search API ได้ `feed_url` |
-| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | viewer | – | อ่าน RSS ได้รายละเอียดรายการและตอนล่าสุด |
+| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | viewer | – | อ่าน RSS ได้รายละเอียดรายการและตอนล่าสุด + `subscription` ของผู้เรียก (หรือ `null`) |
+| GET · POST | `/podcasts/subs` | viewer | `{"feed_url", "title", "author", "artwork"}` | รายการที่ติดตาม (ส่วนตัว) พร้อม `new_count` · ติดตาม (ซ้ำได้ ได้แถวเดิม · ไม่ส่ง `title` จะอ่านจากฟีด) |
+| POST | `/podcasts/subs/{id}/seen` | viewer | – | เปิดดูรายการแล้ว: ตอนที่มีอยู่ไม่นับเป็นตอนใหม่อีก |
+| DELETE | `/podcasts/subs/{id}` | viewer | – | เลิกติดตาม |
 | POST | `/podcasts/play` | operator | `{"url", "title", "thumbnail", "content_type", "volume"}` | เล่นตอนหนึ่ง (ล้างคิว) |
 | GET | `/files` | viewer | – | `{"items", "used", "quota", "max_size", "types"}` (เฉพาะไฟล์ที่เห็นได้) |
 | POST | `/files?name=<ชื่อไฟล์>&duration=<วินาที>&personal=1` | viewer | ตัวไฟล์เสียงเป็น body ตรงๆ (ไม่ใช่ form) | อัปโหลด |
@@ -290,6 +298,40 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 
 ทดสอบเองได้ด้วย `python tests/manual/talk_stream.py --url ws://127.0.0.1:8090/talk --token $TOKEN --file clip.webm`
 
+### ทอล์คกี้ (Talkie)
+
+วิทยุสื่อสารระหว่างสมาชิกของ server นี้ เมื่อเลือกเล่นเพลงที่ "อุปกรณ์นี้" หน้าประกาศจะกลายเป็นทอล์คกี้ (ทุกบทบาท) มีสองแท็บ:
+
+- **วอล์กกี้**: กดปุ่มค้างแล้วพูด ทุกคนที่เปิดวอล์กกี้อยู่ได้ยินสดทันที (ช้าประมาณ 1–2 วินาที) พูดได้ทีละคน (แยกจากพูดสดที่ลำโพง) ฟังครั้งเดียว ไม่เก็บไว้
+  สมาชิกแสดงเป็นการ์ด: ใครกำลังพูด ใครกำลังฟัง ใครออนไลน์แต่ไม่ได้ยิน · หน้าอื่นมีป้ายเล็ก "2 คนอยู่ในวอล์กกี้ · เข้าร่วม" ขณะที่มีคนอื่นอยู่ในห้อง
+- **ข้อความเสียง**: กดค้างเพื่ออัดข้อความถึงทุกคน เก็บไว้ 24 ชั่วโมง ไม่เล่นสด อัดพร้อมกันหลายคนได้ · "ยังไม่ได้ฟัง" แยกตามเครื่อง
+  พร้อมจำนวนบนแท็บและเมนู · ลบข้อความของตัวเองได้ (มีเลิกทำ)
+
+ปิดเสียงวอล์กกี้ได้ทีละเครื่องในการตั้งค่าแอป ("ฟังทอล์คกี้บนอุปกรณ์นี้")
+
+- `WebSocket /talkie`: หน้าเว็บเปิดค้างไว้ทุกหน้าระหว่างที่ลงชื่อเข้าใช้ ยืนยันตัวตนด้วย cookie `sid` (ทุกบทบาท) และ `Origin` โดเมนเดียวกันเหมือน `/talk` ไม่รับ API token (`4403`) · server ตรวจ session ซ้ำทุกครั้งที่ได้ `ping` และ `start`
+- แปลงเสียงด้วย ffmpeg เหมือนพูดสด คลิปเป็นไฟล์ MP3 ใน `talkie/` ข้าง `data.db` (env `TALKIE_DIR`) · พูดสั้นกว่า 0.5 วินาทีไม่เก็บคลิป พูดได้นานสุด 60 วินาทีต่อครั้ง คลิปเกิน 24 ชั่วโมงถูกลบ ลบสมาชิกแล้วคลิปของคนนั้นหายด้วย · ลง activity เฉพาะการลบข้อความ
+
+| Method | Path | Role | Body | ทำอะไร |
+|---|---|---|---|---|
+| GET | `/talkie/clips` | viewer | – | คลิปใน 24 ชั่วโมงล่าสุด ใหม่สุดก่อน: `id`, `user_id`, `name`, `seconds`, `created_at`, `url` |
+| GET | `/talkie/clips/{id}.mp3` | viewer | – | ไฟล์ MP3 ของคลิป (รองรับ Range) |
+| GET | `/talkie/live/{id}` | viewer | – | การพูดวอล์กกี้ที่กำลังเกิดขึ้น เป็น MP3 ตั้งแต่ต้น ส่งต่อเนื่องจนพูดจบ (`<audio>` ธรรมดาเล่นได้) · `403` ถ้าไม่มีแท็บไหนของผู้เรียกอยู่ในห้อง |
+| DELETE | `/talkie/clips/{id}` | viewer | – | ลบข้อความของตัวเอง (ของคนอื่นได้ `403` เจ้าของก็ลบไม่ได้) |
+
+| ทิศทาง | ข้อความ | ความหมาย |
+|---|---|---|
+| ← | `{"type": "hello", "me", "online": [{"id", "name", "in_room"}], "live": {"id", "user_id", "name", "url"?} \| null, "clips"}` | ตอนเชื่อมต่อ (`/talkie?room=0\|1`: อยู่นอกหรือในห้องวอล์กกี้) |
+| ← | `{"type": "online", "online"}` | มีคนเปิดหรือปิดแอป หรือเข้าหรือออกจากห้อง (เปิดหลายแท็บนับครั้งเดียว) |
+| → | `{"type": "room", "in": true \| false}` | เปิดหรือปิดวอล์กกี้: เฉพาะการเชื่อมต่อที่อยู่ในห้องได้ `url` และพูดสดได้ |
+| → | `{"type": "start", "mime", "mode"}` | เริ่มพูด (`mime` เหมือน `/talk`) · ต้องมี `mode`: `walkie` (สด ไม่เก็บ) หรือ `message` (เก็บ ไม่เล่นสด) |
+| ← | `{"type": "ready", "id", "max_seconds"}` | ส่ง binary frame ของ MediaRecorder แล้วจบด้วย `{"type": "stop"}` |
+| ← | `{"type": "error", "code", "detail"}` | ไม่ได้เริ่ม socket ยังเปิดอยู่ · `code`: `busy`, `not_in_room`, `bad_request`, `unavailable` (ไม่มี ffmpeg), `transcoder_error` |
+| ← | `{"type": "live", "id", "user_id", "name", "url"?}` | ถึงทุกคนที่เหลือ: มีคนเริ่มพูดวอล์กกี้ · มี `url` (ให้เล่น) เฉพาะในห้อง |
+| ← | `{"type": "ended", "id", "user_id", "reason", "clip"}` | พูดจบ (`stopped`, `disconnected`, `left_room`, `max_length`, `idle`, `too_large`, `transcoder_error`): ถึงทุกคนสำหรับวอล์กกี้ ถึงคนพูดคนเดียวสำหรับข้อความ · `clip` เป็น `null` ถ้าไม่ได้เก็บ |
+| ← | `{"type": "clip", "clip"}` / `{"type": "clip_deleted", "id"}` | ถึงทุกคน: มีข้อความถูกเก็บ / เจ้าของลบข้อความ |
+| → | `{"type": "ping"}` | ได้ `{"type": "pong"}` |
+
 ## Remote deployment (ESP32 relay + self-hosted MQTT + Cloudflare Tunnel)
 
 Use this when the service runs somewhere other than the speaker's LAN (e.g. a VM without a fixed IP).
@@ -326,7 +368,7 @@ instead of the `mosquitto` service, and give the relay its host, port 8883 and T
 
 Settings can also live in `config.json` (`"transport": "mqtt"`, an `mqtt` block, `public_base_url`).
 The environment variables `SPEAKER_TRANSPORT`, `PUBLIC_BASE_URL`, `MQTT_HOST`, `MQTT_PORT`, `MQTT_TLS`,
-`MQTT_CA_FILE`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_BASE_TOPIC` and `MQTT_CLIENT_ID` override it and
+`MQTT_CA_FILE`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_BASE_TOPIC`, `MQTT_CLIENT_ID` and `COOKIE_SECURE` override it and
 are never written back to the file. The MQTT password is never returned by `/settings` (only `password_set`) or
 written to the activity log.
 
@@ -433,7 +475,8 @@ config.example.json    ตัวอย่างไฟล์ตั้งค่า
 
 ## Contributing
 
-ยินดีรับ issue และ pull request ครับ อ่าน [CONTRIBUTING.md](CONTRIBUTING.md) ก่อน (PR ส่งเข้า branch `dev`)
+ยินดีรับ issue และ pull request ครับ อ่าน [CONTRIBUTING.md](CONTRIBUTING.md) ก่อน (PR ส่งเข้า branch `dev`) ภาพทุกหน้าจอสำหรับใช้เป็นต้นแบบดีไซน์อยู่ที่ [docs/design](docs/design/)
+เมื่อเพิ่มหรืออัปเดต dependency ให้สร้างหน้า Licenses ใหม่ด้วย `python scripts/gen_licenses.py --venv <venv ที่ติดตั้ง requirements.txt>` (ดู `--help`)
 รายงานช่องโหว่ด้านความปลอดภัยตาม [SECURITY.md](SECURITY.md) · ทุกคนต้องปฏิบัติตาม [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## Disclaimer

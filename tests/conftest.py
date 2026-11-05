@@ -129,9 +129,14 @@ def fresh_state(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module, "http", httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
     monkeypatch.setattr(app_module, "feed_http", httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
     monkeypatch.setattr(app_module, "MEDIA_DIR", tmp_path / "media")
+    monkeypatch.setattr(app_module, "TALKIE_DIR", tmp_path / "talkie")
     app_module.clear_queue()
     app_module._talk = app_module._talk_last = app_module._talk_on_speaker = None
+    app_module._talkie = app_module._talkie_last = None
+    app_module._talkie_conns.clear()
+    app_module._talkie_swept = 0.0
     app_module._downloads.clear()
+    app_module._feed_cache.clear()
     spawned = SimpleNamespace(watchers=0, prefetch=[], probes=0, cuts=[])
     app_module.reset_reachability()
     monkeypatch.setattr(app_module, "cast_lock", asyncio.Lock())  # a contended lock binds to its test's event loop

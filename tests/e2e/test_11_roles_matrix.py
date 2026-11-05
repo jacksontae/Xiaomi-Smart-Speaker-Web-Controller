@@ -6,7 +6,7 @@ from playwright.sync_api import expect
 ROUTES = {  # route -> minimum role
     "": "viewer", "announce": "viewer", "music": "operator", "playlists": "viewer", "schedule": "viewer",
     "members": "admin", "settings": "admin", "activity": "admin", "auth": "admin", "account": "viewer",
-    "prefs": "viewer", "help": "viewer",
+    "prefs": "viewer", "help": "viewer", "about": "viewer", "privacy": "viewer", "licenses": "viewer",
 }
 RANK = {"viewer": 0, "operator": 1, "admin": 2}
 ROLE_RANK = {"viewer": 0, "operator": 1, "owner": 2}

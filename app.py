@@ -5,7 +5,8 @@ The speaker fetches every stream from this service (TTS and YouTube are proxied)
 drives the speaker directly over Cast on the LAN, or through the ESP32 relay (firmware/) over MQTT
 when it runs elsewhere; see transport.py. Media URLs then go out under `public_base_url`.
 
-Operators can also talk through the speaker live from the browser's microphone (WebSocket /talk, see talk.py).
+Operators can also talk through the speaker live from the browser's microphone (WebSocket /talk, see talk.py),
+and every member can use the Talkie, a walkie-talkie between the app's members (WebSocket /talkie).
 
 Callers authenticate with either `Authorization: Bearer <api_token>` (acts as admin) or the
 `sid` session cookie of a web account (admin, operator or viewer). The speaker cannot send
@@ -79,6 +80,7 @@ from passkeys import (
 from player import Queue
 from store import SESSION_TTL, Conflict, Store
 from transport import SPEAKER_ERRORS, UNREACHABLE_ERRORS, TransportError, make_transport
+from version import __version__
 
 ROOT = Path(__file__).parent
 CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", ROOT / "config.json"))
@@ -105,6 +107,7 @@ YT_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
 GOOGLE_CLIENT_ID_RE = re.compile(r"[A-Za-z0-9.-]+\.apps\.googleusercontent\.com")
 HOST_LABEL_RE = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)")  # one DNS label (RFC 1123)
 SPEAKER_NAME_MAX = 64  # the settings page's input has the same maxLength
+OWNER_CONTACT_MAX = 120  # ... and so does the owner contact's
 TIME_RE = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 AUDIO_SUFFIXES = {".m4a", ".webm", ".mp3", ".opus", ".ogg", ".mp4", ".aac"}
@@ -128,7 +131,11 @@ PODCAST_SEARCH = os.environ.get("PODCAST_SEARCH_URL", "https://itunes.apple.com/
 FEED_MAX = 10 * 1024 * 1024  # bytes of RSS we read at most
 FEED_REDIRECTS = 5
 EPISODES_MAX = 200
-USER_AGENT = "speaker-service/0.2"  # radio-browser asks clients to identify themselves
+FEED_CACHE_TTL = 15 * 60  # a followed show's feed is read at most this often for its "N new" count
+FEED_FAIL_TTL = 5 * 60  # ... and a feed that failed isn't tried again sooner than this
+FEED_CHECKS = 4  # feeds read at once for the Following list
+FEED_CHECK_TIMEOUT = 10  # seconds one feed may take there before it just shows no count
+USER_AGENT = f"speaker-service/{__version__}"  # radio-browser asks clients to identify themselves
 # "This device" stream proxy (/local/stream): for radio a browser can't fetch itself (http:// on an https page)
 STREAM_MAX_BYTES = 512 * 1024 * 1024  # one relayed stream ends after this much (about 9 h of 128 kbit/s radio)
 STREAM_MAX_SECONDS = 6 * 3600  # ... or after this long; the browser then asks for a fresh link
@@ -147,6 +154,11 @@ TALK_END_WAIT = 20.0  # longest wait for the speaker to play out the stream befo
 TALK_POLL = 0.3
 TALK_GRACE = 60.0  # an ended talk's stream stays fetchable this long (a slow speaker still gets it all)
 TALK_MAX_RATE = 64 * 1024  # bytes/s of recorder input accepted on average (Opus/AAC use a fraction)
+TALKIE_DIR = Path(os.environ.get("TALKIE_DIR", DATA_PATH.parent / "talkie"))  # Talkie clips (MP3, kept a day)
+TALKIE_MAX_SECONDS = 60  # a Talkie talk (walkie or message) ends after this long
+TALKIE_MIN_SECONDS = 0.5  # shorter ones (a tap on the button) are dropped, not kept as a clip
+TALKIE_KEEP = timedelta(hours=24)  # clips older than this are deleted
+TALKIE_SWEEP = 3600.0  # seconds between sweeps for old clip files
 
 
 class MqttSettings(BaseModel):
@@ -238,6 +250,12 @@ class Settings(BaseModel):
     # Passkeys work only when public_base_url is https:// (or http://localhost); its host is the RP ID.
     passkey_signin: bool = True
     passkey_required_for_admins: bool = False  # admins who have a passkey can't sign in any other way
+    # How members reach the owner (an email, a LINE id...), shown on the About page to signed-in members only.
+    owner_contact: str | None = None
+    # The sid cookie's Secure flag. "auto": when the request came over https (uvicorn takes X-Forwarded-Proto
+    # only from FORWARDED_ALLOW_IPS, default this machine) or to the host of an https:// public_base_url (a
+    # TLS-terminating proxy such as Cloudflare Tunnel). true: always. false: never.
+    cookie_secure: Literal["auto"] | bool = "auto"
 
     @field_validator("speaker_ip")
     @classmethod
@@ -257,6 +275,16 @@ class Settings(BaseModel):
         if len(v) > SPEAKER_NAME_MAX:
             raise ValueError(f"speaker_name must be at most {SPEAKER_NAME_MAX} characters")
         return v
+
+    @field_validator("owner_contact")
+    @classmethod
+    def check_owner_contact(cls, v):
+        if v is None:
+            return None
+        v = " ".join(v.split())
+        if len(v) > OWNER_CONTACT_MAX:
+            raise ValueError(f"owner_contact must be at most {OWNER_CONTACT_MAX} characters")
+        return v or None
 
     @field_validator("yt_skip_segments")
     @classmethod
@@ -315,6 +343,7 @@ ENV_OVERRIDES = {
     "MQTT_PASSWORD": ("mqtt", "password"),
     "MQTT_BASE_TOPIC": ("mqtt", "base_topic"),
     "MQTT_CLIENT_ID": ("mqtt", "client_id"),
+    "COOKIE_SECURE": ("cookie_secure",),
 }
 
 
@@ -422,12 +451,13 @@ async def lifespan(_app):
     finally:
         runner.cancel()
         reset_reachability()
-        if _talk is not None:
-            _talk.transcoder.kill()  # never leave an ffmpeg behind
+        for session in (_talk, _talkie, *(c.talk for c in _talkie_conns if c.talk is not _talkie)):
+            if session is not None:
+                session.transcoder.kill()  # never leave an ffmpeg behind
         transport.close()
 
 
-app = FastAPI(title="Speaker Service", lifespan=lifespan)
+app = FastAPI(title="Speaker Service", version=__version__, lifespan=lifespan)
 http = httpx.AsyncClient(timeout=30, follow_redirects=True)
 # For URLs users type in (podcast feeds): redirects are followed by hand so each hop is checked first.
 feed_http = httpx.AsyncClient(timeout=20, follow_redirects=False)
@@ -527,16 +557,26 @@ def unauthorized(detail):
     return HTTPException(401, detail, headers={"WWW-Authenticate": "Bearer"})
 
 
+def cookie_secure(request):
+    """The sid cookie's Secure flag (settings.cookie_secure)."""
+    if settings.cookie_secure != "auto":
+        return settings.cookie_secure
+    if request.url.scheme == "https":
+        return True
+    base = urllib.parse.urlsplit(settings.public_base_url or "")
+    return base.scheme == "https" and request.headers.get("host", "").lower() == base.netloc.lower()
+
+
 def set_session_cookie(request, response, sid):
     response.set_cookie(
         SESSION_COOKIE, sid, max_age=SESSION_TTL, path="/", httponly=True, samesite="strict",
-        secure=request.url.scheme == "https",
+        secure=cookie_secure(request),
     )
 
 
 def clear_session_cookie(request, response):
     response.delete_cookie(
-        SESSION_COOKIE, path="/", httponly=True, samesite="strict", secure=request.url.scheme == "https"
+        SESSION_COOKIE, path="/", httponly=True, samesite="strict", secure=cookie_secure(request)
     )
 
 
@@ -1432,6 +1472,10 @@ class MeBody(BaseModel):
     display_name: str
 
 
+class DeleteMeBody(BaseModel):
+    confirm: str = Field(max_length=64)  # the member's username
+
+
 class PasswordBody(BaseModel):
     current: str
     new: str
@@ -1491,6 +1535,14 @@ class EpisodePlayBody(BaseModel):
     thumbnail: str | None = None
     content_type: str | None = None
     volume: float | None = Field(None, ge=0, le=1)
+
+
+class SubBody(BaseModel):
+    """Follow a show; without a title the feed is read for its details."""
+    feed_url: str
+    title: str | None = None
+    author: str | None = None
+    artwork: str | None = None
 
 
 class FilePatch(BaseModel):
@@ -1654,6 +1706,18 @@ async def auth_state(who: Caller):
     if user and passkey_policy_applies(user) and not user["has_passkey"]:
         state["passkey_required"] = True  # signed in with a password; the UI should ask for a passkey now
     return state
+
+
+@app.get("/about")
+async def about(who: Caller):
+    """The About page: version and build for anyone (it opens from the sign-in page too); this server's speaker,
+    connection and owner contact only for signed-in members."""
+    build = await asyncio.to_thread(static_build.refresh)
+    info = {"version": __version__, "build": build.id}
+    if who is not None:
+        info["server"] = {"speaker": settings.speaker_name, "transport": settings.transport,
+                          "owner_contact": settings.owner_contact}
+    return info
 
 
 @app.post("/auth/setup")
@@ -1891,6 +1955,36 @@ async def delete_passkey(passkey_id: int, who: SignedIn):
     record(who, "passkey remove", names.get(passkey_id))
 
 
+@app.get("/me/export")
+async def export_me(who: SignedIn):
+    """The member's own data as a JSON download. Device preferences aren't included: they live only in the
+    browser (localStorage), never on the server."""
+    user = account_of(who)
+    data = db.export_user(user["id"], who.session)
+    record(who, "data export")
+    body = {"exported_at": utc_iso(datetime.now(UTC)), "server_version": __version__} | data
+    filename = f"speaker-my-data-{datetime.now(ZONE).date().isoformat()}.json"
+    return JSONResponse(body, headers={"Content-Disposition": f'attachment; filename="{filename}"',
+                                       "Cache-Control": "no-store"})
+
+
+@app.delete("/me", status_code=204)
+async def delete_me(body: DeleteMeBody, who: SignedIn, request: Request, response: Response):
+    """A member deletes their own account, typing their username to confirm (every member has one, whatever
+    their sign-in methods). Same cascade as an owner deleting them; the last owner can't leave the server orphaned."""
+    user = account_of(who)
+    if body.confirm.strip().lower() != user["username"]:
+        raise HTTPException(400, "Type your username to confirm")
+    try:
+        gone = remove_member(user["id"])
+    except Conflict as e:
+        raise HTTPException(409, "You're the only owner; make another member an owner first") from e
+    if not gone:
+        raise HTTPException(404, "No such member")
+    clear_session_cookie(request, response)
+    record(who, "member delete", f"{user['username']} (own account)")
+
+
 # --- Members ---
 
 @admin_api.get("/users")
@@ -1944,14 +2038,27 @@ async def delete_user(user_id: int, who: Who):
         raise HTTPException(409, "You can't delete yourself")
     target = db.get_user(user_id)
     try:
-        stored = db.delete_user(user_id) if target is not None else None
+        gone = target is not None and remove_member(user_id)
     except Conflict as e:
         raise HTTPException(409, str(e)) from e
-    if stored is None:
+    if not gone:
         raise HTTPException(404, "No such member")
+    record(who, "member delete", target["username"])
+
+
+def remove_member(user_id):
+    """Delete the member with everything personal (sessions, passkeys, podcast subscriptions, personal playlists
+    and files, Talkie clips) and the files of those on disk; False if there is no such member. Raises Conflict for
+    the last enabled admin."""
+    clips = db.user_clip_files(user_id)
+    stored = db.delete_user(user_id)
+    if stored is None:
+        return False
     for name in stored:  # their personal files went with them
         (MEDIA_DIR / name).unlink(missing_ok=True)
-    record(who, "member delete", target["username"])
+    for name in clips:  # ... and so did their Talkie clips
+        (TALKIE_DIR / name).unlink(missing_ok=True)
+    return True
 
 
 # Owner reset: take back a lost phone's passkey or a Google account that isn't the member's any more.
@@ -2750,9 +2857,105 @@ async def search_podcasts(
 
 @viewer_api.get("/podcasts/episodes")
 async def podcast_episodes(
-    feed: Annotated[str, Query(min_length=1, max_length=2000)], limit: int = Query(50, ge=1, le=EPISODES_MAX)
+    who: Who,
+    feed: Annotated[str, Query(min_length=1, max_length=2000)], limit: int = Query(50, ge=1, le=EPISODES_MAX),
 ):
-    return parse_feed(await fetch_feed(feed), limit)
+    """The show and its episodes; `subscription` is the caller's (with the seen_at to mark new episodes by) or null."""
+    url = http_url(feed, "feed")
+    show = parse_feed(await fetch_feed(url), EPISODES_MAX)
+    sub = db.get_sub(who.user["id"], feed_url=url) if who.user else None
+    if sub:
+        _feed_cache[url] = (time.monotonic(), show)  # fresh for the Following list too
+        sub = refresh_latest(sub, show)
+    return {**show, "episodes": show["episodes"][:limit], "subscription": sub}
+
+
+# --- Podcast subscriptions: personal, each member follows their own shows ---
+
+_feed_cache = {}  # feed URL -> (monotonic time, parsed show or None when it failed)
+
+
+async def cached_feed(url, gate):
+    """The parsed feed, read again only after FEED_CACHE_TTL; None when it can't be read (no count shown)."""
+    at, show = _feed_cache.get(url, (None, None))
+    if at is not None and time.monotonic() - at < (FEED_CACHE_TTL if show else FEED_FAIL_TTL):
+        return show
+    async with gate:
+        try:
+            show = parse_feed(await asyncio.wait_for(fetch_feed(url), FEED_CHECK_TIMEOUT), EPISODES_MAX)
+        except (HTTPException, TimeoutError):
+            show = None
+    _feed_cache[url] = (time.monotonic(), show)
+    return show
+
+
+def newest_episode(show):
+    return max((ep["published"] for ep in show["episodes"] if ep["published"]), default=None,
+               key=datetime.fromisoformat)
+
+
+def refresh_latest(sub, show):
+    """The subscription with latest_at moved up to the feed's newest episode (stored, so it shows when the feed
+    is down later)."""
+    latest = newest_episode(show)
+    if latest and (not sub["latest_at"] or datetime.fromisoformat(latest) > datetime.fromisoformat(sub["latest_at"])):
+        db.set_sub_latest(sub["id"], latest)
+        sub = sub | {"latest_at": latest}
+    return sub
+
+
+def with_new_count(sub, show):
+    """The row plus `new_count`: episodes published after the member last opened the show (None: feed unreadable)."""
+    if show is None:
+        return sub | {"new_count": None}
+    seen = datetime.fromisoformat(sub["seen_at"])
+    fresh = sum(1 for ep in show["episodes"] if ep["published"] and datetime.fromisoformat(ep["published"]) > seen)
+    return refresh_latest(sub, show) | {"new_count": fresh}
+
+
+def sub_or_404(who, sub_id):
+    sub = db.get_sub(account_of(who)["id"], sub_id)
+    if sub is None:
+        raise HTTPException(404, "No such subscription")
+    return sub
+
+
+@viewer_api.get("/podcasts/subs")
+async def list_subs(who: SignedIn):
+    """The caller's followed shows, each with `new_count` (feeds read a few at a time, cached FEED_CACHE_TTL)."""
+    subs = db.list_subs(account_of(who)["id"])
+    gate = asyncio.Semaphore(FEED_CHECKS)
+    shows = await asyncio.gather(*(cached_feed(s["feed_url"], gate) for s in subs))
+    return [with_new_count(s, show) for s, show in zip(subs, shows, strict=True)]
+
+
+@viewer_api.post("/podcasts/subs")
+async def follow_show(body: SubBody, who: SignedIn):
+    """Follow a show (following it again is fine: the same row comes back). Episodes from now on count as new."""
+    user = account_of(who)
+    url = http_url(body.feed_url, "feed_url")
+    await asyncio.to_thread(check_public_url, url, "feed_url")
+    title = body.title.strip()[:200] if body.title and body.title.strip() else None
+    author, artwork, latest = (body.author or "").strip()[:200] or None, optional_http_url(body.artwork), None
+    if title is None:
+        show = parse_feed(await fetch_feed(url), EPISODES_MAX)
+        _feed_cache[url] = (time.monotonic(), show)
+        title, author, artwork = show["title"] or url[:200], show["author"], show["artwork"]
+        latest = newest_episode(show)
+    return db.add_sub(user["id"], url, title, author, artwork, latest) | {"new_count": 0}
+
+
+@viewer_api.post("/podcasts/subs/{sub_id}/seen")
+async def mark_seen(sub_id: int, who: SignedIn):
+    """The member opened the show: its episodes so far stop counting as new."""
+    sub_or_404(who, sub_id)
+    return db.mark_sub_seen(who.user["id"], sub_id) | {"new_count": 0}
+
+
+@viewer_api.delete("/podcasts/subs/{sub_id}", status_code=204)
+async def unfollow_show(sub_id: int, who: SignedIn):
+    sub_or_404(who, sub_id)
+    db.delete_sub(who.user["id"], sub_id)
 
 
 @operator_api.post("/podcasts/play")
@@ -3277,6 +3480,8 @@ async def schedule_loop():
     while True:
         try:
             await run_due_schedules(datetime.now(UTC))
+            talkie_sweep()
+            db.prune(force=False)  # expired sessions and old activity, hourly
         except Exception as e:  # keep the runner alive
             print(f"schedule runner error: {type(e).__name__}: {e}")
         await asyncio.sleep(SCHEDULE_POLL)
@@ -3390,8 +3595,8 @@ async def talk_refuse(ws, code, detail):
         pass
 
 
-def talk_caller(ws):
-    """(Principal, None), or (None, (error code, detail)) for a connection that may not talk.
+def ws_caller(ws):
+    """(Principal, None), or (None, (error code, detail)) for a WebSocket that isn't signed in.
 
     Browsers can't set headers on a WebSocket, so the session cookie authenticates and the Origin
     check stands in for the X-Requested-With header; scripts may send the API token instead.
@@ -3414,9 +3619,15 @@ def talk_caller(ws):
         if user is None:
             return None, ("unauthorized", "Not signed in")
         who = Principal(user["role"], user["display_name"], user, token_hash(sid))
-    if ROLE_RANK[who.role] < ROLE_RANK["operator"]:
-        return None, ("forbidden", "Live talk needs the operator role")
     return who, None
+
+
+def talk_caller(ws):
+    """(Principal, None), or (None, (error code, detail)) for a connection that may not talk live."""
+    who, problem = ws_caller(ws)
+    if who is not None and ROLE_RANK[who.role] < ROLE_RANK["operator"]:
+        return None, ("forbidden", "Live talk needs the operator role")
+    return who, problem
 
 
 def parse_talk_start(message):
@@ -3648,6 +3859,402 @@ async def talk_status():
     return {"available": talk_available(), "max_seconds": settings.talk_max_seconds, "active": active}
 
 
+# --- Talkie (WebSocket /talkie): a walkie-talkie between the members of this server ---
+#
+# One room for everyone. The web app keeps the socket open on every page while signed in: it carries who has the
+# app open, and the talks. A talk is one of two modes:
+#   walkie   live only: streamed to the members in the room, kept nowhere. One talker at a time (its own lock: the
+#            speaker's /talk is separate). Listeners play GET /talkie/live/{id}, an MP3 stream of the talk as it is
+#            spoken.
+#   message  kept only: never live, takes no lock (several members may record at once), kept as a clip for a day.
+# A start must say its mode (the app before the modes, which sent none, never shipped).
+# "In the room" is a connection whose app has the Walkie open (it says so with "room"; one that never said counts
+# as in, as before the room). Only they get the live audio and may start a walkie talk; everyone hears who talks.
+#
+# Protocol (JSON text frames unless noted):
+#   server -> {"type": "hello", "me", "online": [{id, name, in_room}], "live": {id, user_id, name, url?} | null,
+#              "clips": [clip]}                       "url" only for a connection in the room
+#   server -> {"type": "online", "online"}             a member came, left, entered or left the room (tabs count once)
+#   client -> {"type": "room", "in": true | false}     the Walkie opened or closed (/talkie?room=0|1 sets it at once)
+#   client -> {"type": "start", "mime": MediaRecorder.mimeType, "mode": "walkie" | "message"}
+#   server -> {"type": "ready", "id", "max_seconds"}   then the client sends binary recorder chunks
+#   server -> {"type": "error", "code", "detail"}      instead (busy, not_in_room, bad_request, unavailable,
+#                                                      transcoder_error)
+#   server -> {"type": "live", "id", "user_id", "name", "url"?}   to everyone else when a live talk starts ("url"
+#                                                      only in the room; also to a connection entering the room)
+#   client -> {"type": "stop"} | {"type": "ping"}      (a ping is answered with {"type": "pong"})
+#   server -> {"type": "ended", "id", "user_id", "reason", "clip": {...} | null}   when a talk ends: to everyone
+#                                                      for a live talk, to the talker alone for a message
+#   server -> {"type": "clip", "clip"}                 to everyone when a talk is kept
+#   server -> {"type": "clip_deleted", "id"}           to everyone when its author deleted it (DELETE
+#                                                      /talkie/clips/{id})
+# A talk ends on stop, after TALKIE_MAX_SECONDS, when the audio stops coming, when its talker's socket closes or (a
+# walkie talk) leaves the room. Talks under TALKIE_MIN_SECONDS keep no clip. A refused connection gets an error
+# frame and is closed (44xx), as /talk. Only deletes go to the activity log: the rest is chat.
+
+TALKIE_MODES = {"walkie": (True, False), "message": (False, True)}  # mode -> (live, kept)
+
+
+@dataclass(eq=False)
+class TalkieConn:
+    """One open /talkie socket (a member may have several: tabs, devices)."""
+    ws: WebSocket
+    who: Principal
+    send: TalkSender
+    room: bool | None = None  # the app said its Walkie is open (True) or not (False); None: never said
+    talk: "TalkieTalk | None" = None  # its own talk in progress, of either mode
+
+    @property
+    def user_id(self):
+        return self.who.user["id"]
+
+    @property
+    def in_room(self):
+        return self.room is not False
+
+
+@dataclass(eq=False)
+class TalkieTalk:
+    id: str
+    conn: TalkieConn
+    transcoder: object
+    live: bool = True  # streamed to the room (and holds the one-talker lock)
+    kept: bool = True  # saved as a clip when it ends
+    # the whole talk stays readable: a listener who joins late hears it from the start
+    stream: talk.LiveStream = field(default_factory=lambda: talk.LiveStream(backlog=1 << 30))
+    started: float | None = None  # loop time of "ready" (the recorder starts then)
+    last_chunk: float | None = None
+    received: int = 0
+    pump: asyncio.Task | None = None
+    ended: bool = False
+    ended_at: float | None = None
+
+    @property
+    def seconds(self):
+        return self.last_chunk - self.started if self.last_chunk is not None else 0.0
+
+    def view(self, audio=True):
+        """Who is talking; with the live audio's URL for a connection in the room."""
+        user = self.conn.who.user
+        view = {"id": self.id, "user_id": user["id"], "name": user["display_name"]}
+        return view | {"url": f"/talkie/live/{self.id}"} if audio else view
+
+
+_talkie_conns: list[TalkieConn] = []
+_talkie: TalkieTalk | None = None  # the live talk in progress
+_talkie_last: TalkieTalk | None = None  # the previous one, whose stream a slow listener may still be reading
+_talkie_swept = 0.0  # monotonic time of the last sweep for old clip files
+
+
+def talkie_online():
+    """Members with the app open, each once, in the order they came; in the room from any of their tabs."""
+    seen = {}
+    for c in _talkie_conns:
+        member = seen.setdefault(c.user_id, {"id": c.user_id, "name": c.who.user["display_name"], "in_room": False})
+        member["in_room"] = member["in_room"] or c.in_room
+    return list(seen.values())
+
+
+async def talkie_broadcast(message, skip=None):
+    await asyncio.gather(*(c.send(message) for c in list(_talkie_conns) if c is not skip))
+
+
+async def talkie_presence(before, skip=None):
+    """Tell everyone the online list when it differs from `before`."""
+    if (online := talkie_online()) != before:
+        await talkie_broadcast({"type": "online", "online": online}, skip=skip)
+
+
+def talkie_live_view(conn):
+    return _talkie and _talkie.view(audio=conn.in_room)
+
+
+def talkie_cutoff():
+    return utc_iso(datetime.now(UTC) - TALKIE_KEEP)
+
+
+def clip_view(clip):
+    return {"id": clip["id"], "user_id": clip["user_id"], "name": clip["name"], "seconds": clip["seconds"],
+            "created_at": clip["created_at"], "url": f"/talkie/clips/{clip['id']}.mp3"}
+
+
+def talkie_clips():
+    """The last day's clips, newest first."""
+    talkie_sweep()
+    return [clip_view(c) for c in db.list_clips(talkie_cutoff())]
+
+
+def talkie_sweep(force=False):
+    """Delete clips older than TALKIE_KEEP with their files, at most once every TALKIE_SWEEP seconds. Files without
+    a row (a member deleted while their clip was being saved) go once they are as old."""
+    global _talkie_swept
+    now = time.monotonic()
+    if not force and _talkie_swept and now - _talkie_swept < TALKIE_SWEEP:
+        return
+    _talkie_swept = now
+    for name in db.expire_clips(talkie_cutoff()):
+        (TALKIE_DIR / name).unlink(missing_ok=True)
+    if TALKIE_DIR.is_dir():
+        old = time.time() - TALKIE_KEEP.total_seconds()
+        for path in TALKIE_DIR.glob("*.mp3"):
+            if path.stat().st_mtime < old:
+                path.unlink(missing_ok=True)
+
+
+def talkie_caller(ws):
+    """(Principal, None), or (None, (error code, detail)): any signed-in member, never the API token."""
+    who, problem = ws_caller(ws)
+    if who is not None and who.user is None:
+        return None, ("forbidden", "Talkie is for members signed in to the app")
+    return who, problem
+
+
+def signed_out(conn):
+    """The member was signed out, disabled or deleted since the socket opened."""
+    return db.session_user(conn.who.session)[0] is None
+
+
+@app.websocket("/talkie")
+async def talkie_socket(ws: WebSocket):
+    await ws.accept()
+    who, problem = talkie_caller(ws)
+    if problem:
+        await talk_refuse(ws, *problem)
+        return
+    conn = TalkieConn(ws, who, TalkSender(ws), room={"0": False, "1": True}.get(ws.query_params.get("room")))
+    before = talkie_online()
+    hello = {"type": "hello", "me": conn.user_id, "live": talkie_live_view(conn), "clips": talkie_clips()}
+    _talkie_conns.append(conn)
+    # no await between joining and this send: it takes the sender's lock first, so broadcasts queue behind it
+    sent = conn.send(hello | {"online": talkie_online()})
+    try:
+        await sent
+        await talkie_presence(before, skip=conn)
+        await talkie_loop(conn)
+    finally:
+        before = talkie_online()
+        _talkie_conns.remove(conn)
+        if conn.talk is not None:
+            await talkie_end(conn.talk, "disconnected")
+        await talkie_presence(before)
+
+
+async def talkie_loop(conn):
+    """Read the member's messages until the socket closes; audio goes to their talk, timers end it."""
+    loop = asyncio.get_running_loop()
+    pending = None
+    try:
+        while True:
+            mine = conn.talk
+            timeout = None  # nothing to time while the member only listens
+            if mine is not None:
+                now = loop.time()
+                last_audio = mine.last_chunk or mine.started
+                if now >= mine.started + TALKIE_MAX_SECONDS:
+                    await talkie_end(mine, "max_length")
+                    continue
+                if now - last_audio >= TALK_IDLE_TIMEOUT:
+                    await talkie_end(mine, "idle")
+                    continue
+                timeout = min(TALK_TICK, mine.started + TALKIE_MAX_SECONDS - now)
+            if pending is None:
+                pending = asyncio.ensure_future(conn.ws.receive())
+            done, _ = await asyncio.wait({pending}, timeout=timeout)
+            if not done:
+                continue
+            message, pending = pending.result(), None
+            if message["type"] == "websocket.disconnect":
+                return
+            if message.get("bytes"):
+                if mine is not None:
+                    await talkie_audio(mine, message["bytes"])
+            elif message.get("text"):
+                try:
+                    msg = json.loads(message["text"])
+                    kind = msg.get("type")
+                except (ValueError, AttributeError):
+                    msg, kind = {}, None
+                if kind == "start":
+                    await talkie_start(conn, msg)
+                elif kind == "stop" and mine is not None:
+                    await talkie_end(mine, "stopped")
+                elif kind == "room" and isinstance(msg.get("in"), bool):
+                    await talkie_room(conn, msg["in"])
+                elif kind == "ping":
+                    if signed_out(conn):
+                        await talk_refuse(conn.ws, "unauthorized", "Not signed in")
+                        return
+                    await conn.send({"type": "pong"})
+    finally:
+        if pending is not None:
+            pending.cancel()
+
+
+async def talkie_room(conn, inside):
+    """The connection's Walkie opened or closed: it gets the live audio from now on, or no longer talks live."""
+    before, was_in = talkie_online(), conn.in_room
+    conn.room = inside
+    if inside and not was_in and _talkie is not None and _talkie.conn is not conn:
+        await conn.send({"type": "live", **_talkie.view()})  # join the talk going on
+    if not inside and conn.talk is not None and conn.talk.live:
+        await talkie_end(conn.talk, "left_room")
+    await talkie_presence(before)
+
+
+async def talkie_start(conn, msg):
+    global _talkie
+    if conn.talk is not None:
+        return  # already talking
+    mode = msg.get("mode")
+    if not isinstance(mode, str) or mode not in TALKIE_MODES:
+        await conn.send({"type": "error", "code": "bad_request",
+                         "detail": f"Missing or unknown mode; use one of {', '.join(sorted(TALKIE_MODES))}"})
+        return
+    live, kept = TALKIE_MODES[mode]
+    fmt = talk.input_format(msg.get("mime") if isinstance(msg.get("mime"), str) else "")
+    if fmt is None:
+        await conn.send({"type": "error", "code": "bad_request",
+                         "detail": f"Unsupported recording format; use one of {', '.join(sorted(talk.INPUT_FORMATS))}"})
+        return
+    if signed_out(conn):
+        await talk_refuse(conn.ws, "unauthorized", "Not signed in")
+        return
+    if not talk_available():
+        await conn.send({"type": "error", "code": "unavailable",
+                         "detail": "Talkie needs ffmpeg on the server, and it isn't installed"})
+        return
+    if live and not conn.in_room:
+        await conn.send({"type": "error", "code": "not_in_room", "detail": "Open the Walkie to talk live"})
+        return
+    if live and _talkie is not None:
+        await conn.send({"type": "error", "code": "busy",
+                         "detail": f"{_talkie.conn.who.user['display_name']} is talking right now"})
+        return
+    session = conn.talk = TalkieTalk(secrets.token_urlsafe(9), conn, talk_transcoder(fmt), live=live, kept=kept)
+    if live:
+        _talkie = session
+    try:
+        await session.transcoder.start()
+    except talk.TranscoderError as e:
+        conn.talk = None
+        if _talkie is session:
+            _talkie = None
+        await conn.send({"type": "error", "code": "transcoder_error", "detail": str(e)})
+        return
+    session.pump = asyncio.create_task(talk_pump(session))
+    session.started = asyncio.get_running_loop().time()
+    await conn.send({"type": "ready", "id": session.id, "max_seconds": TALKIE_MAX_SECONDS})
+    if live:
+        await asyncio.gather(*(c.send({"type": "live", **session.view(audio=c.in_room)})
+                               for c in list(_talkie_conns) if c is not conn))
+
+
+async def talkie_audio(session, chunk):
+    session.last_chunk = asyncio.get_running_loop().time()
+    session.received += len(chunk)
+    if session.received > TALK_MAX_RATE * TALKIE_MAX_SECONDS:
+        await talkie_end(session, "too_large")
+        return
+    try:
+        await session.transcoder.write(chunk)
+    except talk.TranscoderError as e:
+        await session.conn.send({"type": "error", "code": "transcoder_error", "detail": str(e)})
+        await talkie_end(session, "transcoder_error")
+
+
+async def talkie_end(session, reason):
+    """Stop ffmpeg, close the stream, keep the clip (unless walkie) and tell who heard of it. Runs once per talk."""
+    global _talkie, _talkie_last
+    if session.ended:
+        return
+    session.ended = True
+    if session.conn.talk is session:
+        session.conn.talk = None
+    if _talkie is session:
+        _talkie, _talkie_last = None, session  # the next talker may start while this one winds down
+    try:
+        await session.transcoder.finish(TALK_DRAIN)
+        if session.pump is not None:
+            await asyncio.wait({session.pump}, timeout=TALK_DRAIN)
+            session.pump.cancel()
+    finally:
+        await session.stream.close()
+        session.ended_at = time.monotonic()
+    clip = await talkie_save(session) if session.kept else None
+    ended = {"type": "ended", "id": session.id, "user_id": session.conn.user_id, "reason": reason, "clip": clip}
+    if session.live:
+        await talkie_broadcast(ended)
+    else:
+        await session.conn.send(ended)  # nobody else knew of it
+    if clip is not None:
+        await talkie_broadcast({"type": "clip", "clip": clip})
+
+
+async def talkie_save(session):
+    """Keep the talk as a clip; None when it was too short (or couldn't be saved)."""
+    data = bytes(session.stream.data)
+    if session.seconds < TALKIE_MIN_SECONDS or not data:
+        return None
+    name = f"{session.id}.mp3"
+
+    def write():
+        TALKIE_DIR.mkdir(parents=True, exist_ok=True)
+        (TALKIE_DIR / name).write_bytes(data)
+
+    try:
+        await asyncio.to_thread(write)
+        clip = db.add_clip(session.id, session.conn.user_id, round(session.seconds, 1), name)
+    except Exception as e:  # disk full, or the member was deleted meanwhile
+        print(f"talkie: clip not kept: {type(e).__name__}: {e}")
+        (TALKIE_DIR / name).unlink(missing_ok=True)
+        return None
+    return clip_view(clip)
+
+
+@viewer_api.get("/talkie/live/{talk_id}")
+async def talkie_live(talk_id: str, who: Who):
+    """A Talkie talk's MP3 from its start, as one response that ends when the talk does (a plain <audio> plays it).
+    Only for a member in the room, from any of their tabs."""
+    session = _talkie if _talkie is not None and _talkie.id == talk_id else _talkie_last
+    recent = session is not None and (session.ended_at is None or time.monotonic() - session.ended_at < TALK_GRACE)
+    if not recent or session.id != talk_id:
+        raise HTTPException(404, "No such live talk")
+    if who.user is None or not any(c.user_id == who.user["id"] and c.in_room for c in _talkie_conns):
+        raise HTTPException(403, "Open the Walkie to listen")
+    return StreamingResponse(session.stream.follow(), media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
+
+
+@viewer_api.get("/talkie/clips")
+async def list_talkie_clips():
+    """The last day's Talkie clips, newest first."""
+    return talkie_clips()
+
+
+@viewer_api.get("/talkie/clips/{clip_id}.mp3")
+async def talkie_clip_file(clip_id: str):
+    clip = db.get_clip(clip_id)
+    path = TALKIE_DIR / Path(clip["file"]).name if clip else None
+    if clip is None or clip["created_at"] < talkie_cutoff() or not path.is_file():
+        raise HTTPException(404, "No such clip")
+    return FileResponse(path, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@viewer_api.delete("/talkie/clips/{clip_id}", status_code=204)
+async def delete_talkie_clip(clip_id: str, who: Who):
+    """Delete a Talkie message of your own (only its author may: not even the owner deletes others')."""
+    user = account_of(who)
+    clip = db.get_clip(clip_id)
+    if clip is None or clip["created_at"] < talkie_cutoff():
+        raise HTTPException(404, "No such clip")
+    if clip["user_id"] != user["id"]:
+        raise HTTPException(403, "Only the member who recorded a message may delete it")
+    if not db.delete_clip(clip_id):
+        raise HTTPException(404, "No such clip")  # deleted meanwhile
+    (TALKIE_DIR / Path(clip["file"]).name).unlink(missing_ok=True)
+    await talkie_broadcast({"type": "clip_deleted", "id": clip_id})
+    record(who, "message delete", f"Talkie message of {talk.format_seconds(clip['seconds'])}")
+
+
 # --- Streams fetched by the speaker itself (signed URLs, no header) ---
 
 @app.get("/tts.mp3", dependencies=[Depends(verify_media)])
@@ -3797,4 +4404,6 @@ for router in (viewer_api, operator_api, admin_api):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=settings.port)
+    # No access log: its lines carry client addresses and full query strings (signed media links, searches).
+    # Errors and the app's own messages still go to stdout/stderr.
+    uvicorn.run(app, host="0.0.0.0", port=settings.port, access_log=False)

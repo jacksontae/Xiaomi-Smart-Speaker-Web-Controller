@@ -161,3 +161,25 @@ def test_glass_look_has_no_kit(make_app, seeded):
     expect(app.sheet().locator(".sc-form button[type=submit]")).to_be_visible()
     expect(p.locator("dialog.ak-full")).to_have_count(0)
     app.clean("glass look unchanged")
+
+
+def test_fab_goes_when_the_page_is_left_while_loading(android_app, seeded):
+    """Leaving Playlists before it finished rendering must not leave its FAB on the next page."""
+    app = android_app("operator", route="announce", playing=False)
+    p = app.page
+    held = []  # Playlists waits for its stylesheet; hold it back until we have moved on
+    p.route("**/views/playlists.css*", lambda route: held.append(route))
+    p.evaluate("location.hash = '#/playlists'")
+    for _ in range(50):
+        if held:
+            break
+        p.wait_for_timeout(50)
+    assert held, "Playlists asked for its stylesheet"
+    p.evaluate("location.hash = '#/announce'")
+    expect(p.locator(".phd .pt")).to_have_text("Announce")
+    held[0].continue_()
+    p.wait_for_timeout(800)  # Playlists finishes rendering, unseen
+    expect(p.locator(".ak-fab")).to_have_count(0)
+    assert p.evaluate("document.documentElement.hasAttribute('data-fab')") is False
+    p.unroute("**/views/playlists.css*")
+    app.clean("fab left while loading")

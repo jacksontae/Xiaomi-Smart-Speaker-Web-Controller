@@ -150,3 +150,70 @@ def test_schema_version_and_tables(app):
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"users", "sessions", "playlists", "playlist_items", "phrases", "activity", "schedules",
             "radio_favorites", "media_files"} <= tables
+
+
+def _old_row(db, days, detail):
+    from datetime import UTC, datetime, timedelta
+
+    at = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
+    with db.tx() as tx:
+        tx.execute("INSERT INTO activity (at, actor, action, detail) VALUES (?, 'system', 'test', ?)", (at, detail))
+
+
+def details(db):
+    return [r["detail"] for r in db.activity(limit=100)]
+
+
+def test_activity_older_than_90_days_pruned_hourly_on_write(app, monkeypatch):
+    db = app.db
+    _old_row(db, 91, "old")
+    _old_row(db, 89, "recent")
+    db.log("system", "test", "new")
+    assert details(db) == ["new", "recent", "old"]  # pruned at start-up less than an hour ago
+    real = store.time.monotonic
+    monkeypatch.setattr(store.time, "monotonic", lambda: real() + store.PRUNE_EVERY + 1)
+    db.log("system", "test", "later")
+    assert details(db) == ["later", "new", "recent"]
+
+
+def test_activity_age_limit_keeps_count_cap(app, monkeypatch):
+    monkeypatch.setattr(store, "ACTIVITY_KEEP", 3)
+    for i in range(5):
+        app.db.log("system", "test", str(i))
+    assert details(app.db) == ["4", "3", "2"]
+
+
+def test_startup_prunes_old_activity_and_expired_sessions(app, tmp_path):
+    import time
+
+    from conftest import make_user
+
+    db = app.db
+    user = make_user("bob", "viewer")
+    _old_row(db, 120, "old")
+    db.log("system", "test", "new")
+    db.create_session("live", user["id"])
+    db.create_session("expired", user["id"])
+    with db.tx() as tx:
+        tx.execute("UPDATE sessions SET expires_at = ? WHERE token_hash = 'expired'", (time.time() - 60,))
+    reopened = store.Store(db.path)
+    assert details(reopened) == ["new"]
+    with reopened.tx() as tx:
+        assert [r[0] for r in tx.execute("SELECT token_hash FROM sessions")] == ["live"]
+
+
+def test_prune_removes_expired_sessions_without_sign_in(app):
+    import time
+
+    from conftest import make_user
+
+    user = make_user("bob", "viewer")
+    app.db.create_session("expired", user["id"])
+    with app.db.tx() as tx:
+        tx.execute("UPDATE sessions SET expires_at = ? WHERE token_hash = 'expired'", (time.time() - 60,))
+    app.db.prune(force=False)  # throttled: the start-up sweep was just now
+    with app.db.tx() as tx:
+        assert tx.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
+    app.db.prune()
+    with app.db.tx() as tx:
+        assert tx.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
