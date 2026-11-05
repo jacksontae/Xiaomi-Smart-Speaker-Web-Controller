@@ -23,8 +23,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `DELETE /talkie/clips/{id}`; clips in `TALKIE_DIR`; database schema 8).
 - UI design reference in `docs/design/`: one HTML page with screenshots of every screen on each device, theme and
   language, for anyone designing on top of the app.
+- About, Privacy and Licenses pages, from Account ("About", with the version; Account & app settings on iPad/desktop) and
+  signed out from "Privacy · About" under the sign-in form. About shows the version and build, this server's speaker,
+  connection and the owner's contact (signed in only), and links to What's new, the security policy and issue
+  reports. Privacy says in plain words what is stored, who can see what, and what goes to other services. Licenses
+  lists the app's MIT license, the required notices and every open-source part with its license text
+  (`static/licenses.json`, `static/licenses/`).
+- `owner_contact` setting (Speaker settings, "Contact for members"): how members reach the owner; About shows it to
+  signed-in members and hides the row when it's empty.
+- `GET /about` (anyone): `version` and `build`; signed in also `server` (`speaker`, `transport`, `owner_contact`).
 
 ### Changed
+- The version lives in `version.py` (0.6.0), kept equal to `pyproject.toml` (was 0.2.0) and the newest CHANGELOG
+  release by a test; the radio-browser and feed User-Agent says `speaker-service/0.6.0` (was 0.2).
 - Android: a short context line under the big page title says what matters on that page: what the speaker (or This
   device) is doing on Now, Announce and Music, the playing playlist or how many there are, what's left on the
   schedule today, members and disabled ones, today's activity, unsaved speaker settings. iOS and desktop don't show it.

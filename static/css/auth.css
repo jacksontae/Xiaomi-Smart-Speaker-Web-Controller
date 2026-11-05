@@ -47,6 +47,11 @@ body:has(.auth) .ambient::before, body:has(.auth) .ambient::after { opacity: 0; 
 .auth-form > :nth-child(n+3) { animation-delay: .54s; }
 .auth.leaving { transition: opacity .3s, transform .3s; opacity: 0; transform: scale(.98); }
 .gsi-slot { display: flex; justify-content: center; min-height: 44px; }
+/* Privacy · About under the form (bottom of the screen on iPad/desktop); they open signed out (app.js) */
+.auth-foot { display: flex; justify-content: center; align-items: center; gap: 10px; padding-top: 24px; font-size: 14px; color: var(--ink-3); position: relative; z-index: 2; }
+.auth-foot a { color: var(--ink-2); text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; padding: 0 6px; }
+.auth-foot a:hover { text-decoration: underline; }
+@media (min-width: 744px) { .auth-foot { position: absolute; left: 0; right: 0; bottom: calc(var(--safe-b) + 16px); padding: 0; } }
 
 /* ---------- iPad (T_Login) ---------- */
 @media (min-width: 744px) {
@@ -114,6 +119,7 @@ body:has(.auth) .ambient::before, body:has(.auth) .ambient::after { opacity: 0; 
 :root[data-os="android"] .auth-bloom::after, :root[data-os="android"] .auth-glow { display: none; }
 :root[data-os="android"][data-theme="dark"] .auth-bloom::before { background: radial-gradient(85% 42% at 50% 30%, color-mix(in srgb, var(--md-primary-container) 70%, transparent) 0%, transparent 72%); }
 :root[data-os="android"] .lang-toggle button[aria-pressed="true"] { color: var(--md-primary); font-weight: 700; }
+:root[data-os="android"] .auth-foot a { color: var(--md-on-surface-variant); }
 
 :root[data-os="android"] .auth-col { padding-top: calc(var(--safe-t) + 52px); }
 :root[data-os="android"] .auth-top-gap { flex: .2 1 0; }

@@ -80,6 +80,7 @@ from passkeys import (
 from player import Queue
 from store import SESSION_TTL, Conflict, Store
 from transport import SPEAKER_ERRORS, UNREACHABLE_ERRORS, TransportError, make_transport
+from version import __version__
 
 ROOT = Path(__file__).parent
 CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", ROOT / "config.json"))
@@ -106,6 +107,7 @@ YT_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
 GOOGLE_CLIENT_ID_RE = re.compile(r"[A-Za-z0-9.-]+\.apps\.googleusercontent\.com")
 HOST_LABEL_RE = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)")  # one DNS label (RFC 1123)
 SPEAKER_NAME_MAX = 64  # the settings page's input has the same maxLength
+OWNER_CONTACT_MAX = 120  # ... and so does the owner contact's
 TIME_RE = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 AUDIO_SUFFIXES = {".m4a", ".webm", ".mp3", ".opus", ".ogg", ".mp4", ".aac"}
@@ -133,7 +135,7 @@ FEED_CACHE_TTL = 15 * 60  # a followed show's feed is read at most this often fo
 FEED_FAIL_TTL = 5 * 60  # ... and a feed that failed isn't tried again sooner than this
 FEED_CHECKS = 4  # feeds read at once for the Following list
 FEED_CHECK_TIMEOUT = 10  # seconds one feed may take there before it just shows no count
-USER_AGENT = "speaker-service/0.2"  # radio-browser asks clients to identify themselves
+USER_AGENT = f"speaker-service/{__version__}"  # radio-browser asks clients to identify themselves
 # "This device" stream proxy (/local/stream): for radio a browser can't fetch itself (http:// on an https page)
 STREAM_MAX_BYTES = 512 * 1024 * 1024  # one relayed stream ends after this much (about 9 h of 128 kbit/s radio)
 STREAM_MAX_SECONDS = 6 * 3600  # ... or after this long; the browser then asks for a fresh link
@@ -248,6 +250,8 @@ class Settings(BaseModel):
     # Passkeys work only when public_base_url is https:// (or http://localhost); its host is the RP ID.
     passkey_signin: bool = True
     passkey_required_for_admins: bool = False  # admins who have a passkey can't sign in any other way
+    # How members reach the owner (an email, a LINE id...), shown on the About page to signed-in members only.
+    owner_contact: str | None = None
 
     @field_validator("speaker_ip")
     @classmethod
@@ -267,6 +271,16 @@ class Settings(BaseModel):
         if len(v) > SPEAKER_NAME_MAX:
             raise ValueError(f"speaker_name must be at most {SPEAKER_NAME_MAX} characters")
         return v
+
+    @field_validator("owner_contact")
+    @classmethod
+    def check_owner_contact(cls, v):
+        if v is None:
+            return None
+        v = " ".join(v.split())
+        if len(v) > OWNER_CONTACT_MAX:
+            raise ValueError(f"owner_contact must be at most {OWNER_CONTACT_MAX} characters")
+        return v or None
 
     @field_validator("yt_skip_segments")
     @classmethod
@@ -438,7 +452,7 @@ async def lifespan(_app):
         transport.close()
 
 
-app = FastAPI(title="Speaker Service", lifespan=lifespan)
+app = FastAPI(title="Speaker Service", version=__version__, lifespan=lifespan)
 http = httpx.AsyncClient(timeout=30, follow_redirects=True)
 # For URLs users type in (podcast feeds): redirects are followed by hand so each hop is checked first.
 feed_http = httpx.AsyncClient(timeout=20, follow_redirects=False)
@@ -1673,6 +1687,18 @@ async def auth_state(who: Caller):
     if user and passkey_policy_applies(user) and not user["has_passkey"]:
         state["passkey_required"] = True  # signed in with a password; the UI should ask for a passkey now
     return state
+
+
+@app.get("/about")
+async def about(who: Caller):
+    """The About page: version and build for anyone (it opens from the sign-in page too); this server's speaker,
+    connection and owner contact only for signed-in members."""
+    build = await asyncio.to_thread(static_build.refresh)
+    info = {"version": __version__, "build": build.id}
+    if who is not None:
+        info["server"] = {"speaker": settings.speaker_name, "transport": settings.transport,
+                          "owner_contact": settings.owner_contact}
+    return info
 
 
 @app.post("/auth/setup")

@@ -85,6 +85,7 @@ Three ways to change them: the web UI ("Settings"), `POST /settings`, or edit `c
 | `google_signin` | `false` | Owner (admin) switch for Google sign-in; needs `google_client_id` |
 | `passkey_signin` | `true` | Allow passkey sign-in (works only when `public_base_url` is `https://` or `http://localhost`) |
 | `passkey_required_for_admins` | `false` | Admins who have a passkey must sign in with it (can be turned on only once every admin has one) |
+| `owner_contact` | `null` | How members reach the owner, e.g. `it@example.com` or a LINE id (up to 120 characters); shown on the About page to signed-in members only |
 
 `api_token` is also stored in `config.json` but is never returned by `GET /settings` and can't be changed through
 the API.
@@ -150,6 +151,7 @@ The web UI calls `admin` "Owner".
 | Method | Path | Role | Body | Does |
 |---|---|---|---|---|
 | GET | `/auth/state` | anyone | – | `{"needs_setup", "user", "methods": {"password", "google", "passkey"}}`, plus `google_client_id` when Google is on (and `passkey_required` when an admin must add a passkey) |
+| GET | `/about` | anyone | – | `{"version", "build"}` (app version, static build id), plus `server: {"speaker", "transport", "owner_contact"}` when signed in |
 | POST | `/auth/setup` | anyone (only while there are no users) | `{"api_token", "username", "display_name", "password"}` | Create the first admin and sign in (wrong token `401`, users already exist `409`) |
 | POST | `/auth/login` | anyone | `{"username", "password"}` | Sign in, set the cookie |
 | POST | `/auth/logout` · `/auth/logout-all` | signed in | – | Sign out this device · all devices |

@@ -24,6 +24,7 @@ register({
     'login.pk': 'Sign in with a passkey', 'login.pkCancelled': 'Passkey sign-in cancelled.',
     'login.pkFailed': 'That passkey didn\'t work here. Try again or use your password.',
     'login.clock': 'Date and time',
+    'login.foot': 'About this app', 'login.privacy': 'Privacy', 'login.about': 'About',
   },
   th: {
     'login.title': 'เข้าสู่ระบบ', 'login.user': 'ชื่อผู้ใช้', 'login.pw': 'รหัสผ่าน', 'login.go': 'เข้าสู่ระบบ', 'login.going': 'กำลังเข้าสู่ระบบ…',
@@ -40,6 +41,7 @@ register({
     'login.pk': 'เข้าสู่ระบบด้วยพาสคีย์', 'login.pkCancelled': 'ยกเลิกการเข้าสู่ระบบด้วยพาสคีย์แล้ว',
     'login.pkFailed': 'ใช้พาสคีย์นี้ที่นี่ไม่ได้ ลองอีกครั้งหรือใช้รหัสผ่าน',
     'login.clock': 'วันและเวลา',
+    'login.foot': 'เกี่ยวกับแอปนี้', 'login.privacy': 'ความเป็นส่วนตัว', 'login.about': 'เกี่ยวกับแอป',
   },
 });
 
@@ -102,9 +104,12 @@ export async function render(ctx) {
   const form = h('form', { class: 'auth-form', novalidate: true, onsubmit: (e) => { e.preventDefault(); passwordLogin(); } }, formChildren);
 
   const lg = h('div', { class: 'auth-lg' }, h('div', { class: 'auth-top-gap' }), hero, h('div', { class: 'auth-mid-gap' }), form);
+  // Privacy and About open signed out too (routes.js `public`)
+  const foot = h('nav', { class: 'auth-foot', 'aria-label': t('login.foot') },
+    h('a', { href: '#/privacy' }, t('login.privacy')), h('span', { 'aria-hidden': 'true' }, '·'), h('a', { href: '#/about' }, t('login.about')));
   const root = h('div', { class: 'auth' },
     h('div', { class: 'auth-bloom', 'aria-hidden': 'true' }), h('div', { class: 'auth-glow', 'aria-hidden': 'true' }),
-    langToggle(), h('div', { class: 'auth-col' }, lg));
+    langToggle(), h('div', { class: 'auth-col' }, lg, foot));
 
   // one model per page: in the hero on phone/iPad, above the form on desktop (D_Login); Android keeps it in the hero
   // under the clock on every size (A_Login / AT_Login, order set in auth.css)

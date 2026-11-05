@@ -8,6 +8,7 @@ from fastapi.routing import APIRoute
 # through the speaker's queue, search music sources for This device, and follow podcasts (personal to each member).
 ROLE_TABLE = {
     ("GET", "/auth/state"): None,
+    ("GET", "/about"): None,
     ("POST", "/auth/setup"): None,
     ("POST", "/auth/login"): None,
     ("POST", "/auth/logout"): "viewer",
