@@ -41,9 +41,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   schedule today, members and disabled ones, today's activity, unsaved speaker settings. iOS and desktop don't show it.
 - Playlists are sorted into Music and Announcements (playlists of announcements only) inside My playlists, Shared and
   Members' playlists. `GET /playlists` items have `tts_only`; empty and mixed playlists count as music.
+- The activity log keeps entries for 90 days at most, besides the newest-5000 cap: older ones are deleted at start-up
+  and at most once an hour while new entries are written. Sign-in addresses stay in full.
+- Expired sessions are deleted at start-up and hourly, not only when someone signs in.
 
 ### Fixed
 - Android: a page left before it finished loading no longer leaves its floating button (FAB) on the next page.
+
+### Security
+- The web server's access log is off (`python app.py` runs uvicorn with `access_log=False`): it wrote each
+  client's address and the full query string (signed media links, searches) to `service.log` or the container
+  log. Start-up messages, warnings and errors still go there.
+- The `sid` cookie is `Secure` behind a TLS-terminating proxy that forwards plain http (Cloudflare Tunnel in the
+  Docker deployment): with the default `cookie_secure: "auto"`, a request to the host of an `https://`
+  `public_base_url` counts as https. `cookie_secure` (`"auto"`, `true`, `false`; env `COOKIE_SECURE`) overrides it.
 
 ## [0.6.0] - 2026-11-05
 

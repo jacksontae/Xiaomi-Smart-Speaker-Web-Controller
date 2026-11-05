@@ -16,7 +16,9 @@ from pathlib import Path
 
 SCHEMA_VERSION = 8
 SESSION_TTL = 30 * 24 * 3600
-ACTIVITY_KEEP = 5000
+ACTIVITY_KEEP = 5000  # newest activity rows kept...
+ACTIVITY_MAX_AGE = 90 * 24 * 3600  # ...and none older than this (seconds)
+PRUNE_EVERY = 3600  # seconds between sweeps of old activity rows and expired sessions
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -290,6 +292,7 @@ class Store:
         self.path = Path(path)
         self._coalesce = {}  # (actor, action) -> (row id, time) of the last coalesced activity row
         self._coalesce_lock = threading.Lock()
+        self._pruned = None  # time.monotonic() of the last prune()
         db = sqlite3.connect(self.path, timeout=10)
         try:
             db.execute("PRAGMA journal_mode = WAL")  # readers don't block the writer; persists in the file
@@ -305,6 +308,7 @@ class Store:
                     db.execute(statement)
             if version < SCHEMA_VERSION:
                 db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        self.prune()
 
     @contextmanager
     def tx(self, immediate=False):
@@ -321,6 +325,19 @@ class Store:
             raise
         finally:
             db.close()
+
+    def prune(self, force=True):
+        """Delete expired sessions and activity rows older than ACTIVITY_MAX_AGE. Without force, at most once
+        every PRUNE_EVERY seconds (cheap enough to call on every write)."""
+        mono = time.monotonic()
+        if not force and self._pruned is not None and mono - self._pruned < PRUNE_EVERY:
+            return
+        self._pruned = mono
+        now = time.time()
+        cutoff = datetime.fromtimestamp(now - ACTIVITY_MAX_AGE, UTC).isoformat(timespec="seconds")
+        with self.tx() as db:
+            db.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+            db.execute("DELETE FROM activity WHERE at < ?", (cutoff,))
 
     def schema_version(self):
         with self.tx() as db:
@@ -907,6 +924,7 @@ class Store:
                 "DELETE FROM activity WHERE id <= (SELECT id FROM activity ORDER BY id DESC LIMIT 1 OFFSET ?)",
                 (ACTIVITY_KEEP,),
             )
+        self.prune(force=False)
 
     def activity(self, limit=50, before_id=None):
         with self.tx() as db:

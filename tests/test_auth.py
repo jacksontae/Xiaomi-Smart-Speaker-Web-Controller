@@ -1,5 +1,6 @@
 from unittest import mock
 
+import pytest
 from conftest import PASSWORD, TOKEN, make_user, session_client
 from fastapi.testclient import TestClient
 
@@ -88,6 +89,59 @@ def test_cookie_is_secure_over_https(app):
     c = TestClient(app.app, base_url="https://testserver")
     r = c.post("/auth/login", json={"username": "bob", "password": PASSWORD})
     assert "secure" in r.headers["set-cookie"].lower()
+
+
+def login_cookie(app, base_url):
+    c = TestClient(app.app, base_url=base_url, headers={"X-Requested-With": "speaker-web"})
+    r = c.post("/auth/login", json={"username": "bob", "password": PASSWORD})
+    assert r.status_code == 200
+    sid = r.headers["set-cookie"].split(";")[0]  # sent by hand: the client keeps a Secure cookie off http
+    c.cookies.clear()
+    logout = c.post("/auth/logout", headers={"Cookie": sid})
+    return r.headers["set-cookie"].lower(), logout.headers["set-cookie"].lower()
+
+
+def test_cookie_is_secure_behind_tls_proxy(app, monkeypatch):
+    """Cloudflare Tunnel terminates TLS and forwards plain http: the public https:// host still gets Secure."""
+    make_user("bob")
+    monkeypatch.setattr(app, "settings", app.settings.model_copy(update={"public_base_url": "https://speaker.example.com"}))
+    login, logout = login_cookie(app, "http://speaker.example.com")
+    assert "secure" in login and "secure" in logout
+    login, logout = login_cookie(app, "http://192.0.2.20:8090")  # LAN address: plain http keeps working
+    assert "secure" not in login and "secure" not in logout
+
+
+@pytest.mark.parametrize(("setting", "base_url", "secure"), [
+    (True, "http://192.0.2.20:8090", True),
+    (False, "https://testserver", False),
+    ("auto", "https://testserver", True),
+    ("auto", "http://testserver", False),
+])
+def test_cookie_secure_setting(app, monkeypatch, setting, base_url, secure):
+    make_user("bob")
+    monkeypatch.setattr(app, "settings", app.settings.model_copy(update={"cookie_secure": setting}))
+    login, logout = login_cookie(app, base_url)
+    assert ("secure" in login, "secure" in logout) == (secure, secure)
+
+
+def test_cookie_secure_from_env(app):
+    assert app.load_settings({"COOKIE_SECURE": "true"}).cookie_secure is True
+    assert app.load_settings({"COOKIE_SECURE": "auto"}).cookie_secure == "auto"
+    with pytest.raises(ValueError):
+        app.Settings(cookie_secure="sometimes")
+
+
+def test_main_runs_uvicorn_without_access_log(monkeypatch):
+    """The access log would write client addresses and full query strings (signed links, searches)."""
+    import runpy
+    import sys
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    calls = []
+    monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=lambda *a, **kw: calls.append(kw)))
+    runpy.run_path(str(Path(__file__).resolve().parents[1] / "app.py"), run_name="__main__")
+    assert calls and calls[0]["access_log"] is False
 
 
 def test_session_stored_only_as_hash(app):

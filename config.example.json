@@ -16,6 +16,7 @@
   "passkey_signin": true,
   "passkey_required_for_admins": false,
   "owner_contact": null,
+  "cookie_secure": "auto",
   "mqtt": {
     "host": "broker.example.com",
     "port": 8883,

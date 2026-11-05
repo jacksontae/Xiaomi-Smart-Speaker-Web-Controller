@@ -32,7 +32,9 @@ without the LaunchAgent: `./.venv/bin/python app.py`.
 ## Run
 
 The service starts every time you log in to the Mac (LaunchAgent `~/Library/LaunchAgents/local.speaker-service.plist`)
-and is restarted if the process dies. Output goes to `service.log` in the repository folder.
+and is restarted if the process dies. Output goes to `service.log` in the repository folder. The web server's
+access log is off (its lines would hold client addresses and full query strings), so `service.log` has only
+start-up messages, warnings and errors.
 
 ```bash
 ./speakerctl status      # service state and the speaker's /status
@@ -86,6 +88,7 @@ Three ways to change them: the web UI ("Settings"), `POST /settings`, or edit `c
 | `passkey_signin` | `true` | Allow passkey sign-in (works only when `public_base_url` is `https://` or `http://localhost`) |
 | `passkey_required_for_admins` | `false` | Admins who have a passkey must sign in with it (can be turned on only once every admin has one) |
 | `owner_contact` | `null` | How members reach the owner, e.g. `it@example.com` or a LINE id (up to 120 characters); shown on the About page to signed-in members only |
+| `cookie_secure` | `"auto"` | `Secure` flag of the `sid` cookie. `"auto"`: set when the request came over https, or to the host of an `https://` `public_base_url` (a TLS-terminating proxy such as Cloudflare Tunnel that forwards plain http). `true`: always (then sign in only over https or `http://localhost`). `false`: never. Env `COOKIE_SECURE` |
 
 `api_token` is also stored in `config.json` but is never returned by `GET /settings` and can't be changed through
 the API.
@@ -125,7 +128,7 @@ always `{"detail": "..."}`.
     `./speakerctl token`.
   - `GET /settings` doesn't return it and the API can't change it; use `./speakerctl token --rotate`.
 - **User accounts (web UI):** signing in sets the `sid` cookie (`HttpOnly`, `SameSite=Strict`, valid 30 days from
-  last use).
+  last use; `Secure` over https, see `cookie_secure`). Expired sessions are deleted at start-up and hourly.
   - Requests that change data (POST/PUT/PATCH/DELETE) with the cookie must send `X-Requested-With: speaker-web`,
     or they get `403`.
   - While there are no users, the web UI asks for the API token to create the first admin (`POST /auth/setup`).
@@ -209,7 +212,7 @@ A new admin without a passkey can still sign in with a password, but `/auth/stat
 | POST | `/pause` · `/resume` · `/stop` | operator | – | Playback control (`stop` also clears the queue) |
 | GET · POST | `/settings` | admin | `{"default_volume": 0.4}` | Read · change settings (partial update) |
 | GET | `/speakers` | admin | – | Find Cast speakers on the LAN |
-| GET | `/activity?limit=50&before_id=` | admin | – | Activity log, newest first (`limit` up to 500; the newest 5000 entries are kept) |
+| GET | `/activity?limit=50&before_id=` | admin | – | Activity log, newest first (`limit` up to 500; the newest 5000 entries from the last 90 days are kept) |
 
 ### Playlists and queue
 
@@ -452,7 +455,7 @@ instead of the `mosquitto` service, and give the relay its host, port 8883 and T
 
 Settings can also live in `config.json` (`"transport": "mqtt"`, an `mqtt` block, `public_base_url`).
 The environment variables `SPEAKER_TRANSPORT`, `PUBLIC_BASE_URL`, `MQTT_HOST`, `MQTT_PORT`, `MQTT_TLS`,
-`MQTT_CA_FILE`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_BASE_TOPIC` and `MQTT_CLIENT_ID` override it and
+`MQTT_CA_FILE`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_BASE_TOPIC`, `MQTT_CLIENT_ID` and `COOKIE_SECURE` override it and
 are never written back to the file. The MQTT password is never returned by `/settings` (only `password_set`) or
 written to the activity log.
 
