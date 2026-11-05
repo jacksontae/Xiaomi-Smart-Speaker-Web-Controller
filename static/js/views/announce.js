@@ -2,8 +2,7 @@
 // volume and quick phrases) and "Talk live" (browser mic streamed to the speaker, see ../talk-client.js).
 // "Schedule" is a link to #/schedule (its own page). #/announce/talk opens Talk live directly.
 // Talk live only shows when the server offers it (GET /talk/status -> { available: true }) and for operators.
-// While "This device" is the music output the route is the Talkie instead (views/talkie.js); operators can switch
-// back to this page there ("Speaker").
+// While "This device" is the music output the route is the Talkie instead (views/talkie.js).
 import { h, icon, iconBtn, field, segmented, busy, headerSub } from '../ui.js';
 import { register, t, lang as appLang } from '../i18n.js';
 import { isPhone } from '../sheet.js';
@@ -17,7 +16,6 @@ register({
     'ann.ctx': (x) => `${x || 'Speaker'} connected`, 'ann.ctxPlaying': (x) => `${x || 'Speaker'} connected, playing music`,
     'ann.ctxSpeaking': (x) => `${x || 'Speaker'} is announcing`, 'ann.ctxOff': (x) => `Can't reach ${x || 'the speaker'}`,
     'ann.talk': 'Talk live',
-    'ann.outNote': 'Music plays on this device, but announcements and Talk live always play on the speaker, for everyone there.',
     'ann.textLabel': 'Text to announce',
     'ann.textPh': 'Type a message, e.g. Meeting in 5 minutes, please come to the main room',
     'ann.textPhShort': 'Type a message, e.g. Meeting in 5 minutes',
@@ -89,7 +87,6 @@ register({
     'ann.ctx': (x) => `${x || 'ลำโพง'} เชื่อมต่ออยู่`, 'ann.ctxPlaying': (x) => `${x || 'ลำโพง'} เชื่อมต่ออยู่ กำลังเปิดเพลง`,
     'ann.ctxSpeaking': (x) => `${x || 'ลำโพง'} กำลังประกาศ`, 'ann.ctxOff': (x) => `ติดต่อ${x || 'ลำโพง'}ไม่ได้`,
     'ann.talk': 'พูดสด',
-    'ann.outNote': 'เพลงเล่นที่อุปกรณ์นี้ แต่ประกาศและพูดสดออกที่ลำโพงเสมอ ให้ทุกคนตรงนั้นได้ยิน',
     'ann.textLabel': 'ข้อความที่จะประกาศ',
     'ann.textPh': 'พิมพ์ข้อความ เช่น ประชุมใน 5 นาที เชิญที่ห้องประชุมใหญ่',
     'ann.textPhShort': 'พิมพ์ข้อความ เช่น ประชุมใน 5 นาที',
@@ -182,15 +179,7 @@ const coarse = () => matchMedia('(pointer: coarse)').matches;
 const isIos = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
 export async function render(ctx) {
-  if (ctx.output === 'device') {
-    const { talkieView } = await import('./talkie.js');
-    return talkieView(ctx, { speaker: (top) => renderAnnounce(ctx, top) });
-  }
-  return renderAnnounce(ctx);
-}
-
-/** The Announce page; `top` (the Talkie | Speaker switch) goes under the header. */
-async function renderAnnounce(ctx, top = null) {
+  if (ctx.output === 'device') return (await import('./talkie.js')).talkieView(ctx);
   await Promise.all([ctx.css('views/announce.css'), ctx.css('views/modeswitch.css')]);
   const op = ctx.can('operator');
   let mode = 'say';
@@ -212,10 +201,8 @@ async function renderAnnounce(ctx, top = null) {
 
   const mainCol = h('div', { class: 'ann-main' });
   const sideCol = h('div', { class: 'ann-side' });
-  // "This device" is the music output (local-player.js): say plainly where announcements still go
-  const outNote = ctx.output === 'device' ? h('p', { class: 'out-note small' }, icon('info', 'sm'), h('span', {}, t('ann.outNote'))) : null;
   const head = ctx.header({ title: t('nav.announce'), actions: sw.headActs });
-  const node = h('div', { class: 'page ann-page' }, head, top, sw.slot, outNote,
+  const node = h('div', { class: 'page ann-page' }, head, sw.slot,
     h('div', { class: 'ann-grid' }, mainCol, sideCol));
 
   /* ================= Announce now ================= */
@@ -602,8 +589,7 @@ async function renderAnnounce(ctx, top = null) {
       destroy() { clearInterval(timerT); clearInterval(waveT); document.removeEventListener('keydown', onKey); talk.destroy(); },
     };
   }
-  const dropTalk = () => { if (talkUi) talkUi.destroy(); talkUi = null; };
-  ctx.onCleanup(dropTalk);
+  ctx.onCleanup(() => { if (talkUi) talkUi.destroy(); });
 
   function secureUrl() {
     const u = (talkInfo && (talkInfo.secure_url || talkInfo.public_base_url)) || secureUrl.fromSettings;
@@ -641,6 +627,5 @@ async function renderAnnounce(ctx, top = null) {
       if (status && say) say.setLangFromStatus(status.tts_lang);
       headerSub(head, ctxLine(status, error));
     },
-    destroy: dropTalk, // the Talkie page swaps this page out without leaving the route
   };
 }

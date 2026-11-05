@@ -92,11 +92,10 @@ def test_play_tts_on_this_device(make_app, seeded, api):
     p.wait_for_function("() => document.getElementById('local-audio').currentTime < 1.5")
     expect(p.locator(".np-queue")).to_contain_text("Device check")
 
-    # the Announce page is the Talkie here (test_23); its Speaker side still announces on the speaker, and says so
+    # the Announce page is the Talkie here (test_23), with no speaker side
     app.go("announce")
     app.header("Talkie")
-    p.get_by_role("radiogroup", name="Talk to").get_by_role("radio", name="Speaker").click()
-    expect(p.locator(".out-note")).to_contain_text("always play on the speaker")
+    expect(p.locator("form.ann-card")).to_have_count(0)
 
     # the choice survives a reload; switching back stops this device and touches nothing on the speaker
     p.reload()
@@ -104,7 +103,8 @@ def test_play_tts_on_this_device(make_app, seeded, api):
     expect(p.locator("[data-spk='side']")).to_contain_text("This device")
     pick(app, "main")
     assert p.evaluate("localStorage.getItem('spk.output')") == "speaker"
-    expect(p.locator(".out-note")).to_have_count(0)
+    app.header("Announce")
+    expect(p.locator("form.ann-card")).to_be_visible()
     app.clean("this device")
 
 

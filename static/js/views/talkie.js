@@ -1,8 +1,8 @@
 // Talkie (prototype .temp/proto-talkie, owner-approved): the Announce route while "This device" is the music output.
 // Hold to talk; everyone with the app open hears it live; the talk is kept as a clip for a day ("Recent").
-// The connection, live audio and recorder are ../talkie.js; this file is only the page. Operators and owners get
-// a Talkie | Speaker switch at the top: Speaker is the usual Announce page (announce.js passes it in as `speaker`).
-import { h, icon, segmented } from '../ui.js';
+// The connection, live audio and recorder are ../talkie.js; this file is only the page. There is no speaker side here:
+// nothing goes to the speaker while this device plays the music, so announcing means switching the output back.
+import { h, icon } from '../ui.js';
 import { register, t, fmtRel, fmtDur } from '../i18n.js';
 import { badge, toneOf, initialOf } from '../kit.js';
 import { glyph } from '../icons.js';
@@ -10,7 +10,6 @@ import * as talkie from '../talkie.js';
 
 register({
   en: {
-    'tk.modeAria': 'Talk to', 'tk.modeTalkie': 'Talkie', 'tk.modeSpeaker': 'Speaker',
     'tk.online': (n) => `${n} online`, 'tk.onlineAria': (names) => `Online: ${names}`, 'tk.connecting': 'Connecting…',
     'tk.isLive': (x) => `${x} is talking…`, 'tk.tap': 'Tap to listen', 'tk.muted': 'Talkie sound is off on this device',
     'tk.hold': 'Hold to talk', 'tk.holdKbd': 'Hold Space to talk', 'tk.release': 'Release to send', 'tk.opening': 'Opening the microphone…',
@@ -31,7 +30,6 @@ register({
     'tk.eServer': 'The server can’t take a message right now. Try again in a moment.',
   },
   th: {
-    'tk.modeAria': 'พูดกับ', 'tk.modeTalkie': 'ทอล์คกี้', 'tk.modeSpeaker': 'ลำโพง',
     'tk.online': (n) => `ออนไลน์ ${n} คน`, 'tk.onlineAria': (names) => `ออนไลน์: ${names}`, 'tk.connecting': 'กำลังเชื่อมต่อ…',
     'tk.isLive': (x) => `${x} กำลังพูด…`, 'tk.tap': 'แตะเพื่อฟัง', 'tk.muted': 'ปิดเสียงทอล์คกี้บนอุปกรณ์นี้อยู่',
     'tk.hold': 'กดค้างเพื่อพูด', 'tk.holdKbd': 'กด Space ค้างเพื่อพูด', 'tk.release': 'ปล่อยเพื่อส่ง', 'tk.opening': 'กำลังเปิดไมโครโฟน…',
@@ -56,29 +54,12 @@ register({
 const WAVE_N = 28;
 const MAX_FACES = 5;
 const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-let side = 'talkie'; // Talkie | Speaker for operators, kept while the app is open
-
-/** The Announce route on "This device". speaker(top) builds the usual Announce page with `top` under its header. */
-export async function talkieView(ctx, { speaker }) {
+/** The Announce route on "This device". */
+export async function talkieView(ctx) {
   await Promise.all([ctx.css('views/talkie.css'), ctx.css('views/common.css')]);
-  const op = ctx.can('operator');
-  const host = h('div', { class: 'tw-host' });
-  let current = null; // the page shown: { node, onStatus?, destroy? }
-
-  const toggle = () => segmented({
-    options: [{ value: 'talkie', label: t('tk.modeTalkie') }, { value: 'speaker', label: t('tk.modeSpeaker') }],
-    value: side, label: t('tk.modeAria'), cls: 'tw-side', onChange: (v) => { side = v; show(); },
-  });
-
-  async function show() {
-    if (current && current.destroy) current.destroy();
-    current = side === 'speaker' && op ? await speaker(toggle()) : buildTalkie(ctx, op ? toggle() : null);
-    host.replaceChildren(current.node);
-    if (current.onStatus && (ctx.status || ctx.statusError)) current.onStatus({ status: ctx.status, error: ctx.statusError });
-  }
-  await show();
-  ctx.onCleanup(() => { if (current && current.destroy) current.destroy(); });
-  return { node: host, onStatus: (s) => { if (current && current.onStatus) current.onStatus(s); } };
+  const page = buildTalkie(ctx);
+  ctx.onCleanup(() => page.destroy());
+  return { node: page.node };
 }
 
 /** A small deterministic waveform for a clip (no real levels are stored): bar heights from its id. */
@@ -92,7 +73,7 @@ function face(person, size = '') {
   return h('span', { class: `avatar tw-av ${size}`.trim(), 'aria-hidden': 'true', style: { background: toneOf(person.user_id ?? person.id) } }, initialOf(person.name));
 }
 
-function buildTalkie(ctx, toggleEl) {
+function buildTalkie(ctx) {
   const head = ctx.header({ title: t('nav.talkie') });
   const cleanups = [];
 
@@ -121,7 +102,7 @@ function buildTalkie(ctx, toggleEl) {
   const list = h('div', { class: 'c-card tw-list', role: 'list' });
   const recent = h('section', { class: 'tw-recent', 'aria-labelledby': 'tw-rec' }, h('h2', { class: 'tw-cap', id: 'tw-rec' }, t('tk.recent')), list);
 
-  const node = h('div', { class: 'page tw-page' }, head, toggleEl, onlineRow, banner, talkCard, recent);
+  const node = h('div', { class: 'page tw-page' }, head, onlineRow, banner, talkCard, recent);
 
   let st = 'idle', info = {}, startAt = 0, timer = 0, keyHeld = false, holding = false;
   const ctl = talkie.holdToTalk({
