@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-05
+
 ### Added
 - This device plays HLS radio through the server: `GET /local/hls` (signed) rewrites the playlist so variant
   playlists, segments, keys and init sections go through signed relay links. Browsers that can't play HLS say so
