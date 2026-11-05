@@ -1428,6 +1428,10 @@ class PasskeyName(BaseModel):
     name: str
 
 
+class MeBody(BaseModel):
+    display_name: str
+
+
 class PasswordBody(BaseModel):
     current: str
     new: str
@@ -1786,6 +1790,18 @@ async def change_password(body: PasswordBody, who: SignedIn, request: Request):
     db.delete_sessions(user["id"], keep=who.session)
     record(who, "password change")
     return {"ok": True}
+
+
+@app.patch("/me")
+async def update_me(body: MeBody, who: SignedIn):
+    """Any member renames themselves (role, disabled and password stay with owners and /auth/password)."""
+    user = account_of(who)
+    name = clean_text(body.display_name, "display_name", 64)
+    if name == user["display_name"]:
+        return user
+    updated = db.update_user(user["id"], {"display_name": name})
+    record(who, "member update", f"{user['username']}: display_name={name}")
+    return updated
 
 
 @app.post("/me/google")

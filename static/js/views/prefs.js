@@ -6,7 +6,7 @@ import { h, icon } from '../ui.js';
 import { register, t, roleLabel } from '../i18n.js';
 import { isPhone } from '../sheet.js';
 import { caption, card, settingRow, linkRow, tile, phoneBack } from '../kit.js';
-import { freshAuth, profileHead, nameEditor, googleRow, passkeySection, appPrefsCard } from '../account-kit.js';
+import { freshAuth, profileHead, googleRow, passkeySection, appPrefsCard } from '../account-kit.js';
 import { glyph } from '../icons.js';
 
 register({
@@ -47,7 +47,7 @@ export function large(ctx, auth, title) {
   const user = { ...ctx.user, ...(auth.user || {}) };
   const pwBtn = h('button', { type: 'button', class: 'btn', onclick: () => ctx.changePassword() }, t('acct.changePw'));
   const acctCard = card(
-    h('div', { class: 'c-pad' }, profileHead(user), nameEditor(ctx, user)),
+    h('div', { class: 'c-pad' }, profileHead(user, ctx)),
     settingRow({ title: t('ca.password'), sub: t('pref.pwSub'), control: pwBtn }),
     googleRow(ctx, auth, user, { title: t('ca.gLinkedTitle') }));
   const pk = passkeySection(ctx, auth);

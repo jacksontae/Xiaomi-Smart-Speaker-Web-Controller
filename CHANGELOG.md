@@ -20,6 +20,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   protocol 2).
 - Relay firmware 0.2.0 (not tested on hardware): a `seek` command (`POST /api/seek`, `{"cmd":"seek"}`) and
   status `proto` 2.
+- Every member can change their own display name with the pencil next to it in Account (`PATCH /me`). Role,
+  disabled and password stay with owners and `/auth/password`.
 
 ### Fixed
 - Leaving Activity while it was still loading could throw a page error (a body read cut short by the page change

@@ -100,3 +100,20 @@ def test_operator_cannot_manage_members(as_role):
     op = as_role("operator")
     assert op.get("/users").status_code == 403
     assert op.post("/users", json={"username": "x1x", "password": PASSWORD, "role": "admin"}).status_code == 403
+
+
+def test_any_member_renames_themselves(app, client):
+    vera = make_user("vera", "viewer", display_name="Vera Viewer")
+    c = session_client(vera)
+    r = c.patch("/me", json={"display_name": "  Vera V.  ", "role": "admin", "disabled": True})
+    assert r.status_code == 200 and r.json()["display_name"] == "Vera V."
+    me = app.db.get_user(vera["id"])
+    assert (me["display_name"], me["role"], me["disabled"]) == ("Vera V.", "viewer", False)  # only the name changes
+    e = app.db.activity()[0]
+    assert (e["action"], e["detail"]) == ("member update", "vera: display_name=Vera V.")
+    assert c.patch("/me", json={"display_name": "Vera V."}).status_code == 200  # unchanged: no new entry
+    assert app.db.activity()[0]["id"] == e["id"]
+    assert c.patch("/me", json={"display_name": "   "}).status_code == 400
+    assert c.patch("/me", json={"display_name": "x" * 65}).status_code == 400
+    assert client.patch("/me", json={"display_name": "Token"}).status_code == 400  # the API token has no account
+    assert session_client(vera, csrf=False).patch("/me", json={"display_name": "No CSRF"}).status_code == 403
