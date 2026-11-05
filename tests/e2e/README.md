@@ -38,6 +38,7 @@ is installed.
 | `test_12_network.py` | aborted requests: list load, write, boot, blocked page script, status, inline save |
 | `test_13_phone_app.py` | phone feels like an app: no zoom (viewport, 16 px fields, iOS gestures), no sideways scroll under stress (320/390 px, long text, toasts, sheets, animations), toasts always go away, touch tooltips open on tap only, same Announce mode switch on Announce and Schedule, no blank frame on page change |
 | `test_17_this_device.py` | "This device" output: picker, a playlist's TTS item played in the browser (signed link, no speaker call), seek, notes, persistence, viewer |
+| `test_24_about_policy.py` | About / Privacy / Licenses: signed out from the sign-in page, Account → About, owner contact shown/hidden, Licenses rows, Thai |
 
 ## Run it
 

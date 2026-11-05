@@ -39,7 +39,8 @@ export async function render(ctx) {
   }
   const general = card(
     linkRow({ href: '#/prefs', title: t('nav.appSettings'), value: lang() === 'th' ? 'ไทย' : 'English', lead: tile(glyph('phone')) }),
-    linkRow({ href: '#/help', title: t('nav.help'), lead: tile(icon('help')) }));
+    linkRow({ href: '#/help', title: t('nav.help'), lead: tile(icon('help')) }),
+    withValue(linkRow({ href: '#/about', title: t('nav.about'), lead: tile(icon('info'), 'plain') }), aboutVersion(ctx)));
 
   const pk = passkeySection(ctx, auth);
 
@@ -56,6 +57,13 @@ export async function render(ctx) {
     head, manage, general,
     pk ? [caption(t('ca.passkeys')), pk.card, pk.note] : null,
     caption(t('acct.my')), mine);
+}
+
+/** "v0.6.0" for the About row, filled in when GET /about answers. */
+function aboutVersion(ctx) {
+  const el = h('span', {});
+  ctx.api('/about', { signal: ctx.signal }).then((a) => { el.textContent = `v${a.version}`; }).catch(() => {});
+  return el;
 }
 
 function withValue(rowEl, valueEl) {

@@ -15,6 +15,7 @@
   "google_signin": false,
   "passkey_signin": true,
   "passkey_required_for_admins": false,
+  "owner_contact": null,
   "mqtt": {
     "host": "broker.example.com",
     "port": 8883,

@@ -87,6 +87,7 @@ docker compose -f deploy/remote/docker-compose.yml exec speaker-service \
 | `google_signin` | `false` | เจ้าของ (admin) เปิด/ปิดการล็อกอินด้วย Google · เปิดได้เมื่อมี `google_client_id` แล้ว |
 | `passkey_signin` | `true` | เปิดการล็อกอินด้วย passkey (ใช้ได้จริงเมื่อ `public_base_url` เป็น `https://` หรือ `http://localhost`) |
 | `passkey_required_for_admins` | `false` | admin ที่มี passkey ต้องล็อกอินด้วย passkey เท่านั้น (เปิดได้เมื่อ admin ทุกคนมี passkey แล้ว) |
+| `owner_contact` | `null` | ช่องทางติดต่อเจ้าของ เช่น `it@example.com` หรือ LINE id (ไม่เกิน 120 ตัวอักษร) แสดงในหน้าเกี่ยวกับแอปเฉพาะสมาชิกที่เข้าสู่ระบบแล้ว |
 
 ```bash
 TOKEN=$(./speakerctl token)
@@ -121,6 +122,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 | Method | Path | สิทธิ์ | Body | หน้าที่ |
 |---|---|---|---|---|
 | GET | `/auth/state` | ทุกคน | – | `{"needs_setup", "user", "methods": {"password", "google", "passkey"}}` + `google_client_id` เมื่อเปิด Google (+ `passkey_required` เมื่อ admin ต้องเพิ่ม passkey) |
+| GET | `/about` | ทุกคน | – | `{"version", "build"}` (เวอร์ชันแอป, build id ของไฟล์ static) + `server: {"speaker", "transport", "owner_contact"}` เมื่อล็อกอินแล้ว |
 | POST | `/auth/setup` | ทุกคน (ตอนยังไม่มีผู้ใช้) | `{"api_token", "username", "display_name", "password"}` | สร้าง admin คนแรกแล้วล็อกอิน (token ผิด `401`, มีผู้ใช้แล้ว `409`) |
 | POST | `/auth/login` | ทุกคน | `{"username", "password"}` | ล็อกอิน ตั้ง cookie |
 | POST | `/auth/logout` · `/auth/logout-all` | ล็อกอินแล้ว | – | ออกจากระบบเครื่องนี้ · ทุกเครื่อง |

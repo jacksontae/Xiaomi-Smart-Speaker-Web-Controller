@@ -49,6 +49,7 @@ export const RANK = { viewer: 0, operator: 1, admin: 2 };
 // device: the lowest role while "This device" is this browser's output (Music: viewers play only in their browser).
 // deviceLabel: the nav label (sidebar, tab bar, page title) while "This device" is the output (Announce -> Talkie).
 // css: the stylesheets the view loads with ctx.css(); the router fetches them alongside the module (keep in sync).
+// public: also opens signed out (from the sign-in page), as a screen without the shell (app.js); ctx.user is null then.
 export const ROUTES = [
   { id: 'now', label: 'nav.now', tab: 'tab.now', icon: 'now', min: 'viewer', section: 'main', chip: true, css: ['speaker3d.css', 'views/now.css'], load: () => import('./views/now.js') },
   { id: 'announce', label: 'nav.announce', tab: 'nav.announce', deviceLabel: 'nav.talkie', icon: 'announce', min: 'viewer', section: 'main', css: ['views/announce.css', 'views/modeswitch.css', 'views/talkie.css', 'views/common.css'], load: () => import('./views/announce.js') },
@@ -61,6 +62,9 @@ export const ROUTES = [
   { id: 'auth', label: 'nav.auth', icon: 'lock', min: 'admin', section: 'none', css: ['views/common.css'], load: () => import('./views/methods.js') },
   { id: 'account', label: 'nav.account', icon: 'user', min: 'viewer', section: 'none', css: ['views/common.css', 'views/prefs.css'], load: () => import('./views/account.js') },
   { id: 'prefs', label: 'nav.prefs', icon: 'user', min: 'viewer', section: 'none', css: ['views/common.css', 'views/prefs.css'], load: () => import('./views/prefs.js') },
+  { id: 'about', label: 'nav.about', icon: 'help', min: 'viewer', section: 'none', public: true, css: ['views/common.css', 'views/policy.css'], load: () => import('./views/about.js') },
+  { id: 'privacy', label: 'nav.privacy', icon: 'help', min: 'viewer', section: 'none', public: true, css: ['views/common.css', 'views/policy.css'], load: () => import('./views/privacy.js') },
+  { id: 'licenses', label: 'nav.licenses', icon: 'help', min: 'viewer', section: 'none', public: true, css: ['views/common.css', 'views/policy.css'], load: () => import('./views/licenses.js') },
   { id: 'help', label: 'nav.help', icon: 'help', min: 'viewer', section: 'none', css: ['views/help.css'], load: () => import('./views/help.js') },
 ];
 

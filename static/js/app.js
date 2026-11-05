@@ -166,8 +166,14 @@ async function boot() {
   }
   state.user = state.auth.user || null;
   if (state.auth.needs_setup) return showScreen(() => import('./views/setup.js'));
-  if (!state.user) return showScreen(() => import('./views/login.js'));
+  if (!state.user) return showSignedOut();
   startApp();
+}
+
+/** Signed out: the sign-in screen, or the public page the hash names (About, Privacy, Licenses: routes.js `public`). */
+function showSignedOut() {
+  const { route } = parseHash();
+  return showScreen(route.public ? route.load : () => import('./views/login.js'));
 }
 
 /** Full-screen pre-auth screens (login, setup, errors): no shell. */
@@ -275,7 +281,10 @@ async function render(animate = true) {
   // browsers without view transitions: a short fade that never starts from blank
   if (animate && page && ok !== 'vt' && !motionReduced()) { page.classList.remove('enter'); void page.offsetWidth; page.classList.add('enter'); }
 }
-window.addEventListener('hashchange', () => { if (shell) render(); });
+window.addEventListener('hashchange', () => {
+  if (shell) render();
+  else if (state.auth && !state.auth.needs_setup && !state.user && screenLoad) showSignedOut(); // sign-in <-> About
+});
 
 /** A page not ready within ~120 ms gets a slim progress bar at the top, and its header with placeholder rows in
  *  place of the old page, so a slow connection never looks frozen. Returns the function that clears the bar. */
