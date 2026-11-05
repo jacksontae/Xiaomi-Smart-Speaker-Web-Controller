@@ -2,7 +2,7 @@
 // volume and quick phrases) and "Talk live" (browser mic streamed to the speaker, see ../talk-client.js).
 // "Schedule" is a link to #/schedule (its own page). #/announce/talk opens Talk live directly.
 // Talk live only shows when the server offers it (GET /talk/status -> { available: true }) and for operators.
-import { h, icon, iconBtn, field, segmented, busy } from '../ui.js';
+import { h, icon, iconBtn, field, segmented, busy, headerSub } from '../ui.js';
 import { register, t, lang as appLang } from '../i18n.js';
 import { isPhone } from '../sheet.js';
 import { liveTalk, micPermission, askMic, micAllowedHere } from '../talk-client.js';
@@ -11,6 +11,9 @@ import { glyph } from '../icons.js';
 
 register({
   en: {
+    // the header's context line (Android): the speaker announcements go to; x = its name
+    'ann.ctx': (x) => `${x || 'Speaker'} connected`, 'ann.ctxPlaying': (x) => `${x || 'Speaker'} connected, playing music`,
+    'ann.ctxSpeaking': (x) => `${x || 'Speaker'} is announcing`, 'ann.ctxOff': (x) => `Can't reach ${x || 'the speaker'}`,
     'ann.talk': 'Talk live',
     'ann.outNote': 'Music plays on this device, but announcements and Talk live always play on the speaker, for everyone there.',
     'ann.textLabel': 'Text to announce',
@@ -81,6 +84,8 @@ register({
     'talk.micAllowed': 'Microphone allowed. Hold the button to talk.',
   },
   th: {
+    'ann.ctx': (x) => `${x || 'ลำโพง'} เชื่อมต่ออยู่`, 'ann.ctxPlaying': (x) => `${x || 'ลำโพง'} เชื่อมต่ออยู่ กำลังเปิดเพลง`,
+    'ann.ctxSpeaking': (x) => `${x || 'ลำโพง'} กำลังประกาศ`, 'ann.ctxOff': (x) => `ติดต่อ${x || 'ลำโพง'}ไม่ได้`,
     'ann.talk': 'พูดสด',
     'ann.outNote': 'เพลงเล่นที่อุปกรณ์นี้ แต่ประกาศและพูดสดออกที่ลำโพงเสมอ ให้ทุกคนตรงนั้นได้ยิน',
     'ann.textLabel': 'ข้อความที่จะประกาศ',
@@ -162,6 +167,15 @@ const read = (k) => { try { return localStorage.getItem(k); } catch { return nul
 const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const wideMq = matchMedia('(min-width: 1280px)');
+/** The header's context line from /status (always the real speaker here, also with "This device" as the output). */
+function ctxLine(status, error) {
+  const name = status && status.speaker;
+  if (error) return t('ann.ctxOff', name);
+  if (!status) return '';
+  const m = status.media || {};
+  if (!['PLAYING', 'PAUSED', 'BUFFERING'].includes(m.state)) return t('ann.ctx', name);
+  return t(m.title === 'Announcement' ? 'ann.ctxSpeaking' : m.state === 'PAUSED' ? 'ann.ctx' : 'ann.ctxPlaying', name);
+}
 const coarse = () => matchMedia('(pointer: coarse)').matches;
 const isIos = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
@@ -189,7 +203,8 @@ export async function render(ctx) {
   const sideCol = h('div', { class: 'ann-side' });
   // "This device" is the music output (local-player.js): say plainly where announcements still go
   const outNote = ctx.output === 'device' ? h('p', { class: 'out-note small' }, icon('info', 'sm'), h('span', {}, t('ann.outNote'))) : null;
-  const node = h('div', { class: 'page ann-page' }, ctx.header({ title: t('nav.announce'), actions: sw.headActs }), sw.slot, outNote,
+  const head = ctx.header({ title: t('nav.announce'), actions: sw.headActs });
+  const node = h('div', { class: 'page ann-page' }, head, sw.slot, outNote,
     h('div', { class: 'ann-grid' }, mainCol, sideCol));
 
   /* ================= Announce now ================= */
@@ -610,6 +625,9 @@ export async function render(ctx) {
 
   return {
     node,
-    onStatus({ status }) { if (status && say) say.setLangFromStatus(status.tts_lang); },
+    onStatus({ status, error }) {
+      if (status && say) say.setLangFromStatus(status.tts_lang);
+      headerSub(head, ctxLine(status, error));
+    },
   };
 }

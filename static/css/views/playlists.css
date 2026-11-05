@@ -2,6 +2,8 @@
 .pl-new-l { display: none; }
 .pl-row.sel { background: var(--accent-tint); }
 .pl-row.sel .tb-t { color: var(--accent); }
+/* Music / Announcements inside an owner group (My playlists, Shared, Members') */
+.pl-kind { margin: 4px 4px -4px; font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--ink-3); }
 .pl-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 20px 16px; }
 
 /* detail */

@@ -176,6 +176,18 @@ export function helpLink(topic, label) {
   return h('a', { class: 'help-link', href: `#/help${topic ? `/${topic}` : ''}` }, icon('help', 'xs'), label);
 }
 
+/**
+ * The page header's context line (ctx.header({ sub }); the Android big header's "Speaker is playing …"): set or
+ * change it once the page knows. Empty text hides it. Only Android shows it (android.css).
+ */
+export function headerSub(headerEl, text) {
+  let p = headerEl && headerEl.querySelector('.phd-sub');
+  if (!p && headerEl) p = headerEl.querySelector('.phd-l').appendChild(h('p', { class: 'phd-sub' }));
+  if (!p || p.textContent === (text || '')) return;
+  p.textContent = text || '';
+  p.hidden = !text;
+}
+
 /* ---------- segmented control ---------- */
 /**
  * segmented({ options: [{ value, label }], value, onChange, label }) -> radiogroup element with a sliding thumb.

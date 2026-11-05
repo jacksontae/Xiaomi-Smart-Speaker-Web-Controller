@@ -12,6 +12,7 @@ from playwright.sync_api import expect
 from .e2ekit import wait_for
 
 HDR = {"X-Requested-With": "speaker-web"}
+OWNER_GROUPS = re.compile("My playlists|Shared|Members’ playlists")  # Music / Announcements labels may still show
 QUEUE = [{"id": i + 1, "kind": "youtube", "title": t, "duration": 180 + i * 7}
          for i, t in enumerate(["First tune", "Second tune", "Third tune", "Fourth tune"])]
 STATUS = {"speaker": "Test speaker", "volume": 0.4, "muted": False, "resume_pending": None, "tts_lang": "en",
@@ -56,7 +57,7 @@ def test_nav_follows_the_output(make_app, seeded, device):
     app.go("playlists")
     assert "music" not in nav(app)
     expect(p.locator(".pl-row", has_text=mine["name"])).to_have_count(0)  # personal ones hide on the speaker
-    expect(p.locator("#view .tb-sec")).to_have_count(0)
+    expect(p.locator("#view .tb-sec h2", has_text=OWNER_GROUPS)).to_have_count(0)
     app.go("")  # phones show the speaker picker on Now
     pick(app, "device")
     wait_for(lambda: "music" in nav(app), what="Music in the nav")
@@ -201,7 +202,7 @@ def test_owner_sees_members_playlists(make_app, seeded):
     op = make_app("operator", device="desktop", route="playlists")
     expect(op.page.locator(".pl-row").first).to_be_visible()
     expect(op.page.locator(".pl-row", has_text=mine["name"])).to_have_count(0)
-    expect(op.page.locator("#view .tb-sec")).to_have_count(0)  # operators look unchanged
+    expect(op.page.locator("#view .tb-sec h2", has_text=OWNER_GROUPS)).to_have_count(0)  # operators: no owner groups
     drop(viewer, mine["id"])
     seeded.delete(f"/playlists/{shared['id']}")
     owner.clean("owner members")

@@ -2,7 +2,7 @@
 // Filters (All / Playback / Account / Failed) apply to what is loaded; "Show older" pages back by id.
 // Phone/iPad: segmented filter on top; desktop: filter list on the left, time column on the left of each row.
 // Android (A_Activity / AT_Activity): filter chips on top and one centred column on every width.
-import { h, icon, segmented, busy } from '../ui.js';
+import { h, icon, segmented, busy, headerSub } from '../ui.js';
 import { register, t, fmtClock } from '../i18n.js';
 import { isAndroid } from '../prefs.js';
 import { tile, phoneBack, fmtDayHead, sameDay } from '../kit.js';
@@ -10,6 +10,8 @@ import { glyph } from '../icons.js';
 
 register({
   en: {
+    // the header's context line (Android): today's entries (n+ while older pages of today aren't loaded)
+    'act.ctxN': (n) => `${n} today`, 'act.ctxNone': 'Nothing yet today',
     'act.all': 'All', 'act.play': 'Playback', 'act.acct': 'Account', 'act.fail': 'Failed', 'act.filter': 'Show only',
     'act.older': 'Show older', 'act.noOlder': 'That\'s everything. Older entries aren\'t kept.',
     'act.empty': 'Nothing like this in the entries shown.', 'act.none': 'Nothing has happened yet.',
@@ -30,6 +32,7 @@ register({
     'act.d.setup': 'First-time setup', 'act.d.allDevices': 'On all devices',
   },
   th: {
+    'act.ctxN': (n) => `${n} รายการวันนี้`, 'act.ctxNone': 'วันนี้ยังไม่มีรายการ',
     'act.all': 'ทั้งหมด', 'act.play': 'เล่นเสียง', 'act.acct': 'บัญชี', 'act.fail': 'ไม่สำเร็จ', 'act.filter': 'แสดงเฉพาะ',
     'act.older': 'ดูเก่ากว่านี้', 'act.noOlder': 'แสดงถึงรายการเก่าที่สุดแล้ว',
     'act.empty': 'ไม่มีรายการแบบนี้ในช่วงที่แสดงอยู่', 'act.none': 'ยังไม่มีรายการ',
@@ -130,8 +133,9 @@ export function render(ctx) {
   const feed = h('div', { class: 'a-feed', 'aria-live': 'polite' });
   const more = h('button', { type: 'button', class: 'btn tonal big a-more', onclick: () => loadMore(more) }, t('act.older'));
   const endNote = h('p', { class: 'small a-end', hidden: true }, t('act.noOlder'));
+  const head = phoneBack(ctx.header({ title: t('nav.activity'), back: { href: '#/account', label: t('nav.account') } }));
   const node = h('div', { class: 'page a-page' },
-    phoneBack(ctx.header({ title: t('nav.activity'), back: { href: '#/account', label: t('nav.account') } })),
+    head,
     seg, h('div', { class: 'a-grid' }, side, h('div', { class: 'a-main' }, feed, more, endNote)));
 
   function setFilter(f) {
@@ -174,6 +178,8 @@ export function render(ctx) {
     const page = await ctx.api(`/activity?limit=${PAGE}${before}`, { signal: ctx.signal });
     entries = entries.concat(page);
     done = page.length < PAGE;
+    const today = entries.filter((e) => sameDay(new Date(e.at), new Date())).length;
+    headerSub(head, today ? t('act.ctxN', today === entries.length && !done ? `${today}+` : today) : t('act.ctxNone'));
     draw();
   }
   function loadMore(btn) {

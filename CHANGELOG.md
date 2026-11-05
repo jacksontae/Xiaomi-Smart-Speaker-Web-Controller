@@ -13,6 +13,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   (`GET`/`POST /podcasts/subs`, `POST /podcasts/subs/{id}/seen`, `DELETE /podcasts/subs/{id}`; `/podcasts/episodes`
   has the caller's `subscription`). Feeds are read a few at a time and cached for 15 minutes; database schema 7.
 
+### Changed
+- Android: a short context line under the big page title says what matters on that page: what the speaker (or This
+  device) is doing on Now, Announce and Music, the playing playlist or how many there are, what's left on the
+  schedule today, members and disabled ones, today's activity, unsaved speaker settings. iOS and desktop don't show it.
+- Playlists are sorted into Music and Announcements (playlists of announcements only) inside My playlists, Shared and
+  Members' playlists. `GET /playlists` items have `tts_only`; empty and mixed playlists count as music.
+
 ## [0.6.0] - 2026-11-05
 
 ### Added

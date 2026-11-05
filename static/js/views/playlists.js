@@ -8,7 +8,7 @@
 // members' personal playlists in their own group. Edit controls follow the server's `can_edit`.
 // Android look: New playlist and Add item are extended FABs on phones (android-kit.js), Play all | Shuffle a connected
 // button group, and tablets (>= 960px) get the list-detail two-pane layout of the AT_ boards.
-import { h, icon, field, busy, tip, append } from '../ui.js';
+import { h, icon, field, busy, tip, append, headerSub } from '../ui.js';
 import { register, t, fmtDur } from '../i18n.js';
 import { errorText } from '../api.js';
 import { isPhone } from '../sheet.js';
@@ -42,6 +42,11 @@ register({
     'pl.nowPlaying.here': (x) => `Playing ${x} on this device`, 'pl.shuffling.here': (x) => `Shuffling ${x} on this device`,
     'pl.mine': 'My playlists', 'pl.shared': 'Shared', 'pl.members': 'Members’ playlists',
     'pl.mineNone': 'None yet. Playlists you make are private: only you and the owner can see them.',
+    'pl.music': 'Music', 'pl.says': 'Announcements',
+    // the header's context line (Android)
+    'pl.ctxCount': (n) => (n === 1 ? '1 playlist' : `${n} playlists`),
+    'pl.ctxPlaying': (x) => `Playing ${x} on the speaker`, 'pl.ctxPlaying.here': (x) => `Playing ${x} on this device`,
+    'pl.ctxPaused': (x) => `${x} is paused`,
   },
   th: {
     'pl.new': 'สร้างเพลย์ลิสต์', 'pl.newShort': 'สร้าง', 'pl.createPl': 'สร้างเพลย์ลิสต์', 'pl.name': 'ชื่อเพลย์ลิสต์',
@@ -63,6 +68,10 @@ register({
     'pl.nowPlaying.here': (x) => `กำลังเล่น ${x} ที่อุปกรณ์นี้`, 'pl.shuffling.here': (x) => `สุ่มเล่น ${x} ที่อุปกรณ์นี้`,
     'pl.mine': 'เพลย์ลิสต์ของฉัน', 'pl.shared': 'เพลย์ลิสต์ที่แชร์', 'pl.members': 'เพลย์ลิสต์ของสมาชิก',
     'pl.mineNone': 'ยังไม่มี เพลย์ลิสต์ที่คุณสร้างเป็นแบบส่วนตัว เห็นได้แค่คุณกับเจ้าของ',
+    'pl.music': 'เพลง', 'pl.says': 'ประกาศ',
+    'pl.ctxCount': (n) => `มี ${n} เพลย์ลิสต์`,
+    'pl.ctxPlaying': (x) => `ลำโพงกำลังเล่น ${x}`, 'pl.ctxPlaying.here': (x) => `กำลังเล่น ${x} ที่อุปกรณ์นี้`,
+    'pl.ctxPaused': (x) => `หยุด ${x} ไว้ชั่วคราว`,
   },
 });
 
@@ -79,6 +88,9 @@ const viewerHere = (ctx) => !canOp(ctx) && isDevice();
 const canEdit = (ctx, p) => !!p.can_edit && canPlay(ctx);
 const GROUPS = { mine: 'pl.mine', shared: 'pl.shared', members: 'pl.members' };
 const groupOf = (p) => (p.owner_id == null ? 'shared' : p.mine ? 'mine' : 'members');
+// what's in it: only announcements (server's tts_only) or music; mixed and empty playlists are music
+const KINDS = { music: 'pl.music', says: 'pl.says' };
+const kindOf = (p) => (p.tts_only ? 'says' : 'music');
 
 export async function render(ctx) {
   await Promise.all([ctx.css('views/media.css'), ctx.css('views/playlists.css'), kitCss(ctx)]);
@@ -98,7 +110,8 @@ function listPage(ctx, selected) {
     if (desk) { selected = p.id; history.replaceState(null, '', `#/playlists/${p.id}`); load(); } else ctx.go(`#/playlists/${p.id}`);
   }) }, icon('plus', 'sm'), h('span', { class: 'pl-new-l' }, t('pl.new')), h('span', { class: 'pl-new-s' }, t('pl.newShort'))) : null;
   if (newBtn) fab(ctx, { icon: 'plus', label: t('pl.new'), onclick: () => newBtn.click(), replaces: newBtn });
-  const node = h('div', { class: `page pl${desk ? ' pl-desk' : ''}` }, ctx.header({ title: t('nav.playlists'), actions: newBtn }),
+  const head = ctx.header({ title: t('nav.playlists'), actions: newBtn });
+  const node = h('div', { class: `page pl${desk ? ' pl-desk' : ''}` }, head,
     desk ? h('div', { class: 'pl-split' }, box, pane) : box);
 
   async function load() {
@@ -118,22 +131,42 @@ function listPage(ctx, selected) {
     return Object.keys(GROUPS).map((g) => [g, list.filter((p) => groupOf(p) === g)])
       .filter(([g, l]) => l.length || (g === 'mine' && viewerHere(ctx)));
   }
+  /** [kind, playlists] of one group when it holds announcement playlists (Music first), else null: no kind labels. */
+  function byKind(l) {
+    if (!l.some((p) => kindOf(p) === 'says')) return null;
+    return Object.keys(KINDS).map((k) => [k, l.filter((p) => kindOf(p) === k)]).filter(([, x]) => x.length);
+  }
+  const rowsOf = (l, dataset) => h('div', { class: 'list tb-list pl-list', role: 'list', dataset }, l.map(listRow));
+  /** Header context line: the playlist on the speaker (this device) if it's one of these, else how many there are. */
+  function paintSub() {
+    if (!playlists) return;
+    const q = status && status.queue;
+    const cur = q && mediaActive(status) && visible().find((p) => p.id === q.playlist_id);
+    if (cur) headerSub(head, status.media.state === 'PAUSED' ? t('pl.ctxPaused', cur.name) : here('pl.ctxPlaying', cur.name));
+    else headerSub(head, t('pl.ctxCount', visible().length));
+  }
+  // Music / Announcements nest inside the owner groups (My playlists, Shared, Members'): with only shared playlists
+  // they are the page's sections; otherwise each group that has announcement playlists gets the two as sub-labels.
   function paint() {
     box.replaceChildren(listEl);
     if (!playlists) { listEl.replaceChildren(spinnerLine('')); return; }
-    const groups = grouped(visible());
-    const list = groups.flatMap(([, l]) => l);
+    paintSub();
+    const groups = grouped(visible()).map(([g, l]) => [g, l, byKind(l)]);
+    const list = groups.flatMap(([, l, kinds]) => (kinds ? kinds.flatMap(([, x]) => x) : l)); // page order
     if (!groups.length) {
       listEl.replaceChildren(h('div', { class: 'pl-empty' }, note(t(canOp(ctx) ? 'pl.noneOp' : 'pl.none'))));
       if (desk) { pane.replaceChildren(); detail = null; }
       return;
     }
     if (desk && list.length && (!selected || !list.some((p) => p.id === selected))) selected = list[0].id;
-    if (groups.length === 1 && groups[0][0] === 'shared') listEl.replaceChildren(...list.map(listRow)); // as before
-    else {
-      box.replaceChildren(...groups.flatMap(([g, l]) => [sectionLabel(t(GROUPS[g])), l.length
-        ? h('div', { class: 'list tb-list pl-list', role: 'list', dataset: { group: g } }, l.map(listRow))
-        : h('div', { class: 'pl-empty pl-none', dataset: { group: g } }, note(t('pl.mineNone')))]));
+    const onlyShared = groups.length === 1 && groups[0][0] === 'shared';
+    if (onlyShared && !groups[0][2]) listEl.replaceChildren(...list.map(listRow)); // as before
+    else if (onlyShared) {
+      box.replaceChildren(...groups[0][2].flatMap(([k, x]) => [sectionLabel(t(KINDS[k])), rowsOf(x, { group: 'shared', kind: k })]));
+    } else {
+      box.replaceChildren(...groups.flatMap(([g, l, kinds]) => [sectionLabel(t(GROUPS[g])), ...(kinds
+        ? kinds.flatMap(([k, x]) => [h('h3', { class: 'pl-kind' }, t(KINDS[k])), rowsOf(x, { group: g, kind: k })])
+        : [l.length ? rowsOf(l, { group: g }) : h('div', { class: 'pl-empty pl-none', dataset: { group: g } }, note(t('pl.mineNone')))])]));
     }
     if (desk && !list.length) { pane.replaceChildren(); detail = null; }
     else if (desk && (!detail || detail.id !== selected)) openDetail(selected);
@@ -205,6 +238,7 @@ function listPage(ctx, selected) {
     onStatus(s) {
       status = s.status;
       box.querySelectorAll('.tb-rb').forEach((b) => b.upd && b.upd());
+      paintSub();
       if (detail) detail.onStatus(s);
     },
   };
