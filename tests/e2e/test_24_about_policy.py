@@ -44,7 +44,7 @@ def test_signed_out_from_sign_in(make_app, seeded, api):
         foot.get_by_role("link", name="Privacy").click()
         heading(p, "Privacy")
         expect(p.locator(".pv-table tbody tr")).to_have_count(4)
-        expect(p.get_by_text("The newest 5,000 entries are kept", exact=False)).to_be_visible()
+        expect(p.get_by_text("Entries are deleted after 90 days", exact=False)).to_be_visible()
         expect(p.get_by_text(CONTACT)).to_have_count(0)
         # a jump link scrolls in place; the router doesn't take it for a page
         p.locator(".pv-chip", has_text="Other companies").click()

@@ -40,7 +40,7 @@ service เปิดเองทุกครั้งที่ล็อกอิ
 ./speakerctl status      # สถานะ service และลำโพง
 ./speakerctl restart
 ./speakerctl stop | start
-./speakerctl logs [n]    # ดู log แบบ follow (แสดง n บรรทัดล่าสุดก่อน ค่าเริ่มต้น 50) · log อยู่ที่ service.log
+./speakerctl logs [n]    # ดู log แบบ follow (แสดง n บรรทัดล่าสุดก่อน ค่าเริ่มต้น 50) · log อยู่ที่ service.log (ไม่มี access log มีแค่ข้อความตอนเริ่ม คำเตือน และ error)
 ./speakerctl config      # แก้ config.json แล้วรีสตาร์ท
 ./speakerctl token       # แสดง API token · --rotate เพื่อออก token ใหม่ (ของเดิมใช้ไม่ได้ทันที)
 ./speakerctl uninstall   # เลิกเปิดอัตโนมัติ
@@ -88,6 +88,7 @@ docker compose -f deploy/remote/docker-compose.yml exec speaker-service \
 | `passkey_signin` | `true` | เปิดการล็อกอินด้วย passkey (ใช้ได้จริงเมื่อ `public_base_url` เป็น `https://` หรือ `http://localhost`) |
 | `passkey_required_for_admins` | `false` | admin ที่มี passkey ต้องล็อกอินด้วย passkey เท่านั้น (เปิดได้เมื่อ admin ทุกคนมี passkey แล้ว) |
 | `owner_contact` | `null` | ช่องทางติดต่อเจ้าของ เช่น `it@example.com` หรือ LINE id (ไม่เกิน 120 ตัวอักษร) แสดงในหน้าเกี่ยวกับแอปเฉพาะสมาชิกที่เข้าสู่ระบบแล้ว |
+| `cookie_secure` | `"auto"` | flag `Secure` ของ cookie `sid` · `"auto"`: ใส่เมื่อคำขอมาทาง https หรือมาที่ host ของ `public_base_url` ที่เป็น `https://` (proxy ที่ถอด TLS แล้วส่งต่อเป็น http เช่น Cloudflare Tunnel) · `true`: ใส่เสมอ (ล็อกอินได้เฉพาะทาง https หรือ `http://localhost`) · `false`: ไม่ใส่ · env `COOKIE_SECURE` |
 
 ```bash
 TOKEN=$(./speakerctl token)
@@ -102,7 +103,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 - **API token** ส่ง header `Authorization: Bearer <token>` ได้สิทธิ์ `admin` ใช้กับ curl, integration และ firmware relay
   - token สร้างให้อัตโนมัติตอนเปิด service ครั้งแรก เก็บใน `config.json` (สิทธิ์ไฟล์ 600) ดูด้วย `./speakerctl token`
   - `GET /settings` ไม่ส่ง token กลับไป และเปลี่ยน token ผ่าน API ไม่ได้ ใช้ `./speakerctl token --rotate`
-- **บัญชีผู้ใช้ (หน้าเว็บ)** ล็อกอินแล้วได้ cookie `sid` (`HttpOnly`, `SameSite=Strict`, อายุ 30 วันนับจากใช้งานล่าสุด)
+- **บัญชีผู้ใช้ (หน้าเว็บ)** ล็อกอินแล้วได้ cookie `sid` (`HttpOnly`, `SameSite=Strict`, อายุ 30 วันนับจากใช้งานล่าสุด, `Secure` เมื่อใช้ https ดู `cookie_secure`) · session ที่หมดอายุถูกลบตอนเริ่ม service และทุกชั่วโมง
   - คำขอที่เปลี่ยนข้อมูล (POST/PUT/PATCH/DELETE) ด้วย cookie ต้องส่ง header `X-Requested-With: speaker-web` ไม่งั้นได้ `403`
   - ครั้งแรกที่ยังไม่มีผู้ใช้ หน้าเว็บจะให้ใส่ API token เพื่อสร้างบัญชี admin คนแรก (`POST /auth/setup`)
   - รหัสผ่าน 8–256 ตัว เก็บแบบ scrypt · ล็อกอินผิด 5 ครั้งใน 5 นาที (ต่อ IP + ชื่อผู้ใช้) จะได้ `429` พร้อม `Retry-After`
@@ -174,7 +175,7 @@ challenge ใช้ได้ครั้งเดียวและหมดอ�
 | POST | `/pause` · `/resume` · `/stop` | operator | – | ควบคุมการเล่น (`stop` ล้างคิวด้วย) |
 | GET · POST | `/settings` | admin | `{"default_volume": 0.4}` | ดู · แก้ตั้งค่า |
 | GET | `/speakers` | admin | – | ค้นหาลำโพง Cast ในวง LAN |
-| GET | `/activity?limit=50&before_id=` | admin | – | บันทึกกิจกรรม ใหม่สุดก่อน (`limit` ไม่เกิน 500 · เก็บ 5000 รายการล่าสุด) |
+| GET | `/activity?limit=50&before_id=` | admin | – | บันทึกกิจกรรม ใหม่สุดก่อน (`limit` ไม่เกิน 500 · เก็บ 5000 รายการล่าสุดภายใน 90 วัน) |
 
 ### เพลย์ลิสต์และคิว
 
@@ -365,7 +366,7 @@ instead of the `mosquitto` service, and give the relay its host, port 8883 and T
 
 Settings can also live in `config.json` (`"transport": "mqtt"`, an `mqtt` block, `public_base_url`).
 The environment variables `SPEAKER_TRANSPORT`, `PUBLIC_BASE_URL`, `MQTT_HOST`, `MQTT_PORT`, `MQTT_TLS`,
-`MQTT_CA_FILE`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_BASE_TOPIC` and `MQTT_CLIENT_ID` override it and
+`MQTT_CA_FILE`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_BASE_TOPIC`, `MQTT_CLIENT_ID` and `COOKIE_SECURE` override it and
 are never written back to the file. The MQTT password is never returned by `/settings` (only `password_set`) or
 written to the activity log.
 

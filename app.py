@@ -252,6 +252,10 @@ class Settings(BaseModel):
     passkey_required_for_admins: bool = False  # admins who have a passkey can't sign in any other way
     # How members reach the owner (an email, a LINE id...), shown on the About page to signed-in members only.
     owner_contact: str | None = None
+    # The sid cookie's Secure flag. "auto": when the request came over https (uvicorn takes X-Forwarded-Proto
+    # only from FORWARDED_ALLOW_IPS, default this machine) or to the host of an https:// public_base_url (a
+    # TLS-terminating proxy such as Cloudflare Tunnel). true: always. false: never.
+    cookie_secure: Literal["auto"] | bool = "auto"
 
     @field_validator("speaker_ip")
     @classmethod
@@ -339,6 +343,7 @@ ENV_OVERRIDES = {
     "MQTT_PASSWORD": ("mqtt", "password"),
     "MQTT_BASE_TOPIC": ("mqtt", "base_topic"),
     "MQTT_CLIENT_ID": ("mqtt", "client_id"),
+    "COOKIE_SECURE": ("cookie_secure",),
 }
 
 
@@ -552,16 +557,26 @@ def unauthorized(detail):
     return HTTPException(401, detail, headers={"WWW-Authenticate": "Bearer"})
 
 
+def cookie_secure(request):
+    """The sid cookie's Secure flag (settings.cookie_secure)."""
+    if settings.cookie_secure != "auto":
+        return settings.cookie_secure
+    if request.url.scheme == "https":
+        return True
+    base = urllib.parse.urlsplit(settings.public_base_url or "")
+    return base.scheme == "https" and request.headers.get("host", "").lower() == base.netloc.lower()
+
+
 def set_session_cookie(request, response, sid):
     response.set_cookie(
         SESSION_COOKIE, sid, max_age=SESSION_TTL, path="/", httponly=True, samesite="strict",
-        secure=request.url.scheme == "https",
+        secure=cookie_secure(request),
     )
 
 
 def clear_session_cookie(request, response):
     response.delete_cookie(
-        SESSION_COOKIE, path="/", httponly=True, samesite="strict", secure=request.url.scheme == "https"
+        SESSION_COOKIE, path="/", httponly=True, samesite="strict", secure=cookie_secure(request)
     )
 
 
@@ -3422,6 +3437,7 @@ async def schedule_loop():
         try:
             await run_due_schedules(datetime.now(UTC))
             talkie_sweep()
+            db.prune(force=False)  # expired sessions and old activity, hourly
         except Exception as e:  # keep the runner alive
             print(f"schedule runner error: {type(e).__name__}: {e}")
         await asyncio.sleep(SCHEDULE_POLL)
@@ -4344,4 +4360,6 @@ for router in (viewer_api, operator_api, admin_api):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=settings.port)
+    # No access log: its lines carry client addresses and full query strings (signed media links, searches).
+    # Errors and the app's own messages still go to stdout/stderr.
+    uvicorn.run(app, host="0.0.0.0", port=settings.port, access_log=False)
