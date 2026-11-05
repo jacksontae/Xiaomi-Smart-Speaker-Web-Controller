@@ -3,7 +3,7 @@ import re
 
 from playwright.sync_api import expect
 
-from .e2ekit import BASE, OWNER, pw
+from .e2ekit import BASE, OWNER, VIEWER, pw
 
 
 def seg(p, i):
@@ -86,25 +86,46 @@ def test_prefs_phone_and_account_page(make_app, seeded):
     viewer.clean("account viewer")
 
 
+def rename(app, name):
+    """Pencil beside the name -> sheet -> Save."""
+    app.page.get_by_role("button", name="Edit display name").click()
+    sheet = app.sheet()
+    sheet.get_by_label("Display name").fill(name)
+    sheet.get_by_role("button", name="Save").click()
+    return sheet
+
+
 def test_owner_display_name(make_app, seeded):
     app = make_app("owner", device="desktop", route="prefs")
     p = app.page
-    field = p.locator(".ca-namefield input")
-    field.fill("")
-    p.locator(".ca-namefield button", has_text="Save").click()
-    expect(p.locator(".ca-namefield .hint.err")).to_have_text("Enter a display name first")
-    field.fill("Olivia Renamed")
-    p.locator(".ca-namefield button", has_text="Save").click()
+    expect(p.locator(".ca-namefield")).to_have_count(0)  # no always-open field any more
+    sheet = rename(app, "")
+    expect(sheet.locator(".form-error")).to_have_text("Enter a display name first")
+    sheet.get_by_label("Display name").fill("Olivia Renamed")
+    sheet.get_by_role("button", name="Save").click()
+    app.no_sheet()
     app.toast("Name saved")
     expect(p.locator(".uchip-n")).to_have_text("Olivia Renamed")
-    p.locator(".ca-namefield input").fill(OWNER["display_name"])
-    p.locator(".ca-namefield button", has_text="Save").click()
+    expect(p.locator(".ca-name")).to_have_text("Olivia Renamed")
+    rename(app, OWNER["display_name"])
+    app.no_sheet()
     expect(p.locator(".uchip-n")).to_have_text(OWNER["display_name"])
-    # operators have no name field (no self-service endpoint)
-    op = make_app("operator", device="desktop", route="prefs")
-    expect(op.page.locator(".ca-namefield")).to_have_count(0)
     app.clean("display name")
-    op.clean("operator prefs")
+
+
+def test_viewer_renames_themselves_on_phone(make_app, seeded):
+    app = make_app("viewer", device="phone", lang="th", route="account")
+    p = app.page
+    p.get_by_role("button", name="แก้ชื่อที่แสดง").click()
+    sheet = app.sheet()
+    sheet.get_by_label("ชื่อที่แสดง").fill("Vera V.")
+    sheet.get_by_role("button", name="บันทึก").click()
+    app.no_sheet()
+    app.toast("บันทึกชื่อแล้ว")
+    expect(p.locator(".ca-name")).to_have_text("Vera V.")
+    assert seeded.user("vera")["display_name"] == "Vera V."
+    seeded.patch(f"/users/{seeded.user('vera')['id']}", {"display_name": VIEWER["display_name"]})  # leave it as found
+    app.clean("viewer rename")
 
 
 def test_change_password_flow(make_app, seeded):
