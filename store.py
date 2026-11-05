@@ -870,6 +870,10 @@ class Store:
                 f"{CLIP_SELECT} WHERE c.created_at >= ? ORDER BY c.created_at DESC, c.rowid DESC", (since,),
             )]
 
+    def delete_clip(self, clip_id):
+        with self.tx() as db:
+            return db.execute("DELETE FROM talkie_clips WHERE id = ?", (clip_id,)).rowcount > 0
+
     def user_clip_files(self, user_id):
         with self.tx() as db:
             return [r[0] for r in db.execute("SELECT file FROM talkie_clips WHERE user_id = ?", (user_id,))]

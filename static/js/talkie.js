@@ -1,29 +1,34 @@
 // Talkie client (WebSocket /talkie, see app.py): the walkie-talkie between the members of this server.
-// The socket stays open on every page while signed in (app.js calls start/stop): it says who has the app open and
-// brings other members' talks, which play here live through one <audio> wherever the member is in the app. The
-// page (views/talkie.js) reads the state and talks through holdToTalk().
+// The socket stays open on every page while signed in (app.js calls start/stop): it says who has the app open, who
+// is in the Walkie and who talks there (the shell's "join the Walkie" chip), and brings the voice messages. Walkie
+// talks are heard only while this tab's Walkie is open (setRoom), through one <audio>. The page (views/talkie.js)
+// reads the state and talks through holdToTalk().
 //
-//   start({ user, go })   connect (again after a drop, with backoff); go(hash) navigates (the live pill's tap)
+//   start({ user })       connect (again after a drop, with backoff), out of the room
 //   stop()                sign-out: close, forget, silence
 //   onChange(fn)          fn(state) on every change; returns unsubscribe. state = { connected, me, online, live,
-//                         clips, blocked, hearing, playing, playedRev }: live = { id, user_id, name, url } of someone else's
-//                         talk, blocked = the browser refused to start the live audio (iOS before a first tap)
-//   holdToTalk({ onState, onLevel })  -> { start(), stop(), destroy() }, one talk at a time (see there)
-//   playClip(clip) / stopClip()       play a kept clip (one at a time, through its own <audio>)
+//                         heard, clips, blocked, hearing, playing, playedRev }: online = [{ id, name, in_room }],
+//                         live = { id, user_id, name, url? } of someone else's walkie talk (url only in the room),
+//                         heard = that talk while its audio plays here, blocked = the browser refused to start the
+//                         live audio (iOS before a first tap)
+//   setRoom(on)           this tab's Walkie opened or closed: hear the walkie talks (and may talk live) or not
+//   holdToTalk({ mode, onState, onLevel })  -> { start(), stop(), destroy() }, one talk at a time (see there)
+//   playClip(clip) / stopClip()       play a voice message (one at a time, through its own <audio>)
 //   listen()              start the live audio from a tap (after `blocked`)
-//   played(id) / markPlayed(id)        "Not played yet" per device (localStorage)
+//   played(id) / markPlayed(id)        "Not played yet" per device (localStorage); unread(state) counts them
 //   hearing() / setHearing(on)         the "Hear Talkie on this device" switch (App settings), default on
-//   setPageOpen(on)       the Talkie page is showing: it has its own banner, so the live pill hides
-import { h, icon } from './ui.js';
-import { register, t } from './i18n.js';
+import { register } from './i18n.js';
 import { pickMime, micAllowedHere, micPermission, askMic, openMeter } from './talk-client.js';
 
+// the shell's "join the Walkie" chip and the nav's unread count (shell.js)
 register({
   en: {
-    'tkg.talking': (x) => `${x} is talking…`, 'tkg.tap': 'Tap to listen', 'tkg.tapAria': (x) => `${x} is talking. Tap to listen`,
+    'tkg.onWalkie': (n) => `${n} on Walkie`, 'tkg.talking': (x) => `${x} is talking`, 'tkg.join': 'Join', 'tkg.hide': 'Hide',
+    'tkg.unread': (n) => `${n} not played yet`,
   },
   th: {
-    'tkg.talking': (x) => `${x} กำลังพูด…`, 'tkg.tap': 'แตะเพื่อฟัง', 'tkg.tapAria': (x) => `${x} กำลังพูด แตะเพื่อฟัง`,
+    'tkg.onWalkie': (n) => `${n} คนอยู่ในวอล์กกี้`, 'tkg.talking': (x) => `${x} กำลังพูด`, 'tkg.join': 'เข้าร่วม', 'tkg.hide': 'ซ่อน',
+    'tkg.unread': (n) => `ยังไม่ได้ฟัง ${n} ข้อความ`,
   },
 });
 
@@ -39,24 +44,23 @@ const PLAYED_MAX = 200;
 const read = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 
-const state = { connected: false, me: null, online: [], live: null, clips: [], blocked: false, hearing: read(HEAR_KEY) !== 'off', playing: null, playedRev: 0 };
+const state = { connected: false, me: null, online: [], live: null, heard: null, clips: [], blocked: false, hearing: read(HEAR_KEY) !== 'off', playing: null, playedRev: 0 };
 const subs = new Set();
-let ws = null, user = null, go = () => {};
+let ws = null, user = null;
 let retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0;
 let talker = null;       // the holdToTalk() whose talk is going on (gets ready/error/ended)
-let pageOpen = false;
+let room = false;        // this tab's Walkie is open
+let sockRoom = false;    // ... as the server knows it
 
 export function onChange(fn) { subs.add(fn); return () => subs.delete(fn); }
 /** The current state (the same object onChange passes; read it, don't change it). */
 export const snapshot = () => state;
 function changed() {
-  paintPill();
   subs.forEach((f) => { try { f(state); } catch (e) { console.error(e); } });
 }
 
 /* ---------- socket ---------- */
 export function start(opts) {
-  go = opts.go || go;
   if (user && opts.user && user.id === opts.user.id && ws) return; // a re-render (language): keep the connection
   stop();
   user = opts.user;
@@ -69,14 +73,15 @@ export function stop() {
   disconnect();
   stopLive();
   stopClip();
-  Object.assign(state, { me: null, online: [], live: null, clips: [], blocked: false });
+  Object.assign(state, { me: null, online: [], live: null, heard: null, clips: [], blocked: false });
   changed();
 }
 
 function connect() {
   if (!user || ws || typeof WebSocket === 'undefined') return;
   clearTimeout(retryTimer);
-  const sock = ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/talkie`);
+  sockRoom = room;
+  const sock = ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/talkie?room=${room ? 1 : 0}`);
   sock.binaryType = 'arraybuffer';
   sock.onmessage = (ev) => { if (ws === sock && typeof ev.data === 'string') receive(ev.data); };
   sock.onclose = (ev) => {
@@ -120,16 +125,18 @@ function receive(text) {
   if (msg.type === 'hello') {
     retry = 0;
     Object.assign(state, { connected: true, me: msg.me, online: msg.online || [], clips: msg.clips || [] });
+    sayRoom(); // the Walkie opened or closed while connecting
     setLive(msg.live && msg.live.user_id !== msg.me ? msg.live : null);
   } else if (msg.type === 'online') {
     state.online = msg.online || [];
   } else if (msg.type === 'live') {
     setLive(msg);
+  } else if (msg.type === 'clip') {
+    state.clips = [msg.clip, ...state.clips.filter((c) => c.id !== msg.clip.id)];
+  } else if (msg.type === 'clip_deleted') {
+    state.clips = state.clips.filter((c) => c.id !== msg.id);
+    if (state.playing === msg.id) stopClip();
   } else if (msg.type === 'ended') {
-    if (msg.clip) {
-      state.clips = [msg.clip, ...state.clips.filter((c) => c.id !== msg.clip.id)];
-      if (msg.user_id === state.me) markPlayed(msg.id, false);
-    }
     if (state.live && state.live.id === msg.id) {
       state.live = null;
       // the stream ends by itself once played out; only a blocked one is dropped (nothing will play it now)
@@ -154,42 +161,61 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-/* ---------- live audio (someone else talking) ---------- */
+/* ---------- the Walkie room ---------- */
+/** This tab's Walkie opened (on) or closed: only then does it get, and play, the live audio. */
+export function setRoom(on) {
+  if (room === !!on) return;
+  room = !!on;
+  sayRoom();
+  if (!room) { stopLive(); state.blocked = false; }
+  changed();
+}
+
+/** Tell the server (when connected; a connection still opening says it after its hello, the next one in its URL). */
+function sayRoom() {
+  if (sockRoom !== room && state.connected && send({ type: 'room', in: room })) sockRoom = room;
+}
+
+/* ---------- live audio (someone else talking on the Walkie) ---------- */
 let liveAudio = null;
+let liveTalk = null; // the talk the <audio> plays
 const liveEl = () => {
   if (!liveAudio) {
     liveAudio = new Audio();
     liveAudio.preload = 'none';
-    // heard live here: its clip counts as played ("Not played yet" is for those who missed it)
-    liveAudio.addEventListener('playing', () => { if (liveAudio.dataset.id) markPlayed(liveAudio.dataset.id); });
+    // its voice arrives: only now does the page show them talking (the stream starts a second or two behind)
+    liveAudio.addEventListener('playing', () => { if (liveTalk && !state.heard) { state.heard = liveTalk; changed(); } });
     liveAudio.addEventListener('ended', () => { stopLive(); changed(); });
-    liveAudio.addEventListener('error', () => { if (liveAudio.dataset.id) { stopLive(); changed(); } });
+    liveAudio.addEventListener('error', () => { if (liveTalk) { stopLive(); changed(); } });
   }
   return liveAudio;
 };
 
 function setLive(live) {
   state.live = live;
-  if (!live) return;
+  if (!live || !live.url || !room) return; // outside the room: who talks, no audio
+  if (liveTalk && liveTalk.id === live.id) return; // already playing (a reconnect)
   stopClip();
   if (state.hearing) playLive(live);
 }
 
 function playLive(live) {
   const a = liveEl();
-  a.dataset.id = live.id;
+  stopLive();
+  liveTalk = live;
   a.src = live.url;
   state.blocked = false;
   a.play().catch((e) => {
-    if (a.dataset.id !== live.id) return;
+    if (liveTalk !== live) return;
     // autoplay refused (iOS until the first tap, or a browser policy): offer a tap instead of staying silent
     if (e && e.name === 'NotAllowedError') { state.blocked = true; changed(); }
   });
 }
 
 function stopLive() {
+  state.heard = null;
   if (!liveAudio) return;
-  liveAudio.dataset.id = '';
+  liveTalk = null;
   liveAudio.removeAttribute('src');
   try { liveAudio.load(); } catch { /* nothing loaded */ }
 }
@@ -197,7 +223,7 @@ function stopLive() {
 /** Start the live audio from a tap (the browser blocked it before); after the talk ended, its clip instead. */
 export function listen() {
   state.blocked = false;
-  if (state.live) playLive(state.live);
+  if (state.live && state.live.url && room) playLive(state.live);
   changed();
 }
 
@@ -238,6 +264,8 @@ const playedSet = () => {
   return playedIds;
 };
 export const played = (id) => playedSet().has(id);
+/** Voice messages from others not played on this device yet. */
+export const unread = (s = state) => s.clips.filter((c) => c.user_id !== s.me && !played(c.id)).length;
 export function markPlayed(id, notify = true) {
   const s = playedSet();
   if (s.has(id)) return;
@@ -252,40 +280,23 @@ export const hearing = () => state.hearing;
 export function setHearing(on) {
   state.hearing = !!on;
   write(HEAR_KEY, on ? 'on' : 'off');
-  if (!on) { stopLive(); state.blocked = false; } else if (state.live) playLive(state.live);
+  if (!on) { stopLive(); state.blocked = false; } else if (state.live && state.live.url && room) playLive(state.live);
   changed();
-}
-
-/* ---------- live pill: someone is talking (on every page but Talkie) ---------- */
-let pill = null;
-export function setPageOpen(on) { pageOpen = on; paintPill(); }
-function paintPill() {
-  const live = state.live;
-  const show = !!live && !!user && !pageOpen && (state.hearing || state.blocked);
-  if (!show) { if (pill) pill.hidden = true; return; }
-  if (!pill) {
-    pill = h('button', { type: 'button', class: 'tw-pill', hidden: true, onclick: () => { if (state.blocked) listen(); else go('#/announce'); } });
-    document.body.append(pill);
-  }
-  pill.hidden = false;
-  pill.classList.toggle('blocked', state.blocked);
-  pill.setAttribute('aria-label', state.blocked ? t('tkg.tapAria', live.name) : t('tkg.talking', live.name));
-  pill.replaceChildren(h('span', { class: 'tw-bars', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i')),
-    h('span', { class: 'tw-pill-t' }, t('tkg.talking', live.name)),
-    state.blocked ? h('span', { class: 'tw-pill-tap' }, icon('speaker', 'xs'), t('tkg.tap')) : null);
 }
 
 /* ---------- talking ---------- */
 /**
- * holdToTalk({ onState, onLevel }) -> { start(), stop(), destroy() }
+ * holdToTalk({ mode, onState, onLevel }) -> { start(), stop(), destroy() }
+ * mode: 'walkie' (live to the room, not kept; this tab must be in the room) or 'message' (kept for a day, never live).
  * onState(state, info): 'idle' | 'asking' | 'opening' | 'live' | 'sending' | 'denied' | 'http' | 'error'
  *   idle info = { ended: { reason, clip } } after a talk, { cancelled: true } when released before it went out,
  *   or { allowed: true } after the first-time microphone prompt; error info = { code, detail }
- *   (busy, offline, no_mic, mic_failed, unsupported, bad_request, unavailable, transcoder_error, dropped).
+ *   (busy, not_in_room, offline, no_mic, mic_failed, unsupported, bad_request, unavailable, transcoder_error,
+ *   dropped).
  * The recorder starts as soon as the mic is open and its first chunks wait for the server's "ready", so the first
  * word isn't cut. Releasing sends what was recorded, then {"type": "stop"}.
  */
-export function holdToTalk({ onState = () => {}, onLevel = () => {} } = {}) {
+export function holdToTalk({ mode = 'walkie', onState = () => {}, onLevel = () => {} } = {}) {
   let st = 'idle';
   let stream = null, closeMeter = null, rec = null, queue = [], ready = false, released = false;
   let gen = 0, stopTimer = 0;
@@ -361,7 +372,7 @@ export function holdToTalk({ onState = () => {}, onLevel = () => {} } = {}) {
       if (ready) send(ev.data); else queue.push(ev.data);
     };
     rec.onstop = () => { if (my === gen && ready) setTimeout(() => { if (my === gen) send({ type: 'stop' }); }, 0); };
-    if (!send({ type: 'start', mime: rec.mimeType || mime })) { cleanup(); set('error', { code: 'offline' }); return; }
+    if (!send({ type: 'start', mime: rec.mimeType || mime, mode })) { cleanup(); set('error', { code: 'offline' }); return; }
     rec.start(CHUNK_MS);
   }
 

@@ -190,7 +190,7 @@ function startApp() {
   mountShell();
   render(false);
   startPolling();
-  talkie.start({ user: state.user, go: (hash) => { location.hash = hash; } }); // the walkie-talkie, on every page
+  talkie.start({ user: state.user }); // the walkie-talkie's presence, on every page (the shell's chip, the nav count)
   prefetchRoutes();
   // passkey offer after a fresh sign-in / "passkey required" prompt (team C module; guards itself to once per load)
   import('./passkey-offer.js').then((m) => m.maybePrompt({ api, user: state.user, fresh: !(state.auth && state.auth.user) })).catch(() => {});

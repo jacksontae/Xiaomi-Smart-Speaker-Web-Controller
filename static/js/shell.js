@@ -3,8 +3,11 @@
 // Android look (<html data-os="android">, css/android.css): the same markup restyled as a floating navigation pill
 // (phone) and a navigation rail (tablet), plus three small branches here: the account avatar in the phone top bar,
 // the Now Bar (a playing capsule above the nav on every page but Now) and short rail labels.
+// Talkie (on "This device"): the unread voice messages on the nav item, and a "join the Walkie" chip on other pages.
 import { h, icon, avatar, field, passwordInput, busy, tip, toast } from './ui.js';
 import { t, roleLabel } from './i18n.js';
+import { toneOf, initialOf } from './kit.js';
+import * as talkie from './talkie.js';
 import { ROUTES, RANK, href, labelKey } from './routes.js';
 import { openSheet, popover, isPhone, closePopover } from './sheet.js';
 import { errorText } from './api.js';
@@ -68,6 +71,8 @@ function dragToSelect(bar, axis) {
 
 // Android rail: labels that fit an 80 px column (the phone tab label, else a short form, else the full name)
 const RAIL_LABEL = { settings: 'rail.settings', activity: 'rail.activity', help: 'rail.help' };
+const HINT_FACES = 3;
+let hintHidden = false; // the Walkie chip's Hide: until the room empties (kept across shell rebuilds)
 
 /**
  * buildShell({ user, api, allowed, output, onSignOut, onPickSpeaker, onCommand }) -> shell
@@ -312,6 +317,54 @@ export function buildShell({ user, api, allowed, output = 'speaker', onSignOut, 
     }
     return { el: bar, update };
   }
+  /* ----- Talkie (talkie.js), while "This device" is the output (Announce is the Talkie then): the count of voice
+           messages not played yet on the nav item, and on every other page a chip while others are in the Walkie
+           ("2 on Walkie · Join", "Nok is talking · Join") -> the Walkie tab. Hide puts it away until the room empties. ----- */
+  const hint = output === 'device' ? buildHint() : null;
+  function buildHint() {
+    const lead = h('span', { class: 'tw-hint-lead', 'aria-hidden': 'true' });
+    const faces = h('span', { class: 'tw-hint-faces', 'aria-hidden': 'true' });
+    const text = h('span', { class: 'tw-hint-t' });
+    const go = h('a', { class: 'tw-hint-go', href: href('announce', 'walkie') }, lead, faces, text, h('span', { class: 'tw-hint-join' }, t('tkg.join')));
+    const hide = h('button', { type: 'button', class: 'tw-hint-x', 'aria-label': t('tkg.hide'), onclick: () => { hintHidden = true; paintTalkie(); } }, icon('close', 'xs'));
+    tip(hide, t('tkg.hide'));
+    const box = h('div', { class: 'tw-hint', role: 'status', hidden: true }, go, hide);
+    let sig = '';
+    function update(s, onTalkie) {
+      const others = s.online.filter((p) => p.in_room && p.id !== s.me);
+      if (!others.length) hintHidden = false;
+      const live = s.live && s.live.user_id !== s.me ? s.live : null;
+      const show = s.connected && others.length > 0 && !hintHidden && !onTalkie;
+      box.hidden = !show;
+      if (!show) return;
+      const first = (name) => name.split(' ')[0];
+      const next = JSON.stringify([others, live && live.user_id]);
+      if (next === sig) return;
+      sig = next;
+      box.classList.toggle('talking', !!live);
+      lead.replaceChildren(live ? h('span', { class: 'tw-bars' }, h('i'), h('i'), h('i'), h('i')) : glyph('mic', 'tw-hint-mic'));
+      faces.replaceChildren(...(live ? [{ id: live.user_id, name: live.name }] : others.slice(0, HINT_FACES))
+        .map((p) => h('span', { class: 'avatar tw-hint-av', style: { background: toneOf(p.id) } }, initialOf(p.name))));
+      text.textContent = live ? t('tkg.talking', first(live.name)) : t('tkg.onWalkie', others.length);
+      hide.hidden = !!live;
+    }
+    return { el: box, update };
+  }
+  function paintTalkie(s = talkie.snapshot()) {
+    if (!hint) return;
+    const n = talkie.unread(s);
+    for (const a of el.querySelectorAll('.tabbar [data-route="announce"], .sbn [data-route="announce"]')) {
+      let b = a.querySelector('.tw-navb');
+      if (!n) { if (b) b.remove(); continue; }
+      if (!b) a.append(b = h('span', { class: 'tw-unread tw-navb', role: 'img' }));
+      b.textContent = String(n);
+      b.setAttribute('aria-label', t('tkg.unread', n));
+    }
+    hint.update(s, !!current && (current.parent || current.id) === 'announce');
+  }
+  const offTalkie = hint ? talkie.onChange(paintTalkie) : () => {};
+  if (hint) el.append(hint.el);
+
   let lastStatus = null, lastErr = null;
   function setStatus(status, err) {
     lastStatus = status; lastErr = err;
@@ -341,6 +394,7 @@ export function buildShell({ user, api, allowed, output = 'speaker', onSignOut, 
       barRight.append(me);
     }
     if (nowbar) nowbar.update(lastStatus, lastErr);
+    paintTalkie();
     placeThumbs(animate);
     closePopover();
   }
@@ -381,7 +435,7 @@ export function buildShell({ user, api, allowed, output = 'speaker', onSignOut, 
   return {
     el, content, markRoute, setSpeakers, setStatus, header, accountItems, changePassword, onScroll,
     destroy() {
-      ro.disconnect(); window.removeEventListener('scroll', onScroll); closePopover();
+      ro.disconnect(); window.removeEventListener('scroll', onScroll); closePopover(); offTalkie();
       ['data-scrolled', 'data-nowbar', 'data-bar-title'].forEach((n) => document.documentElement.removeAttribute(n));
     },
   };

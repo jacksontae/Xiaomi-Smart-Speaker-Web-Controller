@@ -377,33 +377,42 @@ To test by hand: `python tests/manual/talk_stream.py --url ws://127.0.0.1:8090/t
 ### Talkie
 
 A walkie-talkie between the members of this server. While "This device" is the music output, the Announce page is
-the Talkie (operators and owners switch between Talkie and Speaker at the top; viewers only get Talkie). Hold the
-button to talk: everyone with the app open hears it live (about 1–2 seconds behind), and the talk is kept as a clip
-for 24 hours for those who weren't listening. One room, one talker at a time (separate from live talk on the speaker).
-Each device can turn the sound off in App settings ("Hear Talkie on this device").
+the Talkie, for every role, with two tabs:
+
+- **Walkie**: hold the button to talk live to everyone who has the Walkie open (about 1–2 seconds behind), one at a
+  time (separate from live talk on the speaker). Heard once, not kept. The members show as cards: who talks, who
+  listens, and who is online but can't hear. Other pages show a small "2 on Walkie · Join" chip while others are in it.
+- **Voice messages**: hold to record a message for everyone, kept 24 hours, never played live; several members may
+  record at once. "Not played yet" per device, with the count on the tab and the nav item. Members delete their own
+  (with Undo).
+
+Each device can turn the Walkie's sound off in App settings ("Hear Talkie on this device").
 
 - `WebSocket /talkie`: the web app keeps it open on every page while signed in. Authentication: the `sid` cookie
   (any role) and a same-site `Origin`, as for `/talk`; the API token is refused (`4403`). The server re-checks the
   session on every `ping` and `start`.
 - Recordings go through ffmpeg like live talk; clips are MP3 files in `talkie/` next to `data.db` (`TALKIE_DIR`).
   Talks shorter than 0.5 seconds keep no clip, a talk ends after 60 seconds, clips older than 24 hours are deleted,
-  and deleting a member deletes their clips. Nothing goes to the activity log.
+  and deleting a member deletes their clips. Only deleting a message goes to the activity log.
 
 | Method | Path | Role | Body | Does |
 |---|---|---|---|---|
 | GET | `/talkie/clips` | viewer | – | The last 24 hours' clips, newest first: `id`, `user_id`, `name`, `seconds`, `created_at`, `url` |
 | GET | `/talkie/clips/{id}.mp3` | viewer | – | A clip's MP3 (Range requests work) |
-| GET | `/talkie/live/{id}` | viewer | – | The talk going on as one MP3 response from its start, ending when the talk does (a plain `<audio>` plays it) |
+| GET | `/talkie/live/{id}` | viewer | – | The walkie talk going on as one MP3 response from its start, ending when the talk does (a plain `<audio>` plays it); `403` unless one of the caller's tabs is in the room |
+| DELETE | `/talkie/clips/{id}` | viewer | – | Delete a message of your own (`403` for anyone else's, owners included) |
 
 | Direction | Message | Meaning |
 |---|---|---|
-| ← | `{"type": "hello", "me", "online": [{"id", "name"}], "live": {"id", "user_id", "name", "url"} \| null, "clips"}` | On connect |
-| ← | `{"type": "online", "online"}` | Someone opened or closed the app (several tabs count once) |
-| → | `{"type": "start", "mime"}` | Talk (same `mime` values as `/talk`) |
+| ← | `{"type": "hello", "me", "online": [{"id", "name", "in_room"}], "live": {"id", "user_id", "name", "url"?} \| null, "clips"}` | On connect (`/talkie?room=0\|1`: out of or in the Walkie room) |
+| ← | `{"type": "online", "online"}` | Someone opened or closed the app, or entered or left the room (several tabs count once) |
+| → | `{"type": "room", "in": true \| false}` | The Walkie opened or closed: only connections in the room get `url` and may talk live |
+| → | `{"type": "start", "mime", "mode"}` | Talk (same `mime` values as `/talk`); `mode` is required: `walkie` (live, not kept) or `message` (kept, never live) |
 | ← | `{"type": "ready", "id", "max_seconds"}` | Send MediaRecorder binary frames, then `{"type": "stop"}` |
-| ← | `{"type": "error", "code", "detail"}` | Not started; the socket stays open. `code`: `busy`, `bad_request`, `unavailable` (no ffmpeg), `transcoder_error` |
-| ← | `{"type": "live", "id", "user_id", "name", "url"}` | To everyone else: a talk started; play `url` |
-| ← | `{"type": "ended", "id", "user_id", "reason", "clip"}` | To everyone: the talk ended (`stopped`, `disconnected`, `max_length`, `idle`, `too_large`, `transcoder_error`); `clip` is `null` when nothing was kept |
+| ← | `{"type": "error", "code", "detail"}` | Not started; the socket stays open. `code`: `busy`, `not_in_room`, `bad_request`, `unavailable` (no ffmpeg), `transcoder_error` |
+| ← | `{"type": "live", "id", "user_id", "name", "url"?}` | To everyone else: a walkie talk started; `url` (to play) only in the room |
+| ← | `{"type": "ended", "id", "user_id", "reason", "clip"}` | The talk ended (`stopped`, `disconnected`, `left_room`, `max_length`, `idle`, `too_large`, `transcoder_error`): to everyone for a walkie talk, to the talker for a message; `clip` is `null` when nothing was kept |
+| ← | `{"type": "clip", "clip"}` / `{"type": "clip_deleted", "id"}` | To everyone: a message was kept / deleted by its author |
 | → | `{"type": "ping"}` | Answered with `{"type": "pong"}` |
 
 ## Remote deployment (ESP32 relay + self-hosted MQTT + Cloudflare Tunnel)
