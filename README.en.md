@@ -452,6 +452,11 @@ the VM's own ports; the relay reaches the broker over `wss://` through the tunne
 The service's port is bound to the VM's loopback (`127.0.0.1:8090`) only. To reach the web UI other than through
 the tunnel, use an SSH tunnel (`ssh -L 8090:127.0.0.1:8090 <vm>`).
 
+The compose network has a fixed subnet (`172.30.77.0/24`) and `cloudflared` a fixed address in it; the service
+trusts `X-Forwarded-For` from that address only (`FORWARDED_ALLOW_IPS`), so the activity log and the sign-in throttle
+see each visitor's own IP. If that subnet clashes with one on the VM, change all three values together, then
+`docker compose down` and `up -d` (Compose won't change an existing network).
+
 A managed broker (HiveMQ Cloud, EMQX Cloud, ...) also works: point `MQTT_HOST`/`MQTT_PORT`/`MQTT_TLS` at it
 instead of the `mosquitto` service, and give the relay its host, port 8883 and TLS.
 

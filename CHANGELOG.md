@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Security
+- Remote deployment (Docker): the service now trusts `X-Forwarded-For` from cloudflared only, which gets a fixed
+  address on a pinned compose subnet. Before, every visitor showed up as cloudflared's container, so the activity
+  log had one IP for everyone and one person's failed sign-ins throttled all. Upgrading needs
+  `docker compose down` once, because Compose won't change an existing network's subnet.
+
 ## [0.6.1] - 2026-11-05
 
 ### Added
