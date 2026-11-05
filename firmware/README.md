@@ -9,7 +9,7 @@ fetches it (from the speaker service or the cloud).
 [server / cloud] --MQTT or HTTP--> [ESP32 relay] --Cast (TLS :8009)--> [speaker] --HTTP--> audio URL
 ```
 
-> **Status:** builds for `esp32dev`, `esp32-s3` and `esp8266` (D1 mini / NodeMCU); the Cast codec and the play state machine have
+> **Status:** builds for `esp32dev`, `esp32-s3` and `esp8266` (D1 mini / NodeMCU); the Cast codec, the play state machine and the connectivity watchdog have
 > host unit tests. Tested on an ESP32-D0WDQ6 (`esp32dev`) with a Xiaomi Mi Smart Speaker over MQTT:
 > status, volume, play, pause/resume/stop, and the speaker service's announcements, YouTube and
 > resume-after-announcement, over plain MQTT and over MQTT on WebSocket (Mosquitto `ws://`). ESP32-S3 and ESP8266 are not yet tested on hardware.
@@ -22,7 +22,7 @@ Needs [PlatformIO](https://platformio.org/install/cli).
 cd firmware
 pio run -e esp32dev -t upload     # or -e esp32-s3, -e esp8266
 pio device monitor                # 115200 baud
-pio test -e native                # codec and play-state tests on your computer
+pio test -e native                # codec, play-state and watchdog tests on your computer
 ```
 
 ## ESP32 or ESP8266?
@@ -51,6 +51,12 @@ TLS records (probed on each connect). If you see out-of-memory resets, use an ES
 Hold the **BOOT** button for 3 s while powering on to wipe settings and return to setup.
 Once configured, the board never reopens the setup access point on its own: if Wi-Fi is down it keeps
 retrying the saved network. To change networks or fix a wrong password, use `POST /api/config` or hold BOOT.
+
+A connectivity watchdog (from 0.2.1) keeps a configured board from staying offline: with Wi-Fi down for
+60 s it joins the network again (every 60 s), and it restarts itself after 10 minutes without Wi-Fi, or
+after 10 minutes with Wi-Fi up but no MQTT connection (when a broker is set). Settings live in flash, so a
+restart is safe. The status JSON's `reset_reason` (`power_on`, `software`, `watchdog_wifi`, `watchdog_mqtt`,
+`panic`, `hw_watchdog`, `brownout`, ...) tells why the board last started.
 
 ## Commands
 
@@ -84,7 +90,7 @@ briefly (mDNS lookup and TLS handshake).
 
 Over MQTT, add an `"id"` to match replies: results go to `<base>/result` (with the firmware `version`),
 a retained status is published to `<base>/status` every 30 s and within a second of any change (app,
-player state, track, volume) with `proto`, `seq` and `uptime`, and `<base>/online` is `true`/`false`
+player state, track, volume) with `proto`, `seq`, `uptime` and `reset_reason`, and `<base>/online` is `true`/`false`
 (last will). `media` includes `content_type` and `duration` when the speaker reports them.
 `<base>` defaults to `speaker-relay/<device-name>`.
 

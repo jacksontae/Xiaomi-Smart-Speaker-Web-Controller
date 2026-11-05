@@ -51,6 +51,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Expired sessions are deleted at start-up and hourly, not only when someone signs in.
 
 ### Fixed
+- Relay firmware 0.2.1: a board that lost Wi-Fi or its MQTT connection could stay offline until power-cycled.
+  A watchdog now rejoins Wi-Fi after 60 s down and restarts the board after 10 minutes without Wi-Fi or without
+  MQTT; its status has `reset_reason` (e.g. `watchdog_wifi`, `watchdog_mqtt`) to show why it last started.
 - Android: a page left before it finished loading no longer leaves its floating button (FAB) on the next page.
 - Android: members' avatars (Members, Account, Talkie) have white initials again; they were dark on the dark
   member colours and hard to read.
