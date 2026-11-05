@@ -20,6 +20,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Playlists are sorted into Music and Announcements (playlists of announcements only) inside My playlists, Shared and
   Members' playlists. `GET /playlists` items have `tts_only`; empty and mixed playlists count as music.
 
+### Fixed
+- Android: a page left before it finished loading no longer leaves its floating button (FAB) on the next page.
+
 ## [0.6.0] - 2026-11-05
 
 ### Added

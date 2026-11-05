@@ -100,17 +100,22 @@ function makeCtx(params = [], route = null) {
 function unmountView() {
   if (!view) return;
   try { if (view.destroy) view.destroy(); } catch (e) { console.error(e); }
-  view.abort.abort();
-  view.cleanups.forEach((f) => { try { f(); } catch (e) { console.error(e); } });
+  drop(view);
   view = null;
+}
+function drop(made) {
+  made.abort.abort();
+  made.cleanups.forEach((f) => { try { f(); } catch (e) { console.error(e); } });
 }
 
 /** Mount a view result into `host`. `mod.render(ctx)` may return a node, a view object, or a Promise of either.
  *  Resolves 'vt' when the swap ran as a view transition (a crossfade: no blank frame, the header stays put),
  *  true for a plain swap, false when a newer navigation won. */
 async function mount(mod, host, made, seq, animate) {
-  let v = await mod.render(made.ctx);
-  if (seq !== renderSeq) { made.abort.abort(); if (v && v.destroy) v.destroy(); return false; }
+  let v;
+  try { v = await mod.render(made.ctx); } catch (e) { drop(made); throw e; }
+  // a newer navigation won while this page rendered: undo what it already set up outside its node (an Android FAB)
+  if (seq !== renderSeq) { if (v && v.destroy) v.destroy(); drop(made); return false; }
   if (v instanceof Node) v = { node: v };
   view = { ...v, abort: made.abort, cleanups: made.cleanups };
   const swap = () => { host.replaceChildren(v.node); window.scrollTo(0, 0); };
