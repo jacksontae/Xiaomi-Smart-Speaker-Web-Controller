@@ -9,7 +9,7 @@ import { get as getPref, set as setPref, motionReduced, onChange as onPrefs } fr
 import { googleCredential } from './signin.js';
 import { createPasskey, createError, passkeyCapable, deviceName } from './passkey-offer.js';
 import { glyph } from './icons.js';
-import { card, badge, tile, gMark, fmtDay, fmtWhen, toneOf, initialOf, settingRow, linkRow, switchInput } from './kit.js';
+import { card, badge, tile, gMark, fmtDay, fmtWhen, toneStyle, initialOf, settingRow, linkRow, switchInput } from './kit.js';
 import { hearing as hearTalkie, setHearing as setHearTalkie } from './talkie.js';
 
 register({
@@ -89,7 +89,7 @@ export async function freshAuth(ctx) {
 /** Avatar, name (with the pencil when ctx is given), username and role. */
 export function profileHead(user, ctx) {
   return h('div', { class: 'ca-head' },
-    h('span', { class: 'avatar lg', style: { background: toneOf(user.id) }, 'aria-hidden': 'true' }, initialOf(user.display_name)),
+    h('span', { class: 'avatar lg', style: toneStyle(user.id), 'aria-hidden': 'true' }, initialOf(user.display_name)),
     h('div', { class: 'ca-head-tx' }, ctx ? nameLine(ctx, user) : h('p', { class: 'ca-name' }, user.display_name), h('p', { class: 'small' }, t('ca.username', user.username))),
     badge(roleLabel(user.role), user.role === 'admin' ? '' : 'plain'));
 }

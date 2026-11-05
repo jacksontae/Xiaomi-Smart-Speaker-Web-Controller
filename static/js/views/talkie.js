@@ -9,7 +9,7 @@
 // nothing goes to the speaker while this device plays the music, so announcing means switching the output back.
 import { h, icon, segmented } from '../ui.js';
 import { register, t, fmtRel, fmtDur } from '../i18n.js';
-import { badge, toneOf, initialOf } from '../kit.js';
+import { badge, toneStyle, initialOf } from '../kit.js';
 import { glyph } from '../icons.js';
 import { isPhone } from '../sheet.js';
 import { ibtn, deleteLater, isPending, undoDelete } from '../media-kit.js';
@@ -91,7 +91,7 @@ function bars(id) {
 }
 
 function face(person, size = '') {
-  return h('span', { class: `avatar tw-av ${size}`.trim(), 'aria-hidden': 'true', style: { background: toneOf(person.user_id ?? person.id) } }, initialOf(person.name));
+  return h('span', { class: `avatar tw-av ${size}`.trim(), 'aria-hidden': 'true', style: toneStyle(person.user_id ?? person.id) }, initialOf(person.name));
 }
 
 const liveBars = (cls = '') => h('span', { class: `tw-bars ${cls}`.trim(), 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i'), h('i'));

@@ -608,6 +608,8 @@ config.example.json    Example settings (copied to config.json)
 ## Contributing
 
 Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first (PRs go to the `dev` branch).
+After adding or upgrading a dependency, regenerate the Licenses page with
+`python scripts/gen_licenses.py --venv <a venv with requirements.txt installed>` (see `--help`).
 Report security problems as described in [SECURITY.md](SECURITY.md). Everyone follows the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 

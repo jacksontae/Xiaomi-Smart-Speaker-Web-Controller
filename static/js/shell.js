@@ -6,7 +6,7 @@
 // Talkie (on "This device"): the unread voice messages on the nav item, and a "join the Walkie" chip on other pages.
 import { h, icon, avatar, field, passwordInput, busy, tip, toast } from './ui.js';
 import { t, roleLabel } from './i18n.js';
-import { toneOf, initialOf } from './kit.js';
+import { toneStyle, initialOf } from './kit.js';
 import * as talkie from './talkie.js';
 import { ROUTES, RANK, href, labelKey } from './routes.js';
 import { openSheet, popover, isPhone, closePopover } from './sheet.js';
@@ -344,7 +344,7 @@ export function buildShell({ user, api, allowed, output = 'speaker', onSignOut, 
       box.classList.toggle('talking', !!live);
       lead.replaceChildren(live ? h('span', { class: 'tw-bars' }, h('i'), h('i'), h('i'), h('i')) : glyph('mic', 'tw-hint-mic'));
       faces.replaceChildren(...(live ? [{ id: live.user_id, name: live.name }] : others.slice(0, HINT_FACES))
-        .map((p) => h('span', { class: 'avatar tw-hint-av', style: { background: toneOf(p.id) } }, initialOf(p.name))));
+        .map((p) => h('span', { class: 'avatar tw-hint-av', style: toneStyle(p.id) }, initialOf(p.name))));
       text.textContent = live ? t('tkg.talking', first(live.name)) : t('tkg.onWalkie', others.length);
       hide.hidden = !!live;
     }

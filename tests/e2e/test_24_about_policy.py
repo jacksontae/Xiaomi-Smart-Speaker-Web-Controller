@@ -140,8 +140,13 @@ def test_licenses_rows_open_to_their_text(make_app, seeded):
     expect(fp.locator(".li-cr")).to_have_text("Copyright 2019 The Anuphan Project Authors")
     expect(fp.locator(".li-text")).to_contain_text("SIL OPEN FONT LICENSE")
     # this app's MIT license
+    show = p.locator(".li-own .li-show")
+    expect(show).to_have_text("Show text")
     p.locator(".li-own summary").click()
     expect(p.locator(".li-own .li-text")).to_contain_text("Copyright (c) 2026 Jackson Tae")
+    expect(show).to_have_text("Hide text")
+    p.locator(".li-own summary").click()
+    expect(show).to_have_text("Show text")
     # the notices
     expect(p.locator(".li-n")).to_have_count(3)
     app.clean("licenses")

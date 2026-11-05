@@ -8,7 +8,7 @@
 import { h, append, icon, iconBtn, field, passwordInput, busy, segmented, tip, toast, headerSub } from '../ui.js';
 import { register, t, roleLabel } from '../i18n.js';
 import { errorText } from '../api.js';
-import { card, badge, linkRow, tile, switchInput, settingRow, phoneBack, fmtWhen, gMark, toneOf, initialOf } from '../kit.js';
+import { card, badge, linkRow, tile, switchInput, settingRow, phoneBack, fmtWhen, gMark, toneStyle, initialOf } from '../kit.js';
 import { isAndroid } from '../prefs.js';
 import { kitCss, fab, fullDialog } from '../android-kit.js';
 import { glyph } from '../icons.js';
@@ -180,7 +180,7 @@ export function render(ctx) {
       type: 'button', class: 'm-row', role: 'listitem', 'aria-current': desk() && u.id === selected ? 'true' : null,
       onclick: () => open(u.id),
     },
-    h('span', { class: 'avatar', style: { background: toneOf(u.id) }, 'aria-hidden': 'true' }, initialOf(u.display_name)),
+    h('span', { class: 'avatar', style: toneStyle(u.id), 'aria-hidden': 'true' }, initialOf(u.display_name)),
     h('span', { class: 'm-tx' },
       h('span', { class: 'm-name' }, u.display_name, self ? ` ${t('mem.you')}` : ''),
       h('span', { class: 'm-seen' }, h('b', {}, u.username), ' ', seen),
@@ -258,7 +258,7 @@ export function render(ctx) {
     });
 
     const head = sheet ? null : h('div', { class: 'm-ed-head' },
-      h('span', { class: 'avatar lg', style: { background: toneOf(u.id) }, 'aria-hidden': 'true' }, initialOf(u.display_name)),
+      h('span', { class: 'avatar lg', style: toneStyle(u.id), 'aria-hidden': 'true' }, initialOf(u.display_name)),
       h('div', { class: 'm-ed-ht' }, h('p', { class: 'm-ed-name' }, u.display_name), h('p', { class: 'small' }, t('mem.usernameLine', u.username))),
       isAndroid() ? save : null);
 

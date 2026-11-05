@@ -10,7 +10,7 @@ import { policyPage, fine, extLink, extMark } from '../policy-kit.js';
 register({
   en: {
     'li.lead': 'Speaker Web Controller is free software. It’s built on the open-source parts below; tap one to see its license.',
-    'li.app': 'This app', 'li.mit': 'MIT License', 'li.show': 'Show text',
+    'li.app': 'This app', 'li.mit': 'MIT License', 'li.show': 'Show text', 'li.hide': 'Hide text',
     'li.notices': 'Notices',
     'li.font': 'Anuphan font', 'li.fontT': 'Copyright 2019 The Anuphan Project Authors. Licensed under the SIL Open Font License 1.1.',
     'li.ffmpegT': 'This software uses FFmpeg (ffmpeg.org) under the LGPL 2.1 or the GPL, depending on how it was built.',
@@ -29,7 +29,7 @@ register({
   },
   th: {
     'li.lead': 'Speaker Web Controller เป็นซอฟต์แวร์เสรี สร้างจากซอฟต์แวร์โอเพนซอร์สด้านล่าง แตะรายการเพื่อดูสัญญาอนุญาต',
-    'li.app': 'แอปนี้', 'li.mit': 'สัญญาอนุญาต MIT', 'li.show': 'ดูข้อความ',
+    'li.app': 'แอปนี้', 'li.mit': 'สัญญาอนุญาต MIT', 'li.show': 'ดูข้อความ', 'li.hide': 'ซ่อนข้อความ',
     'li.notices': 'ประกาศที่ต้องแสดง',
     'li.font': 'ฟอนต์ Anuphan', 'li.fontT': 'Copyright 2019 The Anuphan Project Authors ใช้ภายใต้ SIL Open Font License 1.1',
     'li.ffmpegT': 'ซอฟต์แวร์นี้ใช้ FFmpeg (ffmpeg.org) ภายใต้ LGPL 2.1 หรือ GPL แล้วแต่วิธีที่คอมไพล์',
@@ -98,10 +98,15 @@ export async function render(ctx) {
   };
 
   const ownText = h('pre', { class: 'li-text', tabindex: 0 });
-  const own = h('details', { class: 'c-card li-own', ontoggle: (e) => { if (e.currentTarget.open) fill(ownText, data.app.text); } },
+  const showLabel = h('span', { class: 'li-show' }, t('li.show'));
+  const own = h('details', { class: 'c-card li-own', ontoggle: (e) => {
+    const open = e.currentTarget.open;
+    showLabel.textContent = t(open ? 'li.hide' : 'li.show');
+    if (open) fill(ownText, data.app.text);
+  } },
     h('summary', { class: 'c-row c-link' }, tile(glyph('file'), 'accent'),
       h('span', { class: 'c-row-tx' }, h('span', { class: 'c-title' }, data.app.name), h('span', { class: 'c-sub' }, t('li.mit'))),
-      h('span', { class: 'li-show' }, t('li.show')), icon('chev-down', 'sm li-chev')),
+      showLabel, icon('chev-down', 'sm li-chev')),
     h('div', { class: 'li-a' }, ownText));
 
   const notice = (ic, title, txt) => h('div', { class: 'c-row li-n' }, tile(ic, 'lamp'),

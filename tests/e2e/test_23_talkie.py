@@ -2,10 +2,15 @@
 speaker from there, so there is no speaker side to switch to). Two tabs: Walkie (live to the members who have it
 open, as cards) and Voice messages (kept a day, delete with Undo). Chrome's fake mic does the talking; other pages
 show a "join the Walkie" chip and the nav counts the messages not played yet."""
+import contextlib
 import re
 
+import httpx
 import pytest
 from playwright.sync_api import expect
+from websockets.sync.client import connect
+
+from .e2ekit import BASE, pw
 
 
 def on_this_device(app, route="announce"):
@@ -30,6 +35,29 @@ def hold(app, button, state_of, ms):
     p.mouse.down()
     expect(state_of).to_have_attribute("data-state", "live", timeout=10_000)
     p.wait_for_timeout(ms)  # talk for a bit (the fake mic beeps)
+
+
+@contextlib.contextmanager
+def walkie_members(api, n):
+    """`n` extra members in the Walkie without a browser each: a signed-in /talkie socket per member, in the room.
+    The sockets close and the members are deleted afterwards."""
+    users = []
+    try:
+        with contextlib.ExitStack() as socks:
+            for i in range(n):
+                spec = {"username": f"walkie{i}", "display_name": f"Walkie{i} Member",
+                        "password": pw(f"walkie{i}-pass"), "role": "viewer"}
+                users.append(api.ensure_user(spec))
+                r = httpx.post(f"{BASE}/auth/login", headers={"X-Requested-With": "speaker-web"},
+                               json={"username": spec["username"], "password": spec["password"]})
+                r.raise_for_status()
+                ws = socks.enter_context(connect(f"{BASE.replace('http', 'ws', 1)}/talkie?room=1", origin=BASE,
+                                                 additional_headers={"Cookie": f"sid={r.cookies['sid']}"}))
+                assert '"hello"' in ws.recv(timeout=10)
+            yield users
+    finally:
+        for u in users:
+            api.delete(f"/users/{u['id']}")
 
 
 def test_operator_gets_only_talkie(make_app, seeded):
@@ -81,6 +109,35 @@ def test_viewer_gets_only_talkie(make_app, seeded):
     expect(p.locator(".tw-label")).to_have_text("กดค้างเพื่อพูด")
     expect(p.locator(".tw-pc.me .tw-pc-n")).to_have_text("คุณ")
     app.clean("talkie viewer")
+
+
+def test_phone_room_folds_into_plus_card(make_app, seeded):
+    """A phone shows 6 member cards at most: past that, 5 and a "+N" card that opens the rest. On Android, whose theme
+    avatar is light with dark letters, the members' own (dark) tones keep white letters."""
+    app = make_app("viewer", device="android", route="now")
+    p = on_this_device(app)
+    with walkie_members(seeded, 7):  # 8 in the room with me
+        expect(p.locator(".tw-room .tw-cap")).to_have_text("In the room · 8")
+        cards = p.locator(".tw-grid > [role=listitem]")
+        expect(cards).to_have_count(6)
+        expect(p.locator(".tw-grid .tw-pc:not(.tw-pc-more)")).to_have_count(5)
+        expect(p.locator(".tw-pc.me")).to_have_count(1)
+        more = p.get_by_role("button", name="Show 3 more")
+        expect(more).to_have_text("+3")
+        expect(cards.last).to_contain_text("+3")  # the last card
+        box, first = more.bounding_box(), p.locator(".tw-pc").first.bounding_box()
+        assert abs(box["height"] - first["height"]) < 1  # the same size as a member card
+        more.click()
+        expect(more).to_have_count(0)
+        expect(p.locator(".tw-grid .tw-pc")).to_have_count(8)
+        colors = p.locator(".tw-pc .avatar").evaluate_all("els => els.map((e) => getComputedStyle(e).color)")
+        assert colors and set(colors) == {"rgb(255, 255, 255)"}, colors
+        for i in range(7):
+            expect(p.locator(".tw-pc", has_text=f"Walkie{i}")).to_have_attribute("aria-label",
+                                                                                 f"Walkie{i} Member: Listening")
+    expect(p.locator(".tw-room .tw-cap")).to_have_text("In the room · 1")
+    expect(p.locator(".tw-grid .tw-pc")).to_have_count(1)
+    app.clean("talkie plus card")
 
 
 def test_walkie_cards_and_join_chip(make_app, seeded):
