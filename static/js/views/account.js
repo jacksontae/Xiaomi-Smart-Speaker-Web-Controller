@@ -4,7 +4,7 @@
 import { h, icon, busy } from '../ui.js';
 import { register, t, roleLabel, lang } from '../i18n.js';
 import { isPhone } from '../sheet.js';
-import { caption, card, linkRow, tile, toneOf, initialOf } from '../kit.js';
+import { caption, card, linkRow, tile, toneStyle, initialOf } from '../kit.js';
 import { freshAuth, googleRow, passkeySection, nameLine } from '../account-kit.js';
 import { large } from './prefs.js';
 import { glyph } from '../icons.js';
@@ -24,7 +24,7 @@ export async function render(ctx) {
   const admin = ctx.can('admin');
 
   const head = h('div', { class: 'ca-head acc-head' },
-    h('span', { class: 'avatar lg', style: { background: toneOf(user.id) }, 'aria-hidden': 'true' }, initialOf(user.display_name)),
+    h('span', { class: 'avatar lg', style: toneStyle(user.id), 'aria-hidden': 'true' }, initialOf(user.display_name)),
     h('div', { class: 'ca-head-tx' }, nameLine(ctx, user), h('p', { class: 'small' }, t('acc.who', user.username, roleLabel(user.role)))));
 
   let manage = null;

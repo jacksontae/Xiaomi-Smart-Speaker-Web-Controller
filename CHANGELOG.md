@@ -44,6 +44,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 - Android: a page left before it finished loading no longer leaves its floating button (FAB) on the next page.
+- Android: members' avatars (Members, Account, Talkie) have white initials again; they were dark on the dark
+  member colours and hard to read.
 
 ## [0.6.0] - 2026-11-05
 

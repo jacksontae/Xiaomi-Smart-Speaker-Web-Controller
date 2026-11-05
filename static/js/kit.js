@@ -111,3 +111,6 @@ export { sameDay };
 const AVATAR_TONES = ['#2f5f6a', '#a3365a', '#5a6b8c', '#6b5a2f', '#3d6b4f', '#6a4c7d'];
 /** Avatar background per member, stable by id. */
 export const toneOf = (id) => AVATAR_TONES[(Number(id) || 0) % AVATAR_TONES.length];
+/** The inline style of a member's avatar: their tone, with white letters (every tone is dark; the theme's
+ *  --on-avatar goes with its own --avatar, which is light on Android). */
+export const toneStyle = (id) => ({ background: toneOf(id), color: '#fff' });
