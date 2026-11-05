@@ -19,6 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   the speaker's Announce page at the top, viewers talk too. "Hear Talkie on this device" in App settings
   (`WebSocket /talkie`, `GET /talkie/clips`, `GET /talkie/clips/{id}.mp3`, `GET /talkie/live/{id}`; clips in
   `TALKIE_DIR`; database schema 8).
+- UI design reference in `docs/design/`: one HTML page with screenshots of every screen on each device, theme and
+  language, for anyone designing on top of the app.
 
 ### Changed
 - Android: a short context line under the big page title says what matters on that page: what the speaker (or This

@@ -462,7 +462,7 @@ config.example.json    ตัวอย่างไฟล์ตั้งค่า
 
 ## Contributing
 
-ยินดีรับ issue และ pull request ครับ อ่าน [CONTRIBUTING.md](CONTRIBUTING.md) ก่อน (PR ส่งเข้า branch `dev`)
+ยินดีรับ issue และ pull request ครับ อ่าน [CONTRIBUTING.md](CONTRIBUTING.md) ก่อน (PR ส่งเข้า branch `dev`) ภาพทุกหน้าจอสำหรับใช้เป็นต้นแบบดีไซน์อยู่ที่ [docs/design](docs/design/)
 รายงานช่องโหว่ด้านความปลอดภัยตาม [SECURITY.md](SECURITY.md) · ทุกคนต้องปฏิบัติตาม [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## Disclaimer
