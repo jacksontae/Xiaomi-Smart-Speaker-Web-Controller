@@ -6,8 +6,9 @@ import { motionReduced, onChange as onPrefs } from './prefs.js';
 import { h, icon, toast } from './ui.js';
 import { openSheet, popover, closeAllSheets } from './sheet.js';
 import { buildShell } from './shell.js';
-import { RANK, ROUTES, parseHash } from './routes.js';
+import { RANK, ROUTES, parseHash, labelKey } from './routes.js';
 import * as local from './local-player.js';
+import * as talkie from './talkie.js';
 
 const POLL_MS = 4000;
 const appEl = document.getElementById('app');
@@ -28,6 +29,7 @@ const LOCAL_ROUTES = new Set(['now', 'music', 'playlists']);
 let routeId = null;
 // Any signed-in member may pick it, viewers too: it plays only in their own browser and never reaches the speaker.
 const deviceOutput = () => local.isDevice() && !!state.user;
+const outputName = () => (deviceOutput() ? 'device' : 'speaker');
 // a route's `device` role applies while this device is the output (Music opens to viewers then, see routes.js)
 const allowed = (r) => can(r.device && deviceOutput() ? r.device : r.min);
 const routedApi = (path, opts) => (deviceOutput() && local.intercept(path, opts)) || api(path, opts);
@@ -77,7 +79,7 @@ function makeCtx(params = [], route = null) {
       get auth() { return state.auth; },
       get status() { return viewStatus().status; },
       get statusError() { return viewStatus().error; },
-      get output() { return deviceOutput() ? 'device' : 'speaker'; },
+      get output() { return outputName(); },
       signal: abort.signal,
       onCleanup: (fn) => cleanups.push(fn),
       header: (opts) => (shell ? shell.header(opts) : h('h1', {}, opts.title)),
@@ -144,6 +146,7 @@ setUnauthorizedHandler(() => {
   if (!state.user) return;
   state.user = null;
   stopPolling();
+  talkie.stop();
   closeAllSheets();
   toast(t('err.session'), 'err');
   boot();
@@ -187,6 +190,7 @@ function startApp() {
   mountShell();
   render(false);
   startPolling();
+  talkie.start({ user: state.user, go: (hash) => { location.hash = hash; } }); // the walkie-talkie, on every page
   prefetchRoutes();
   // passkey offer after a fresh sign-in / "passkey required" prompt (team C module; guards itself to once per load)
   import('./passkey-offer.js').then((m) => m.maybePrompt({ api, user: state.user, fresh: !(state.auth && state.auth.user) })).catch(() => {});
@@ -196,12 +200,12 @@ function startApp() {
 
 function mountShell() {
   if (shell) shell.destroy();
-  shell = buildShell({ user: state.user, api, allowed, onSignOut: signOut, onPickSpeaker: pickOutput, onCommand: command });
+  shell = buildShell({ user: state.user, api, allowed, output: outputName(), onSignOut: signOut, onPickSpeaker: pickOutput, onCommand: command });
   appEl.replaceChildren(shell.el);
   applySpeakers();
   shell.setStatus(state.status, state.statusErr);
 }
-const navKey = () => ROUTES.filter(allowed).map((r) => r.id).join();
+const navKey = () => ROUTES.filter(allowed).map((r) => `${r.id}:${labelKey(r, outputName())}`).join();
 
 /** The speaker picker: the real speaker, or this device. Only this browser changes. */
 function pickOutput(s) {
@@ -209,7 +213,8 @@ function pickOutput(s) {
   local.setOutput(s.id === 'device' ? 'device' : 'speaker');
   toast(s.id === 'device' ? t('out.nowDevice') : t('spk.switched', s.name), 'ok');
   if (navKey() !== nav) {
-    // the nav changed (a viewer gains or loses Music): rebuild it, and leave a page this output doesn't offer
+    // the nav changed (a viewer gains or loses Music, Announce becomes Talkie): rebuild it, and leave a page this
+    // output doesn't offer
     if (!allowed(parseHash().route)) history.replaceState(null, '', '#/');
     mountShell();
   }
@@ -219,6 +224,7 @@ function pickOutput(s) {
 
 async function signOut(path) {
   local.stop(); // the output choice stays for this browser; the music stops with the session
+  talkie.stop();
   try { await api(path, { method: 'POST', allow401: true }); } catch (e) { if (e.status !== 401) { fail(e); throw e; } }
   state.user = null;
   state.status = null;
@@ -263,7 +269,7 @@ async function render(animate = true) {
   }
   // a 401 while the page loaded signs out and tears the shell down
   if (!ok || !shell || seq !== renderSeq) return;
-  document.title = `${t(route.label)} · ${t('app.name')}`;
+  document.title = `${t(labelKey(route, outputName()))} · ${t('app.name')}`;
   shell.onScroll();
   const page = shell.content.firstElementChild;
   // browsers without view transitions: a short fade that never starts from blank
@@ -284,7 +290,7 @@ function pending(route, seq) {
     closeAllSheets();
     const rows = [0, 1, 2].map(() => h('div', { class: 'skel-row' }, h('span', { class: 'skel-dot' }), h('span', { class: 'skel-line' })));
     shell.content.replaceChildren(h('div', { class: 'page page-loading', 'aria-busy': 'true' },
-      shell.header({ title: t(route.label) }), h('div', { class: 'skel', role: 'status', 'aria-label': t('app.loading') }, rows)));
+      shell.header({ title: t(labelKey(route, outputName())) }), h('div', { class: 'skel', role: 'status', 'aria-label': t('app.loading') }, rows)));
     window.scrollTo(0, 0);
   }, PENDING_MS);
   return () => { clearTimeout(timer); progress.classList.remove('on'); };

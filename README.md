@@ -112,7 +112,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 
 | role | ทำอะไรได้ |
 |---|---|
-| `viewer` | ดูสถานะ คิว เพลย์ลิสต์ที่แชร์ และข้อความด่วน · ข้ามเพลง/ย้อน/เลือกเพลงในคิวของลำโพง · ค้นเพลง เล่นที่อุปกรณ์นี้ · อัปโหลดไฟล์และทำเพลย์ลิสต์ของตัวเอง (ส่วนตัว) |
+| `viewer` | ดูสถานะ คิว เพลย์ลิสต์ที่แชร์ และข้อความด่วน · ข้ามเพลง/ย้อน/เลือกเพลงในคิวของลำโพง · ค้นเพลง เล่นที่อุปกรณ์นี้ · อัปโหลดไฟล์และทำเพลย์ลิสต์ของตัวเอง (ส่วนตัว) · ทอล์คกี้ |
 | `operator` | viewer + ประกาศ เล่น ปรับเสียง หยุด/เล่นต่อ คุมคิว แก้เพลย์ลิสต์ที่แชร์และข้อความด่วน |
 | `admin` | operator + จัดการสมาชิก ตั้งค่า ค้นหาลำโพง ดูบันทึกกิจกรรม |
 
@@ -292,6 +292,32 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 | ← | `{"type": "error", "code", "detail"}` | ไม่ได้เริ่ม ปิดด้วย code `4400` bad_request · `4401` unauthorized · `4403` forbidden · `4409` busy · `4503` unavailable (ไม่มี ffmpeg) |
 
 ทดสอบเองได้ด้วย `python tests/manual/talk_stream.py --url ws://127.0.0.1:8090/talk --token $TOKEN --file clip.webm`
+
+### ทอล์คกี้ (Talkie)
+
+วิทยุสื่อสารระหว่างสมาชิกของ server นี้ เมื่อเลือกเล่นเพลงที่ "อุปกรณ์นี้" หน้าประกาศจะกลายเป็นทอล์คกี้ (operator และเจ้าของสลับ
+ทอล์คกี้/ลำโพง ได้ที่ด้านบน ผู้ชมเห็นแค่ทอล์คกี้) กดปุ่มค้างแล้วพูด ทุกคนที่เปิดแอปอยู่ได้ยินทันที (ช้าประมาณ 1–2 วินาที) และเก็บเป็นคลิป
+24 ชั่วโมงให้คนที่ไม่ได้ฟังฟังย้อนหลัง มีห้องเดียว พูดได้ทีละคน (แยกจากพูดสดที่ลำโพง) ปิดเสียงได้ทีละเครื่องในการตั้งค่าแอป ("ฟังทอล์คกี้บนอุปกรณ์นี้")
+
+- `WebSocket /talkie`: หน้าเว็บเปิดค้างไว้ทุกหน้าระหว่างที่ลงชื่อเข้าใช้ ยืนยันตัวตนด้วย cookie `sid` (ทุกบทบาท) และ `Origin` โดเมนเดียวกันเหมือน `/talk` ไม่รับ API token (`4403`) · server ตรวจ session ซ้ำทุกครั้งที่ได้ `ping` และ `start`
+- แปลงเสียงด้วย ffmpeg เหมือนพูดสด คลิปเป็นไฟล์ MP3 ใน `talkie/` ข้าง `data.db` (env `TALKIE_DIR`) · พูดสั้นกว่า 0.5 วินาทีไม่เก็บคลิป พูดได้นานสุด 60 วินาทีต่อครั้ง คลิปเกิน 24 ชั่วโมงถูกลบ ลบสมาชิกแล้วคลิปของคนนั้นหายด้วย · ไม่ลง activity
+
+| Method | Path | Role | Body | ทำอะไร |
+|---|---|---|---|---|
+| GET | `/talkie/clips` | viewer | – | คลิปใน 24 ชั่วโมงล่าสุด ใหม่สุดก่อน: `id`, `user_id`, `name`, `seconds`, `created_at`, `url` |
+| GET | `/talkie/clips/{id}.mp3` | viewer | – | ไฟล์ MP3 ของคลิป (รองรับ Range) |
+| GET | `/talkie/live/{id}` | viewer | – | การพูดที่กำลังเกิดขึ้น เป็น MP3 ตั้งแต่ต้น ส่งต่อเนื่องจนพูดจบ (`<audio>` ธรรมดาเล่นได้) |
+
+| ทิศทาง | ข้อความ | ความหมาย |
+|---|---|---|
+| ← | `{"type": "hello", "me", "online": [{"id", "name"}], "live": {"id", "user_id", "name", "url"} \| null, "clips"}` | ตอนเชื่อมต่อ |
+| ← | `{"type": "online", "online"}` | มีคนเปิดหรือปิดแอป (เปิดหลายแท็บนับครั้งเดียว) |
+| → | `{"type": "start", "mime"}` | เริ่มพูด (`mime` เหมือน `/talk`) |
+| ← | `{"type": "ready", "id", "max_seconds"}` | ส่ง binary frame ของ MediaRecorder แล้วจบด้วย `{"type": "stop"}` |
+| ← | `{"type": "error", "code", "detail"}` | ไม่ได้เริ่ม socket ยังเปิดอยู่ · `code`: `busy`, `bad_request`, `unavailable` (ไม่มี ffmpeg), `transcoder_error` |
+| ← | `{"type": "live", "id", "user_id", "name", "url"}` | ถึงทุกคนที่เหลือ: มีคนเริ่มพูด เล่น `url` |
+| ← | `{"type": "ended", "id", "user_id", "reason", "clip"}` | ถึงทุกคน: พูดจบ (`stopped`, `disconnected`, `max_length`, `idle`, `too_large`, `transcoder_error`) · `clip` เป็น `null` ถ้าไม่ได้เก็บ |
+| → | `{"type": "ping"}` | ได้ `{"type": "pong"}` |
 
 ## Remote deployment (ESP32 relay + self-hosted MQTT + Cloudflare Tunnel)
 

@@ -89,6 +89,10 @@ ROLE_TABLE = {
     ("POST", "/local/resolve"): "viewer",
     ("POST", "/local/played"): "viewer",
     ("GET", "/talk/status"): "operator",
+    # Talkie: every member talks to every other one (the /talkie WebSocket checks the same way).
+    ("GET", "/talkie/live/{talk_id}"): "viewer",
+    ("GET", "/talkie/clips"): "viewer",
+    ("GET", "/talkie/clips/{clip_id}.mp3"): "viewer",
     # Fetched by the speaker with signed URLs, or the public web UI.
     ("GET", "/tts.mp3"): "signed",
     ("GET", "/yt/{filename}"): "signed",
@@ -141,7 +145,8 @@ def test_role_table_covers_every_route(app):
 
 def _url(path):
     return path.format(user_id=999, playlist_id=999, item_id=999, phrase_id=999, schedule_id=999,
-                       passkey_id=999, favorite_id=999, file_id=999, sub_id=999, filename="x.m4a")
+                       passkey_id=999, favorite_id=999, file_id=999, sub_id=999, filename="x.m4a",
+                       talk_id="x", clip_id="x")
 
 
 def _call(client, method, path):

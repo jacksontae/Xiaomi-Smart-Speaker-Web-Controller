@@ -12,6 +12,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   the show; those episodes are marked New. Subscriptions are personal and go with the member
   (`GET`/`POST /podcasts/subs`, `POST /podcasts/subs/{id}/seen`, `DELETE /podcasts/subs/{id}`; `/podcasts/episodes`
   has the caller's `subscription`). Feeds are read a few at a time and cached for 15 minutes; database schema 7.
+- Talkie, a walkie-talkie between members: while This device is the music output, the Announce page (and its nav
+  label) is Talkie. Hold to talk; everyone with the app open hears it live on any page (a small "is talking" pill,
+  "Tap to listen" when the browser blocks the sound), and each talk is kept as a clip for 24 hours under Recent with
+  "Not played yet" per device. One room, one talker at a time, 60 seconds at most; operators and owners switch to
+  the speaker's Announce page at the top, viewers talk too. "Hear Talkie on this device" in App settings
+  (`WebSocket /talkie`, `GET /talkie/clips`, `GET /talkie/clips/{id}.mp3`, `GET /talkie/live/{id}`; clips in
+  `TALKIE_DIR`; database schema 8).
 
 ### Changed
 - Android: a short context line under the big page title says what matters on that page: what the speaker (or This

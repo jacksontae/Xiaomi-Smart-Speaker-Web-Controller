@@ -50,9 +50,32 @@ export async function askMic() {
   }
 }
 
+/** The mic level of `stream`, 0..1, to onLevel ~20 times a second (RMS from a real AnalyserNode). Returns close().
+ *  No Web Audio: the level stays at 0 and close() does nothing. */
+export function openMeter(stream, onLevel) {
+  let audio = null, timer = 0;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    audio = new Ctx();
+    const src = audio.createMediaStreamSource(stream);
+    const an = audio.createAnalyser();
+    an.fftSize = 1024;
+    src.connect(an);
+    const buf = new Float32Array(an.fftSize);
+    timer = setInterval(() => {
+      an.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      const rms = Math.sqrt(sum / buf.length);
+      onLevel(Math.min(1, Math.sqrt(rms) * 1.6)); // perceptual-ish: quiet speech still moves the bar
+    }, 50);
+  } catch { /* no Web Audio: the talk still works, the meter stays flat */ }
+  return () => { clearInterval(timer); if (audio) audio.close().catch(() => {}); onLevel(0); };
+}
+
 export function liveTalk({ onState = () => {}, onLevel = () => {} } = {}) {
   let state = 'idle';
-  let stream = null, audio = null, levelTimer = 0;
+  let stream = null, closeMeter = null;
   let ws = null, rec = null, pingTimer = 0, endTimer = 0;
   let ended = null;      // { reason, seconds } once the server said so
   let refused = null;    // { code, detail } from a server error frame
@@ -63,8 +86,8 @@ export function liveTalk({ onState = () => {}, onLevel = () => {} } = {}) {
 
   function cleanup() {
     gen += 1;
-    clearInterval(levelTimer); clearInterval(pingTimer); clearTimeout(endTimer);
-    levelTimer = pingTimer = endTimer = 0;
+    clearInterval(pingTimer); clearTimeout(endTimer);
+    pingTimer = endTimer = 0;
     try { if (rec && rec.state !== 'inactive') rec.stop(); } catch { /* already stopped */ }
     rec = null;
     if (ws) {
@@ -73,27 +96,7 @@ export function liveTalk({ onState = () => {}, onLevel = () => {} } = {}) {
       ws = null;
     }
     if (stream) { stream.getTracks().forEach((tr) => tr.stop()); stream = null; }
-    if (audio) { audio.close().catch(() => {}); audio = null; }
-    onLevel(0);
-  }
-
-  function meter() {
-    try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      audio = new Ctx();
-      const src = audio.createMediaStreamSource(stream);
-      const an = audio.createAnalyser();
-      an.fftSize = 1024;
-      src.connect(an);
-      const buf = new Float32Array(an.fftSize);
-      levelTimer = setInterval(() => {
-        an.getFloatTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-        const rms = Math.sqrt(sum / buf.length);
-        onLevel(Math.min(1, Math.sqrt(rms) * 1.6)); // perceptual-ish: quiet speech still moves the bar
-      }, 50);
-    } catch { /* no Web Audio: the talk still works, the meter stays flat */ }
+    if (closeMeter) { closeMeter(); closeMeter = null; } else onLevel(0);
   }
 
   async function start({ chime = true, volume = null } = {}) {
@@ -116,7 +119,7 @@ export function liveTalk({ onState = () => {}, onLevel = () => {} } = {}) {
     }
     if (my !== gen) { stream.getTracks().forEach((tr) => tr.stop()); return; } // cancelled while the prompt was up
     if (state !== 'connecting') set('connecting');
-    meter();
+    closeMeter = openMeter(stream, (v) => onLevel(v));
     try {
       rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
     } catch {
