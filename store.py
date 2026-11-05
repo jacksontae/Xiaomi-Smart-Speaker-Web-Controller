@@ -1,5 +1,5 @@
 """SQLite storage for accounts, passkeys, sessions, playlists, quick phrases, schedules, radio favourites,
-uploaded files, podcast subscriptions and the activity log.
+uploaded files, podcast subscriptions, Talkie clips and the activity log.
 
 Every call opens its own short-lived connection, so the store is safe to use from any thread.
 Writes that check-then-change (last-admin guard, reorder, first-run setup) run in one
@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 SESSION_TTL = 30 * 24 * 3600
 ACTIVITY_KEEP = 5000
 
@@ -184,6 +184,18 @@ MIGRATIONS = {
             UNIQUE (user_id, feed_url)
         )""",
     ],
+    8: [
+        # Talkie: the recordings of the walkie-talkie between members, kept for a day (the MP3s live in the data
+        # folder, `file` is the name there). id = the talk's id, which listeners already know from its live frame.
+        """CREATE TABLE IF NOT EXISTS talkie_clips (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            seconds REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            file TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS talkie_clips_created ON talkie_clips(created_at)",
+    ],
 }
 USER_SELECT = "SELECT u.*, EXISTS (SELECT 1 FROM passkeys p WHERE p.user_id = u.id) AS has_passkey FROM users u"
 SCHEDULE_COLUMNS = (
@@ -210,6 +222,10 @@ FILE_SELECT = (
     " LEFT JOIN users o ON o.id = m.owner_id"
 )
 SUB_COLUMNS = "id, feed_url, title, author, artwork, latest_at, seen_at, created_at"
+CLIP_SELECT = (
+    "SELECT c.id, c.user_id, u.display_name AS name, c.seconds, c.created_at, c.file"
+    " FROM talkie_clips c JOIN users u ON u.id = c.user_id"
+)
 PLAYLIST_COLUMNS = "p.id, p.name, p.updated_at, p.owner_id, o.display_name AS owner_name"
 PLAYLIST_FROM = "playlists p LEFT JOIN users o ON o.id = p.owner_id"
 
@@ -829,6 +845,41 @@ class Store:
     def delete_sub(self, user_id, sub_id):
         with self.tx() as db:
             return db.execute("DELETE FROM podcast_subs WHERE user_id = ? AND id = ?", (user_id, sub_id)).rowcount > 0
+
+    # --- Talkie clips ---
+
+    def add_clip(self, clip_id, user_id, seconds, file):
+        with self.tx() as db:
+            db.execute(
+                "INSERT INTO talkie_clips (id, user_id, seconds, created_at, file) VALUES (?, ?, ?, ?, ?)",
+                (clip_id, user_id, seconds, now_iso(), file),
+            )
+            return self.get_clip(clip_id, db=db)
+
+    def get_clip(self, clip_id, db=None):
+        if db is None:
+            with self.tx() as db:
+                return self.get_clip(clip_id, db)
+        row = db.execute(f"{CLIP_SELECT} WHERE c.id = ?", (clip_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_clips(self, since):
+        """Clips recorded at or after `since` (ISO, UTC), newest first, with the talker's name."""
+        with self.tx() as db:
+            return [dict(r) for r in db.execute(
+                f"{CLIP_SELECT} WHERE c.created_at >= ? ORDER BY c.created_at DESC, c.rowid DESC", (since,),
+            )]
+
+    def user_clip_files(self, user_id):
+        with self.tx() as db:
+            return [r[0] for r in db.execute("SELECT file FROM talkie_clips WHERE user_id = ?", (user_id,))]
+
+    def expire_clips(self, before):
+        """Delete clips recorded before `before` (ISO, UTC); returns their file names."""
+        with self.tx(immediate=True) as db:
+            files = [r[0] for r in db.execute("SELECT file FROM talkie_clips WHERE created_at < ?", (before,))]
+            db.execute("DELETE FROM talkie_clips WHERE created_at < ?", (before,))
+            return files
 
     # --- Activity ---
 

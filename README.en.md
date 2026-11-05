@@ -103,6 +103,7 @@ Environment variables used by the service:
 | `DATA_PATH` | `./data.db` | SQLite database |
 | `CACHE_DIR` | `./cache` | YouTube cache |
 | `MEDIA_DIR` | `media/` next to `data.db` | Uploaded files |
+| `TALKIE_DIR` | `talkie/` next to `data.db` | Talkie clips (kept 24 hours) |
 | `UPLOAD_MAX_MB` · `UPLOAD_QUOTA_MB` | `50` · `2000` | Size limit per upload · for all uploads together |
 | `YT_FORMAT` | `bestaudio[ext=m4a]/bestaudio` | yt-dlp format |
 | `FFMPEG` | `ffmpeg` | ffmpeg binary (live talk, SponsorBlock cuts) |
@@ -138,7 +139,7 @@ always `{"detail": "..."}`.
 
 | role | can do |
 |---|---|
-| `viewer` | See status, queue, shared playlists and quick phrases · skip/back/pick a track in the speaker's queue · search music and play on "This device" · upload files and make their own (personal) playlists |
+| `viewer` | See status, queue, shared playlists and quick phrases · skip/back/pick a track in the speaker's queue · search music and play on "This device" · upload files and make their own (personal) playlists · Talkie |
 | `operator` | viewer + announce, play, set volume, pause/resume/stop, control the queue, edit shared playlists, quick phrases and schedules, radio and podcasts, upload shared files, live talk |
 | `admin` | operator + manage members, settings, speaker discovery, activity log, rename or delete any uploaded file |
 
@@ -372,6 +373,38 @@ them to MP3 with ffmpeg and has the speaker play the link `/talk/<id>/live` as a
 | ← | `{"type": "error", "code", "detail"}` | Not started, closed with `4400` bad_request · `4401` unauthorized · `4403` forbidden · `4409` busy · `4503` unavailable (no ffmpeg) |
 
 To test by hand: `python tests/manual/talk_stream.py --url ws://127.0.0.1:8090/talk --token $TOKEN --file clip.webm`
+
+### Talkie
+
+A walkie-talkie between the members of this server. While "This device" is the music output, the Announce page is
+the Talkie (operators and owners switch between Talkie and Speaker at the top; viewers only get Talkie). Hold the
+button to talk: everyone with the app open hears it live (about 1–2 seconds behind), and the talk is kept as a clip
+for 24 hours for those who weren't listening. One room, one talker at a time (separate from live talk on the speaker).
+Each device can turn the sound off in App settings ("Hear Talkie on this device").
+
+- `WebSocket /talkie`: the web app keeps it open on every page while signed in. Authentication: the `sid` cookie
+  (any role) and a same-site `Origin`, as for `/talk`; the API token is refused (`4403`). The server re-checks the
+  session on every `ping` and `start`.
+- Recordings go through ffmpeg like live talk; clips are MP3 files in `talkie/` next to `data.db` (`TALKIE_DIR`).
+  Talks shorter than 0.5 seconds keep no clip, a talk ends after 60 seconds, clips older than 24 hours are deleted,
+  and deleting a member deletes their clips. Nothing goes to the activity log.
+
+| Method | Path | Role | Body | Does |
+|---|---|---|---|---|
+| GET | `/talkie/clips` | viewer | – | The last 24 hours' clips, newest first: `id`, `user_id`, `name`, `seconds`, `created_at`, `url` |
+| GET | `/talkie/clips/{id}.mp3` | viewer | – | A clip's MP3 (Range requests work) |
+| GET | `/talkie/live/{id}` | viewer | – | The talk going on as one MP3 response from its start, ending when the talk does (a plain `<audio>` plays it) |
+
+| Direction | Message | Meaning |
+|---|---|---|
+| ← | `{"type": "hello", "me", "online": [{"id", "name"}], "live": {"id", "user_id", "name", "url"} \| null, "clips"}` | On connect |
+| ← | `{"type": "online", "online"}` | Someone opened or closed the app (several tabs count once) |
+| → | `{"type": "start", "mime"}` | Talk (same `mime` values as `/talk`) |
+| ← | `{"type": "ready", "id", "max_seconds"}` | Send MediaRecorder binary frames, then `{"type": "stop"}` |
+| ← | `{"type": "error", "code", "detail"}` | Not started; the socket stays open. `code`: `busy`, `bad_request`, `unavailable` (no ffmpeg), `transcoder_error` |
+| ← | `{"type": "live", "id", "user_id", "name", "url"}` | To everyone else: a talk started; play `url` |
+| ← | `{"type": "ended", "id", "user_id", "reason", "clip"}` | To everyone: the talk ended (`stopped`, `disconnected`, `max_length`, `idle`, `too_large`, `transcoder_error`); `clip` is `null` when nothing was kept |
+| → | `{"type": "ping"}` | Answered with `{"type": "pong"}` |
 
 ## Remote deployment (ESP32 relay + self-hosted MQTT + Cloudflare Tunnel)
 

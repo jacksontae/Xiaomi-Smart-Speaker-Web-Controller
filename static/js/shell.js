@@ -5,7 +5,7 @@
 // the Now Bar (a playing capsule above the nav on every page but Now) and short rail labels.
 import { h, icon, avatar, field, passwordInput, busy, tip, toast } from './ui.js';
 import { t, roleLabel } from './i18n.js';
-import { ROUTES, RANK, href } from './routes.js';
+import { ROUTES, RANK, href, labelKey } from './routes.js';
 import { openSheet, popover, isPhone, closePopover } from './sheet.js';
 import { errorText } from './api.js';
 import { isAndroid } from './prefs.js';
@@ -70,13 +70,14 @@ function dragToSelect(bar, axis) {
 const RAIL_LABEL = { settings: 'rail.settings', activity: 'rail.activity', help: 'rail.help' };
 
 /**
- * buildShell({ user, api, allowed, onSignOut, onPickSpeaker, onCommand }) -> shell
+ * buildShell({ user, api, allowed, output, onSignOut, onPickSpeaker, onCommand }) -> shell
  * allowed(route): may this member open it now (app.js: role, and the output for Music); the nav lists those.
+ * output: 'speaker' | 'device', for the routes named by output (Announce is Talkie on "This device").
  * shell.el, shell.content (the <main>), shell.markRoute(route), shell.setSpeakers(list), shell.setStatus(status, err),
  * shell.header(opts), shell.accountItems(close) (menu rows reused by the phone Account page), shell.destroy()
  * onCommand(path): POST a speaker command (Now Bar play/pause) and refresh /status; resolves when done.
  */
-export function buildShell({ user, api, allowed, onSignOut, onPickSpeaker, onCommand }) {
+export function buildShell({ user, api, allowed, output = 'speaker', onSignOut, onPickSpeaker, onCommand }) {
   const android = isAndroid();
   const can = (role) => RANK[user.role] >= RANK[role];
   const routes = ROUTES.filter((r) => (allowed ? allowed(r) : can(r.min)));
@@ -95,14 +96,14 @@ export function buildShell({ user, api, allowed, onSignOut, onPickSpeaker, onCom
   // Android: the active destination shows a filled icon (sprite i-<name>-fill), the others the outlined one
   const navIcon = (r) => (android ? [icon(r.icon, 'ic-o'), icon(`${r.icon}-fill`, 'ic-f')] : icon(r.icon));
   const tabbar = h('div', { class: 'tabbar glass' }, tabThumb,
-    main.map((r) => h('a', { class: 'tab', href: href(r.id), dataset: { route: r.id } }, navIcon(r), h('span', {}, t(r.tab)))));
+    main.map((r) => h('a', { class: 'tab', href: href(r.id), dataset: { route: r.id } }, navIcon(r), h('span', {}, t(labelKey(r, output, 'tab'))))));
   const meBtn = h('a', { class: 'me-btn glass', href: href('account'), dataset: { route: 'account' }, 'aria-label': t('acct.aria', user.display_name, roleLabel(user.role)) }, avatar(user));
   const tabdock = h('nav', { class: 'tabdock', 'aria-label': t('nav.main') }, tabbar, meBtn);
 
   /* ----- iPad / desktop: sidebar ----- */
   const navThumb = h('span', { class: 'nv-thumb', 'aria-hidden': 'true' });
   const link = (r) => h('a', { class: 'nv', href: href(r.id), dataset: { route: r.id } }, navIcon(r),
-    h('span', {}, t(android ? r.tab || RAIL_LABEL[r.id] || r.label : r.label)));
+    h('span', {}, t(android ? labelKey(r, output, 'tab') || RAIL_LABEL[r.id] || r.label : labelKey(r, output))));
   // Android rail (AT_ boards): Help joins the lower group; the page header then has no Help button
   const lower = android ? [...admin, ROUTES.find((r) => r.id === 'help')] : admin;
   const sbn = h('nav', { class: 'sbn', 'aria-label': t('nav.main') }, navThumb, main.map(link),

@@ -5,7 +5,8 @@ The speaker fetches every stream from this service (TTS and YouTube are proxied)
 drives the speaker directly over Cast on the LAN, or through the ESP32 relay (firmware/) over MQTT
 when it runs elsewhere; see transport.py. Media URLs then go out under `public_base_url`.
 
-Operators can also talk through the speaker live from the browser's microphone (WebSocket /talk, see talk.py).
+Operators can also talk through the speaker live from the browser's microphone (WebSocket /talk, see talk.py),
+and every member can use the Talkie, a walkie-talkie between the app's members (WebSocket /talkie).
 
 Callers authenticate with either `Authorization: Bearer <api_token>` (acts as admin) or the
 `sid` session cookie of a web account (admin, operator or viewer). The speaker cannot send
@@ -151,6 +152,11 @@ TALK_END_WAIT = 20.0  # longest wait for the speaker to play out the stream befo
 TALK_POLL = 0.3
 TALK_GRACE = 60.0  # an ended talk's stream stays fetchable this long (a slow speaker still gets it all)
 TALK_MAX_RATE = 64 * 1024  # bytes/s of recorder input accepted on average (Opus/AAC use a fraction)
+TALKIE_DIR = Path(os.environ.get("TALKIE_DIR", DATA_PATH.parent / "talkie"))  # Talkie clips (MP3, kept a day)
+TALKIE_MAX_SECONDS = 60  # one Talkie message ends after this long
+TALKIE_MIN_SECONDS = 0.5  # shorter ones (a tap on the button) are dropped, not kept as a clip
+TALKIE_KEEP = timedelta(hours=24)  # clips older than this are deleted
+TALKIE_SWEEP = 3600.0  # seconds between sweeps for old clip files
 
 
 class MqttSettings(BaseModel):
@@ -426,8 +432,9 @@ async def lifespan(_app):
     finally:
         runner.cancel()
         reset_reachability()
-        if _talk is not None:
-            _talk.transcoder.kill()  # never leave an ffmpeg behind
+        for session in (_talk, _talkie):
+            if session is not None:
+                session.transcoder.kill()  # never leave an ffmpeg behind
         transport.close()
 
 
@@ -1955,6 +1962,7 @@ async def delete_user(user_id: int, who: Who):
     if who.user is not None and who.user["id"] == user_id:
         raise HTTPException(409, "You can't delete yourself")
     target = db.get_user(user_id)
+    clips = db.user_clip_files(user_id) if target is not None else []
     try:
         stored = db.delete_user(user_id) if target is not None else None
     except Conflict as e:
@@ -1963,6 +1971,8 @@ async def delete_user(user_id: int, who: Who):
         raise HTTPException(404, "No such member")
     for name in stored:  # their personal files went with them
         (MEDIA_DIR / name).unlink(missing_ok=True)
+    for name in clips:  # ... and so did their Talkie clips
+        (TALKIE_DIR / name).unlink(missing_ok=True)
     record(who, "member delete", target["username"])
 
 
@@ -3385,6 +3395,7 @@ async def schedule_loop():
     while True:
         try:
             await run_due_schedules(datetime.now(UTC))
+            talkie_sweep()
         except Exception as e:  # keep the runner alive
             print(f"schedule runner error: {type(e).__name__}: {e}")
         await asyncio.sleep(SCHEDULE_POLL)
@@ -3498,8 +3509,8 @@ async def talk_refuse(ws, code, detail):
         pass
 
 
-def talk_caller(ws):
-    """(Principal, None), or (None, (error code, detail)) for a connection that may not talk.
+def ws_caller(ws):
+    """(Principal, None), or (None, (error code, detail)) for a WebSocket that isn't signed in.
 
     Browsers can't set headers on a WebSocket, so the session cookie authenticates and the Origin
     check stands in for the X-Requested-With header; scripts may send the API token instead.
@@ -3522,9 +3533,15 @@ def talk_caller(ws):
         if user is None:
             return None, ("unauthorized", "Not signed in")
         who = Principal(user["role"], user["display_name"], user, token_hash(sid))
-    if ROLE_RANK[who.role] < ROLE_RANK["operator"]:
-        return None, ("forbidden", "Live talk needs the operator role")
     return who, None
+
+
+def talk_caller(ws):
+    """(Principal, None), or (None, (error code, detail)) for a connection that may not talk live."""
+    who, problem = ws_caller(ws)
+    if who is not None and ROLE_RANK[who.role] < ROLE_RANK["operator"]:
+        return None, ("forbidden", "Live talk needs the operator role")
+    return who, problem
 
 
 def parse_talk_start(message):
@@ -3754,6 +3771,315 @@ async def talk_status():
     """Whether live talk works on this server (ffmpeg installed) and who is talking."""
     active = _talk and {"by": _talk.who.actor, "id": _talk.id}
     return {"available": talk_available(), "max_seconds": settings.talk_max_seconds, "active": active}
+
+
+# --- Talkie (WebSocket /talkie): a walkie-talkie between the members of this server ---
+#
+# One room for everyone. The web app keeps the socket open on every page while signed in: it carries who has the
+# app open, and the talks. One talker at a time (its own lock: the speaker's /talk is separate). Listeners play
+# GET /talkie/live/{id}, an MP3 stream of the talk as it is spoken; the finished talk is kept as a clip for a day.
+#
+# Protocol (JSON text frames unless noted):
+#   server -> {"type": "hello", "me", "online": [{id, name}], "live": {id, user_id, name, url} | null, "clips"}
+#   server -> {"type": "online", "online"}             a member opened or closed the app (several tabs count once)
+#   client -> {"type": "start", "mime": MediaRecorder.mimeType}
+#   server -> {"type": "ready", "id", "max_seconds"}   then the client sends binary recorder chunks
+#   server -> {"type": "error", "code", "detail"}      instead (busy, bad_request, unavailable, transcoder_error)
+#   server -> {"type": "live", "id", "user_id", "name", "url"}   to everyone else when a talk starts
+#   client -> {"type": "stop"} | {"type": "ping"}      (a ping is answered with {"type": "pong"})
+#   server -> {"type": "ended", "id", "user_id", "reason", "clip": {...} | null}   to everyone when a talk ends
+# A talk ends on stop, after TALKIE_MAX_SECONDS, when the audio stops coming or the talker's socket closes. Talks
+# under TALKIE_MIN_SECONDS keep no clip. A refused connection gets an error frame and is closed (44xx), as /talk.
+# Nothing goes to the activity log: it's chat.
+
+@dataclass(eq=False)
+class TalkieConn:
+    """One open /talkie socket (a member may have several: tabs, devices)."""
+    ws: WebSocket
+    who: Principal
+    send: TalkSender
+
+    @property
+    def user_id(self):
+        return self.who.user["id"]
+
+
+@dataclass(eq=False)
+class TalkieTalk:
+    id: str
+    conn: TalkieConn
+    transcoder: object
+    # the whole talk stays readable: a listener who joins late hears it from the start
+    stream: talk.LiveStream = field(default_factory=lambda: talk.LiveStream(backlog=1 << 30))
+    started: float | None = None  # loop time of "ready" (the recorder starts then)
+    last_chunk: float | None = None
+    received: int = 0
+    pump: asyncio.Task | None = None
+    ended: bool = False
+    ended_at: float | None = None
+
+    @property
+    def seconds(self):
+        return self.last_chunk - self.started if self.last_chunk is not None else 0.0
+
+    def view(self):
+        user = self.conn.who.user
+        return {"id": self.id, "user_id": user["id"], "name": user["display_name"], "url": f"/talkie/live/{self.id}"}
+
+
+_talkie_conns: list[TalkieConn] = []
+_talkie: TalkieTalk | None = None  # the talk in progress
+_talkie_last: TalkieTalk | None = None  # the previous one, whose stream a slow listener may still be reading
+_talkie_swept = 0.0  # monotonic time of the last sweep for old clip files
+
+
+def talkie_online():
+    """Members with the app open, each once, in the order they came."""
+    seen = {}
+    for c in _talkie_conns:
+        seen.setdefault(c.user_id, {"id": c.user_id, "name": c.who.user["display_name"]})
+    return list(seen.values())
+
+
+async def talkie_broadcast(message, skip=None):
+    await asyncio.gather(*(c.send(message) for c in list(_talkie_conns) if c is not skip))
+
+
+def talkie_cutoff():
+    return utc_iso(datetime.now(UTC) - TALKIE_KEEP)
+
+
+def clip_view(clip):
+    return {"id": clip["id"], "user_id": clip["user_id"], "name": clip["name"], "seconds": clip["seconds"],
+            "created_at": clip["created_at"], "url": f"/talkie/clips/{clip['id']}.mp3"}
+
+
+def talkie_clips():
+    """The last day's clips, newest first."""
+    talkie_sweep()
+    return [clip_view(c) for c in db.list_clips(talkie_cutoff())]
+
+
+def talkie_sweep(force=False):
+    """Delete clips older than TALKIE_KEEP with their files, at most once every TALKIE_SWEEP seconds. Files without
+    a row (a member deleted while their clip was being saved) go once they are as old."""
+    global _talkie_swept
+    now = time.monotonic()
+    if not force and _talkie_swept and now - _talkie_swept < TALKIE_SWEEP:
+        return
+    _talkie_swept = now
+    for name in db.expire_clips(talkie_cutoff()):
+        (TALKIE_DIR / name).unlink(missing_ok=True)
+    if TALKIE_DIR.is_dir():
+        old = time.time() - TALKIE_KEEP.total_seconds()
+        for path in TALKIE_DIR.glob("*.mp3"):
+            if path.stat().st_mtime < old:
+                path.unlink(missing_ok=True)
+
+
+def talkie_caller(ws):
+    """(Principal, None), or (None, (error code, detail)): any signed-in member, never the API token."""
+    who, problem = ws_caller(ws)
+    if who is not None and who.user is None:
+        return None, ("forbidden", "Talkie is for members signed in to the app")
+    return who, problem
+
+
+def signed_out(conn):
+    """The member was signed out, disabled or deleted since the socket opened."""
+    return db.session_user(conn.who.session)[0] is None
+
+
+@app.websocket("/talkie")
+async def talkie_socket(ws: WebSocket):
+    await ws.accept()
+    who, problem = talkie_caller(ws)
+    if problem:
+        await talk_refuse(ws, *problem)
+        return
+    conn = TalkieConn(ws, who, TalkSender(ws))
+
+    def here():  # the member has the app open, in any tab
+        return any(c.user_id == conn.user_id for c in _talkie_conns)
+
+    came = not here()
+    hello = {"type": "hello", "me": conn.user_id, "live": _talkie and _talkie.view(), "clips": talkie_clips()}
+    _talkie_conns.append(conn)
+    # no await between joining and this send: it takes the sender's lock first, so broadcasts queue behind it
+    sent = conn.send(hello | {"online": talkie_online()})
+    try:
+        await sent
+        if came:
+            await talkie_broadcast({"type": "online", "online": talkie_online()}, skip=conn)
+        await talkie_loop(conn)
+    finally:
+        _talkie_conns.remove(conn)
+        if _talkie is not None and _talkie.conn is conn:
+            await talkie_end(_talkie, "disconnected")
+        if not here():
+            await talkie_broadcast({"type": "online", "online": talkie_online()})
+
+
+async def talkie_loop(conn):
+    """Read the member's messages until the socket closes; audio goes to their talk, timers end it."""
+    loop = asyncio.get_running_loop()
+    pending = None
+    try:
+        while True:
+            mine = _talkie if _talkie is not None and _talkie.conn is conn else None
+            timeout = None  # nothing to time while the member only listens
+            if mine is not None:
+                now = loop.time()
+                last_audio = mine.last_chunk or mine.started
+                if now >= mine.started + TALKIE_MAX_SECONDS:
+                    await talkie_end(mine, "max_length")
+                    continue
+                if now - last_audio >= TALK_IDLE_TIMEOUT:
+                    await talkie_end(mine, "idle")
+                    continue
+                timeout = min(TALK_TICK, mine.started + TALKIE_MAX_SECONDS - now)
+            if pending is None:
+                pending = asyncio.ensure_future(conn.ws.receive())
+            done, _ = await asyncio.wait({pending}, timeout=timeout)
+            if not done:
+                continue
+            message, pending = pending.result(), None
+            if message["type"] == "websocket.disconnect":
+                return
+            if message.get("bytes"):
+                if mine is not None:
+                    await talkie_audio(mine, message["bytes"])
+            elif message.get("text"):
+                try:
+                    msg = json.loads(message["text"])
+                    kind = msg.get("type")
+                except (ValueError, AttributeError):
+                    msg, kind = {}, None
+                if kind == "start":
+                    await talkie_start(conn, msg)
+                elif kind == "stop" and mine is not None:
+                    await talkie_end(mine, "stopped")
+                elif kind == "ping":
+                    if signed_out(conn):
+                        await talk_refuse(conn.ws, "unauthorized", "Not signed in")
+                        return
+                    await conn.send({"type": "pong"})
+    finally:
+        if pending is not None:
+            pending.cancel()
+
+
+async def talkie_start(conn, msg):
+    global _talkie
+    fmt = talk.input_format(msg.get("mime") if isinstance(msg.get("mime"), str) else "")
+    if _talkie is not None and _talkie.conn is conn:
+        return  # already talking
+    if fmt is None:
+        await conn.send({"type": "error", "code": "bad_request",
+                         "detail": f"Unsupported recording format; use one of {', '.join(sorted(talk.INPUT_FORMATS))}"})
+        return
+    if signed_out(conn):
+        await talk_refuse(conn.ws, "unauthorized", "Not signed in")
+        return
+    if not talk_available():
+        await conn.send({"type": "error", "code": "unavailable",
+                         "detail": "Talkie needs ffmpeg on the server, and it isn't installed"})
+        return
+    if _talkie is not None:
+        await conn.send({"type": "error", "code": "busy",
+                         "detail": f"{_talkie.conn.who.user['display_name']} is talking right now"})
+        return
+    session = _talkie = TalkieTalk(secrets.token_urlsafe(9), conn, talk_transcoder(fmt))
+    try:
+        await session.transcoder.start()
+    except talk.TranscoderError as e:
+        _talkie = None
+        await conn.send({"type": "error", "code": "transcoder_error", "detail": str(e)})
+        return
+    session.pump = asyncio.create_task(talk_pump(session))
+    session.started = asyncio.get_running_loop().time()
+    await conn.send({"type": "ready", "id": session.id, "max_seconds": TALKIE_MAX_SECONDS})
+    await talkie_broadcast({"type": "live", **session.view()}, skip=conn)
+
+
+async def talkie_audio(session, chunk):
+    session.last_chunk = asyncio.get_running_loop().time()
+    session.received += len(chunk)
+    if session.received > TALK_MAX_RATE * TALKIE_MAX_SECONDS:
+        await talkie_end(session, "too_large")
+        return
+    try:
+        await session.transcoder.write(chunk)
+    except talk.TranscoderError as e:
+        await session.conn.send({"type": "error", "code": "transcoder_error", "detail": str(e)})
+        await talkie_end(session, "transcoder_error")
+
+
+async def talkie_end(session, reason):
+    """Stop ffmpeg, close the stream, keep the clip and tell everyone. Runs once per talk."""
+    global _talkie, _talkie_last
+    if session.ended:
+        return
+    session.ended = True
+    if _talkie is session:
+        _talkie, _talkie_last = None, session  # the next talker may start while this one winds down
+    try:
+        await session.transcoder.finish(TALK_DRAIN)
+        if session.pump is not None:
+            await asyncio.wait({session.pump}, timeout=TALK_DRAIN)
+            session.pump.cancel()
+    finally:
+        await session.stream.close()
+        session.ended_at = time.monotonic()
+    clip = await talkie_save(session)
+    await talkie_broadcast({"type": "ended", "id": session.id, "user_id": session.conn.user_id, "reason": reason,
+                            "clip": clip})
+
+
+async def talkie_save(session):
+    """Keep the talk as a clip; None when it was too short (or couldn't be saved)."""
+    data = bytes(session.stream.data)
+    if session.seconds < TALKIE_MIN_SECONDS or not data:
+        return None
+    name = f"{session.id}.mp3"
+
+    def write():
+        TALKIE_DIR.mkdir(parents=True, exist_ok=True)
+        (TALKIE_DIR / name).write_bytes(data)
+
+    try:
+        await asyncio.to_thread(write)
+        clip = db.add_clip(session.id, session.conn.user_id, round(session.seconds, 1), name)
+    except Exception as e:  # disk full, or the member was deleted meanwhile
+        print(f"talkie: clip not kept: {type(e).__name__}: {e}")
+        (TALKIE_DIR / name).unlink(missing_ok=True)
+        return None
+    return clip_view(clip)
+
+
+@viewer_api.get("/talkie/live/{talk_id}")
+async def talkie_live(talk_id: str):
+    """A Talkie talk's MP3 from its start, as one response that ends when the talk does (a plain <audio> plays it)."""
+    session = _talkie if _talkie is not None and _talkie.id == talk_id else _talkie_last
+    recent = session is not None and (session.ended_at is None or time.monotonic() - session.ended_at < TALK_GRACE)
+    if not recent or session.id != talk_id:
+        raise HTTPException(404, "No such live talk")
+    return StreamingResponse(session.stream.follow(), media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
+
+
+@viewer_api.get("/talkie/clips")
+async def list_talkie_clips():
+    """The last day's Talkie clips, newest first."""
+    return talkie_clips()
+
+
+@viewer_api.get("/talkie/clips/{clip_id}.mp3")
+async def talkie_clip_file(clip_id: str):
+    clip = db.get_clip(clip_id)
+    path = TALKIE_DIR / Path(clip["file"]).name if clip else None
+    if clip is None or clip["created_at"] < talkie_cutoff() or not path.is_file():
+        raise HTTPException(404, "No such clip")
+    return FileResponse(path, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 # --- Streams fetched by the speaker itself (signed URLs, no header) ---

@@ -2,6 +2,8 @@
 // volume and quick phrases) and "Talk live" (browser mic streamed to the speaker, see ../talk-client.js).
 // "Schedule" is a link to #/schedule (its own page). #/announce/talk opens Talk live directly.
 // Talk live only shows when the server offers it (GET /talk/status -> { available: true }) and for operators.
+// While "This device" is the music output the route is the Talkie instead (views/talkie.js); operators can switch
+// back to this page there ("Speaker").
 import { h, icon, iconBtn, field, segmented, busy, headerSub } from '../ui.js';
 import { register, t, lang as appLang } from '../i18n.js';
 import { isPhone } from '../sheet.js';
@@ -180,6 +182,15 @@ const coarse = () => matchMedia('(pointer: coarse)').matches;
 const isIos = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
 export async function render(ctx) {
+  if (ctx.output === 'device') {
+    const { talkieView } = await import('./talkie.js');
+    return talkieView(ctx, { speaker: (top) => renderAnnounce(ctx, top) });
+  }
+  return renderAnnounce(ctx);
+}
+
+/** The Announce page; `top` (the Talkie | Speaker switch) goes under the header. */
+async function renderAnnounce(ctx, top = null) {
   await Promise.all([ctx.css('views/announce.css'), ctx.css('views/modeswitch.css')]);
   const op = ctx.can('operator');
   let mode = 'say';
@@ -204,7 +215,7 @@ export async function render(ctx) {
   // "This device" is the music output (local-player.js): say plainly where announcements still go
   const outNote = ctx.output === 'device' ? h('p', { class: 'out-note small' }, icon('info', 'sm'), h('span', {}, t('ann.outNote'))) : null;
   const head = ctx.header({ title: t('nav.announce'), actions: sw.headActs });
-  const node = h('div', { class: 'page ann-page' }, head, sw.slot, outNote,
+  const node = h('div', { class: 'page ann-page' }, head, top, sw.slot, outNote,
     h('div', { class: 'ann-grid' }, mainCol, sideCol));
 
   /* ================= Announce now ================= */
@@ -591,7 +602,8 @@ export async function render(ctx) {
       destroy() { clearInterval(timerT); clearInterval(waveT); document.removeEventListener('keydown', onKey); talk.destroy(); },
     };
   }
-  ctx.onCleanup(() => { if (talkUi) talkUi.destroy(); });
+  const dropTalk = () => { if (talkUi) talkUi.destroy(); talkUi = null; };
+  ctx.onCleanup(dropTalk);
 
   function secureUrl() {
     const u = (talkInfo && (talkInfo.secure_url || talkInfo.public_base_url)) || secureUrl.fromSettings;
@@ -629,5 +641,6 @@ export async function render(ctx) {
       if (status && say) say.setLangFromStatus(status.tts_lang);
       headerSub(head, ctxLine(status, error));
     },
+    destroy: dropTalk, // the Talkie page swaps this page out without leaving the route
   };
 }

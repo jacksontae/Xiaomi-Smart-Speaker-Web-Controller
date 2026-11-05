@@ -45,7 +45,7 @@ def workdir():
     if path.exists() and not os.environ.get("E2E_KEEP_DATA"):
         for name in ("config.json", "data.db", "data.db-wal", "data.db-shm"):
             (path / name).unlink(missing_ok=True)
-        for name in ("cache", "media"):
+        for name in ("cache", "media", "talkie"):
             shutil.rmtree(path / name, ignore_errors=True)
     path.mkdir(parents=True, exist_ok=True)
     (path / "artifacts").mkdir(exist_ok=True)

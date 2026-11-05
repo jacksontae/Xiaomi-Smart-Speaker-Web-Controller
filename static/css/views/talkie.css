@@ -1,0 +1,80 @@
+/* Talkie (views/talkie.js): the Announce route on "This device". Prototype .temp/proto-talkie (owner-approved).
+   Glass look first; the Android look (M3) at the end. The live bars (.tw-bars) are in shell.css (the pill uses them too). */
+.tw-host { display: contents; }
+.tw-page > :not(.phd) { width: 100%; max-width: 640px; } /* the header keeps the page's width (chip, Help at the right) */
+.tw-side { align-self: stretch; }
+
+.tw-online { display: flex; align-items: center; gap: 10px; margin: 0 4px; min-height: 28px; }
+.tw-faces { display: flex; }
+.tw-av.sm { width: 28px; height: 28px; font-size: 12px; box-shadow: 0 0 0 2px var(--bg); }
+.tw-faces .tw-av + .tw-av { margin-left: -8px; }
+.tw-more { background: var(--fill); color: var(--ink-2); }
+.tw-count { display: inline-flex; align-items: center; gap: 6px; }
+.tw-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+
+.tw-live { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: var(--r-lg); background: var(--accent); color: var(--on-accent); }
+.tw-live[hidden] { display: none; }
+.tw-live.muted { opacity: .75; }
+.tw-live-av .avatar { width: 32px; height: 32px; font-size: 13px; }
+.tw-live-t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tw-live .tw-bars { height: 20px; }
+.tw-tap { min-height: 36px; padding: 0 14px; background: var(--on-accent); color: var(--accent); border: 0; }
+.tw-tap[hidden] { display: none; }
+
+.tw-stage { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 32px 20px 24px; text-align: center; }
+.tw-card > .tw-stage { border-top: 0; }
+.tw-status { font-weight: 700; color: var(--danger); font-variant-numeric: tabular-nums; min-height: 22px; }
+.tw-status[hidden] { display: block; visibility: hidden; }
+.tw-pttwrap { padding: 14px; }
+.tw-ptt { --lv: 0; position: relative; width: 132px; height: 132px; border-radius: 50%; border: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent); box-shadow: 0 8px 24px rgba(17, 34, 42, .12); cursor: pointer;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--t-mid) var(--ease), transform var(--t-fast) var(--ease), box-shadow var(--t-mid) var(--ease); }
+.tw-ptt .tw-mic { width: 52px; height: 52px; stroke-width: 2; pointer-events: none; }
+.tw-ptt:active:not(:disabled) { transform: scale(.97); }
+.tw-ptt:disabled { cursor: default; }
+/* talking: red, with rings that grow with the voice */
+.tw-card[data-state="live"] .tw-ptt, .tw-card[data-state="opening"] .tw-ptt {
+  background: var(--danger-bg); color: var(--on-danger);
+  box-shadow: 0 0 0 calc(10px + var(--lv) * 10px) var(--danger-tint), 0 0 0 calc(22px + var(--lv) * 18px) color-mix(in srgb, var(--danger) 6%, transparent); }
+.tw-card[data-state="sending"] .tw-ptt { background: var(--ink-3); color: var(--surface); }
+/* someone else is talking (or not connected): grey */
+.tw-card[data-state="busy"] .tw-ptt, .tw-card[data-state="idle"] .tw-ptt:disabled { background: var(--fill); color: var(--ink-3); box-shadow: none; }
+.tw-label { font-size: 17px; font-weight: 600; }
+.tw-help { max-width: 300px; }
+.tw-err { max-width: 340px; font-size: 14px; line-height: 1.5; color: var(--danger-ink); }
+.tw-err[hidden] { display: none; }
+
+.tw-recent { display: flex; flex-direction: column; gap: 10px; }
+.tw-cap { margin: 8px 4px 0; font-size: 22px; font-weight: 700; }
+.tw-empty { padding: 16px; }
+.tw-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.tw-row .tw-av { width: 36px; height: 36px; font-size: 15px; }
+.tw-row-tx { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.tw-row-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tw-row-top strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.tw-row-wave { display: flex; align-items: center; gap: 10px; }
+.tw-wave { display: flex; align-items: center; gap: 2px; height: 22px; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.tw-wave i { display: block; flex: 0 0 3px; border-radius: 2px; background: var(--accent-line); }
+.tw-wave i.on { background: var(--accent); }
+.tw-len { font-variant-numeric: tabular-nums; }
+.tw-play { width: 44px; height: 44px; flex: 0 0 auto; border-radius: 50%; border: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--accent-tint); color: var(--accent); cursor: pointer; }
+.tw-play[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+
+/* ---------- Android (M3) ---------- */
+:root[data-os="android"] .tw-av.sm { box-shadow: 0 0 0 2px var(--md-surface); }
+:root[data-os="android"] .tw-live { border-radius: 20px; background: var(--md-primary); color: var(--md-on-primary); }
+:root[data-os="android"] .tw-tap { background: var(--md-on-primary); color: var(--md-primary); }
+:root[data-os="android"] .tw-card { border-radius: 28px; }
+:root[data-os="android"] .tw-ptt { background: var(--md-primary); color: var(--md-on-primary);
+  transition: transform var(--t-fast) var(--ease), border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease); }
+:root[data-os="android"] .tw-card[data-state="live"] .tw-ptt, :root[data-os="android"] .tw-card[data-state="opening"] .tw-ptt {
+  border-radius: 40px; background: var(--md-error); color: var(--md-on-error); }
+:root[data-os="android"] .tw-card[data-state="busy"] .tw-ptt, :root[data-os="android"] .tw-card[data-state="idle"] .tw-ptt:disabled {
+  background: var(--md-surface-high); color: var(--md-on-surface-variant); box-shadow: 0 6px 18px rgba(0, 0, 0, .08); }
+:root[data-os="android"] .tw-cap { color: var(--md-primary); }
+:root[data-os="android"] .tw-play { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+:root[data-os="android"] .tw-play[aria-pressed="true"] { background: var(--md-primary); color: var(--md-on-primary); }
+:root[data-os="android"] .tw-wave i { background: color-mix(in srgb, var(--md-primary) 35%, transparent); }
+:root[data-os="android"] .tw-wave i.on { background: var(--md-primary); }
