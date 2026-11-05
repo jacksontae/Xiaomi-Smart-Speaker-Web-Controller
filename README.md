@@ -134,12 +134,14 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 | POST | `/me/passkeys/options` | ล็อกอินแล้ว | – | `{"publicKey"}` สำหรับ `navigator.credentials.create()` |
 | GET · POST | `/me/passkeys` | ล็อกอินแล้ว | `{"credential", "name"}` | ดู · เพิ่ม passkey ของตัวเอง |
 | PATCH · DELETE | `/me/passkeys/{id}` | ล็อกอินแล้ว | `{"name"}` · – | เปลี่ยนชื่อ · ลบ passkey |
+| GET | `/me/export` | ล็อกอินแล้ว | – | ดาวน์โหลดข้อมูลของตัวเองเป็น JSON (`speaker-my-data-YYYY-MM-DD.json`): โปรไฟล์ ชื่อ passkey เซสชัน เพลย์ลิสต์และไฟล์ส่วนตัว (ชื่อและขนาด) พอดแคสต์ที่ติดตาม คลิป Talkie และ activity ของตัวเอง |
+| DELETE | `/me` | ล็อกอินแล้ว | `{"confirm": "<ชื่อผู้ใช้ของตัวเอง>"}` | ลบบัญชีตัวเองพร้อมทุกอย่างที่เป็นของส่วนตัว แล้วออกจากระบบ (ชื่อผู้ใช้ไม่ตรง `400`, เป็นเจ้าของคนเดียว `409`) |
 | GET · POST | `/users` | admin | `{"username", "display_name", "password", "role"}` | ดู · เพิ่มสมาชิก |
 | PATCH · DELETE | `/users/{id}` | admin | `{"display_name", "role", "password", "disabled"}` (ใส่เฉพาะที่จะแก้) | แก้ · ลบสมาชิก |
 
-ชื่อผู้ใช้ 3–32 ตัว `a-z 0-9 . _ -` · ลบ ปิด หรือลดสิทธิ์ตัวเองไม่ได้ และต้องเหลือ admin ที่เปิดใช้อย่างน้อย 1 คน (`409`)
+ชื่อผู้ใช้ 3–32 ตัว `a-z 0-9 . _ -` · ลบ (ยกเว้นผ่าน `DELETE /me`) ปิด หรือลดสิทธิ์ตัวเองไม่ได้ และต้องเหลือ admin ที่เปิดใช้อย่างน้อย 1 คน (`409`)
 ปิดบัญชีหรือเปลี่ยนรหัสผ่านจะออกจากระบบทุกเครื่องของคนนั้น
-`/me/*`, `/auth/password` และ `/auth/logout-all` ต้องเป็นบัญชีผู้ใช้ เรียกด้วย API token ได้ `400`
+`/me`, `/me/*`, `/auth/password` และ `/auth/logout-all` ต้องเป็นบัญชีผู้ใช้ เรียกด้วย API token ได้ `400`
 
 #### Sign in with Google
 

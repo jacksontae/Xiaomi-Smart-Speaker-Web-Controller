@@ -163,12 +163,14 @@ The web UI calls `admin` "Owner".
 | POST | `/me/passkeys/options` | signed in | – | `{"publicKey"}` for `navigator.credentials.create()` |
 | GET · POST | `/me/passkeys` | signed in | `{"credential", "name"}` | List · add your own passkeys |
 | PATCH · DELETE | `/me/passkeys/{id}` | signed in | `{"name"}` · – | Rename · delete a passkey |
+| GET | `/me/export` | signed in | – | Download your own data as JSON (`speaker-my-data-YYYY-MM-DD.json`): profile, passkey names, sessions, personal playlists and files (names and sizes), podcast subscriptions, Talkie clips, your activity |
+| DELETE | `/me` | signed in | `{"confirm": "<your username>"}` | Delete your own account with everything personal and sign out (wrong username `400`, the only owner `409`) |
 | GET · POST | `/users` | admin | `{"username", "display_name", "password", "role"}` | List · add members |
 | PATCH · DELETE | `/users/{id}` | admin | `{"display_name", "role", "password", "disabled"}` (only the fields to change) | Edit · delete a member |
 
-Usernames are 3–32 characters of `a-z 0-9 . _ -`. You can't delete, disable or demote yourself, and at least one
-enabled admin must remain (`409`). Disabling an account or changing its password signs that member out everywhere.
-The `/me/*`, `/auth/password` and `/auth/logout-all` endpoints need a user account; the API token gets `400`.
+Usernames are 3–32 characters of `a-z 0-9 . _ -`. You can't delete (except with `DELETE /me`), disable or demote
+yourself, and at least one enabled admin must remain (`409`). Disabling an account or changing its password signs that member out everywhere.
+The `/me`, `/me/*`, `/auth/password` and `/auth/logout-all` endpoints need a user account; the API token gets `400`.
 
 #### Sign in with Google
 
