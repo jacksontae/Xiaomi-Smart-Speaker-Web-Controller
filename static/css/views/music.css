@@ -1,4 +1,4 @@
-/* Music page (boards YouTube / T_YouTube / D_YouTube). Shared rows and buttons: teamb.css. */
+/* Music page (boards YouTube / T_YouTube / D_YouTube). Shared rows and buttons: media.css. */
 .mu-pane, .mu-out, .mu-block { display: flex; flex-direction: column; gap: 12px; }
 .mu-panel.enter { animation: page-in var(--t-mid) var(--ease) both; }
 

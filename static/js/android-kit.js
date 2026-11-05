@@ -1,5 +1,5 @@
 // Android kit: Material 3 pieces the Android look has and the glass look (iPhone/iPad/desktop) doesn't.
-// Shared by the page teams (B: Playlists, Music, Schedule; C: Members, Settings, Account…). Off Android every
+// Shared by the pages (Playlists, Music, Schedule, Members, Settings, Account…). Off Android every
 // function is a no-op that returns null, so those pages keep today's buttons and sheets with no extra branches.
 // Styles: css/views/android-kit.css, fetched only on Android by kitCss() (route css lists stay as they are).
 //

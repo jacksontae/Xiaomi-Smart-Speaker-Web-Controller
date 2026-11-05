@@ -1,17 +1,18 @@
 // Now playing (boards Now / T_Now / D_Now): the 3D speaker mirrors the real state, then title + status line,
 // progress (ticks locally between polls), transport, volume and the queue with shuffle/repeat.
 // Idle, offline and announcing states come from /status; owners also see the ESP32 relay's health when the
-// server reports `relay` (mqtt transport). The speaker has no seek endpoint, so its progress bar is display only;
-// with "This device" as the output (status.local, local-player.js) the bar is a slider seeking the browser's player.
+// server reports `relay` (mqtt transport). The progress bar is a slider when status.media.seekable (operators; not live
+// streams, nor a relay before firmware 0.2.0): dragging previews, letting go sends one POST /seek. With "This device"
+// as the output (status.local, local-player.js) it seeks the browser's player directly.
 // The page marks its state in data-np (playing, paused, loading, announce, idle, off): Android tints the player card
-// with it and draws the wavy progress (a-wavy.js), whose wave only moves while playing.
+// with it and draws the wavy progress (wavy.js), whose wave only moves while playing.
 import { h, icon, iconBtn, tip, busy } from '../ui.js';
 import { register, t, fmtDur, fmtRel } from '../i18n.js';
 import { speaker3d } from '../speaker3d.js';
-import { aicon } from '../a-icons.js';
 import { isAndroid } from '../prefs.js';
-import { wavyTrack } from '../a-wavy.js';
+import { wavyTrack } from '../wavy.js';
 import { seek, isDevice } from '../local-player.js';
+import { glyph } from '../icons.js';
 
 register({
   en: {
@@ -123,7 +124,7 @@ const KIND_ICON = { youtube: 'note', radio: 'radio', podcast: 'podcast', file: '
 const REPEAT_NEXT = { off: 'all', all: 'one', one: 'off' };
 const QUEUE_PEEK = 6; // rows shown from the current item before "Show all"
 
-const kindIcon = (kind, cls) => (kind === 'tts' ? icon('announce', cls) : aicon(KIND_ICON[kind] || 'note', cls));
+const kindIcon = (kind, cls) => (kind === 'tts' ? icon('announce', cls) : glyph(KIND_ICON[kind] || 'note', cls));
 
 export async function render(ctx) {
   await Promise.all([ctx.css('speaker3d.css'), ctx.css('views/now.css')]); // styled before first paint
@@ -136,6 +137,7 @@ export async function render(ctx) {
   let err = null;         // latest status error
   let statusAt = 0;       // performance.now() of the last poll, for the local progress tick
   let volHoldUntil = 0;   // ignore polled volume while the user drags
+  let seekHold = null;    // {pos, at, until}: the speaker position just asked for, shown until polls catch up
   let showAll = false;
   let queueKey = '';
 
@@ -157,11 +159,22 @@ export async function render(ctx) {
   const liveTag = h('p', { class: 'np-livetag', hidden: true }, h('span', { 'aria-hidden': 'true' }), t('now.live'));
   const localNote = h('p', { class: 'np-local small', hidden: true }, icon('info', 'sm'), h('span'));
 
-  /* ----- seeking (this device only): tap/drag the bar, arrow keys move 10 s ----- */
-  const seekable = () => !!(st && st.local && st.media && st.media.duration && !err);
-  function seekAt(clientX) {
+  /* ----- seeking: tap/drag the bar, arrow keys move 10 s ----- */
+  const seekable = () => !!(st && st.media && st.media.duration && !err && (st.local || (member && st.media.seekable)));
+  // This device seeks at once; the speaker shows the new spot now and gets one /seek when the drag (or keys) settle
+  let seekSend = 0;
+  function seekTo(sec, settle) {
+    const to = Math.max(0, Math.min(sec, st.media.duration - 1));
+    if (st.local) { seek(to); return; }
+    seekHold = { pos: to, at: performance.now(), until: performance.now() + 4000 };
+    tick();
+    clearTimeout(seekSend);
+    if (settle) seekSend = setTimeout(() => act('/seek', { position: Math.round(to * 10) / 10 }), settle);
+  }
+  const posNow = () => (seekHold ? seekHold.pos : st.media.position || 0);
+  function seekAt(clientX, settle) {
     const r = bar.getBoundingClientRect();
-    seek(Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * st.media.duration);
+    seekTo(Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * st.media.duration, settle);
   }
   bar.addEventListener('pointerdown', (e) => {
     if (!seekable()) return;
@@ -170,15 +183,15 @@ export async function render(ctx) {
     bar.setPointerCapture(e.pointerId);
     const move = (ev) => seekAt(ev.clientX);
     bar.addEventListener('pointermove', move);
-    bar.addEventListener('pointerup', () => bar.removeEventListener('pointermove', move), { once: true });
+    bar.addEventListener('pointerup', (ev) => { bar.removeEventListener('pointermove', move); seekAt(ev.clientX, 1); }, { once: true });
   });
   bar.addEventListener('keydown', (e) => {
     if (!seekable()) return;
-    const pos = st.media.position || 0;
+    const pos = posNow();
     const to = { ArrowLeft: pos - 10, ArrowDown: pos - 10, ArrowRight: pos + 10, ArrowUp: pos + 10, Home: 0, End: st.media.duration }[e.key];
     if (to === undefined) return;
     e.preventDefault();
-    seek(to);
+    seekTo(to, 500);
   });
   function setSeekable(on) {
     bar.classList.toggle('seek', on);
@@ -189,7 +202,7 @@ export async function render(ctx) {
   /* ----- transport ----- */
   // busy while the command is on its way (a round trip through the tunnel, then the speaker): dimmed, no double taps
   const ctl = (name, label, fn, cls = '') => {
-    const b = h('button', { type: 'button', class: `np-b ${cls}`.trim(), 'aria-label': label, onclick: () => busy(b, fn) }, aicon(name, 'lg'));
+    const b = h('button', { type: 'button', class: `np-b ${cls}`.trim(), 'aria-label': label, onclick: () => busy(b, fn) }, glyph(name, 'lg'));
     tip(b, label);
     return b;
   };
@@ -217,7 +230,7 @@ export async function render(ctx) {
   } else {
     volCtl = h('div', { class: 'np-meter', role: 'meter', 'aria-label': t('now.volume'), 'aria-valuemin': '0', 'aria-valuemax': '100' }, h('span'));
   }
-  const volume = h('div', { class: 'np-volume glass', hidden: true }, aicon('vol-low', 'sm'), volCtl, volOut);
+  const volume = h('div', { class: 'np-volume glass', hidden: true }, glyph('vol-low', 'sm'), volCtl, volOut);
   function paintVol(pct) {
     volOut.textContent = `${pct}%`;
     volCtl.style.setProperty('--p', `${pct}%`);
@@ -264,7 +277,7 @@ export async function render(ctx) {
   }
   function setPlayIcon(playing) {
     const label = t(playing ? 'now.pause' : 'now.play');
-    playB.replaceChildren(aicon(playing ? 'pause' : 'play', 'lg'));
+    playB.replaceChildren(glyph(playing ? 'pause' : 'play', 'lg'));
     playB.setAttribute('aria-label', label);
     playB.dataset.on = String(playing); // Android: circle when paused, rounded square while playing
     tip(playB, label);
@@ -363,14 +376,14 @@ export async function render(ctx) {
     const tools = [];
     if (op) {
       const sh = iconBtn('shuffle', '', () => patchQueue({ shuffle: !q.shuffle }), 'np-tool');
-      sh.replaceChildren(aicon('shuffle', 'sm'));
+      sh.replaceChildren(glyph('shuffle', 'sm'));
       sh.setAttribute('aria-pressed', String(!!q.shuffle));
       sh.setAttribute('aria-label', t(q.shuffle ? 'now.shuffleOn' : 'now.shuffleOff'));
       tip(sh, sh.getAttribute('aria-label'));
       const rep = q.repeat || 'off';
       const rLabel = t({ off: 'now.repeatOff', all: 'now.repeatAll', one: 'now.repeatOne' }[rep]);
       const rp = iconBtn('repeat', rLabel, () => patchQueue({ repeat: REPEAT_NEXT[rep] }), 'np-tool');
-      rp.replaceChildren(aicon(rep === 'one' ? 'repeat-one' : 'repeat', 'sm'));
+      rp.replaceChildren(glyph(rep === 'one' ? 'repeat-one' : 'repeat', 'sm'));
       rp.setAttribute('aria-pressed', String(rep !== 'off'));
       tools.push(sh, rp);
     }
@@ -406,8 +419,9 @@ export async function render(ctx) {
   function tick() {
     const m = st && st.media;
     if (err || !m || !m.duration || prog.hidden) return;
-    let pos = m.position || 0;
-    if (m.state === 'PLAYING') pos += (performance.now() - statusAt) / 1000;
+    let pos = m.position || 0, since = statusAt;
+    if (seekHold && performance.now() < seekHold.until && Math.abs(pos - seekHold.pos) > 3) { pos = seekHold.pos; since = seekHold.at; } else seekHold = null;
+    if (m.state === 'PLAYING') pos += (performance.now() - since) / 1000;
     pos = Math.min(pos, m.duration);
     fill.style.width = `${(pos / m.duration) * 100}%`;
     bar.style.setProperty('--np-pos', `${(pos / m.duration) * 100}%`);
@@ -426,7 +440,7 @@ export async function render(ctx) {
     relayBox.hidden = false;
     const ok = r.broker_connected && r.online;
     const rows = [
-      h('div', { class: 'row np-rhead' }, aicon('wifi', 'sm'), h('span', { class: 'np-rlbl' }, t('now.relay')),
+      h('div', { class: 'row np-rhead' }, glyph('wifi', 'sm'), h('span', { class: 'np-rlbl' }, t('now.relay')),
         h('span', { class: ok ? 'np-ok' : 'np-bad' }, t(ok ? 'now.relayOnline' : 'now.relayOffline'))),
     ];
     const notes = [];

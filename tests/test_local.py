@@ -127,7 +127,7 @@ def test_podcast_and_url(client, no_speaker):
     assert resolve(client, kind="url", source="file:///etc/passwd").status_code == 400
     hls = resolve(client, kind="url", source="https://cdn.example.com/live.m3u8",
                   content_type="application/vnd.apple.mpegurl").json()
-    assert hls["proxy_url"] is None  # relaying the playlist alone would break its segment links
+    assert hls["proxy_url"].startswith("/local/hls?")  # its segment links get relayed too (test_hls_*)
     assert resolve(client, kind="spotify", source="x").status_code == 422
 
 

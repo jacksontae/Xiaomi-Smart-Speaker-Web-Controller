@@ -59,6 +59,9 @@ class FakeMediaController:
     def play(self):
         self.played = True
 
+    def seek(self, position):
+        self.status.current_time = self.status.adjusted_current_time = position
+
 
 class FakeCast:
     def __init__(self):

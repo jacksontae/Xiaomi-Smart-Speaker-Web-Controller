@@ -6,12 +6,12 @@
 import { h, icon, iconBtn, field, busy, segmented, helpLink } from '../ui.js';
 import { register, t, fmtDur, lang } from '../i18n.js';
 import { errorText, ApiError } from '../api.js';
-import { bicon } from '../teamb-icons.js';
 import {
   thumb, mediaRow, roundBtn, setRound, errBox, note, sectionLabel, spinnerLine, searchForm, sourceError,
   playTracker, trackPlay, pickPlaylist, ibtn, deleteLater, isPending, undoDelete, isUrl, epMeta, fileMeta, size, androidSearch, here,
-} from '../teamb-common.js';
+} from '../media-kit.js';
 import { isAndroid } from '../prefs.js';
+import { glyph } from '../icons.js';
 
 register({
   en: {
@@ -86,7 +86,7 @@ const memo = { source: 'youtube', yt: null, radio: { q: '' }, pod: null };
 const ADD_IC = () => (isAndroid() ? 'playlist-add' : 'plus');
 
 export async function render(ctx) {
-  await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/music.css')]);
+  await Promise.all([ctx.css('views/media.css'), ctx.css('views/music.css')]);
   const asked = ctx.params[0];
   let source = SOURCES.some((s) => s.id === asked) ? asked : memo.source;
   const tracker = playTracker(ctx);
@@ -95,7 +95,7 @@ export async function render(ctx) {
 
   const seg = segmented({
     label: t('music.sources'), cls: 'mu-src', value: source,
-    options: SOURCES.map((s) => ({ value: s.id, label: [bicon(s.icon, 'xs mu-src-ic'), h('span', {}, t(`music.src.${s.id}`))] })),
+    options: SOURCES.map((s) => ({ value: s.id, label: [glyph(s.icon, 'xs mu-src-ic'), h('span', {}, t(`music.src.${s.id}`))] })),
     onChange: (v) => {
       source = v;
       memo.source = v;
@@ -186,7 +186,7 @@ function radioPane(ctx, tracker) {
       heart.setAttribute('aria-pressed', String(!!f));
       heart.setAttribute('aria-label', t(f ? 'music.favOn' : 'music.favOff', s.name));
       heart.dataset.tip = heart.getAttribute('aria-label');
-      heart.replaceChildren(bicon(f ? 'heart-on' : 'heart'));
+      heart.replaceChildren(glyph(f ? 'heart-on' : 'heart'));
     };
     if (heart) heart.addEventListener('click', () => busy(heart, async () => {
       try {
@@ -331,7 +331,7 @@ function filesPane(ctx, tracker) {
   const progress = h('div', { class: 'mu-progress' });
   const listBox = h('div', { class: 'mu-block' });
   const picker = h('input', { type: 'file', class: 'sr-only', tabindex: '-1', 'aria-hidden': 'true', multiple: false });
-  const upBtn = h('button', { type: 'button', class: 'btn primary', onclick: () => { if (upload) { err.replaceChildren(errBox(t('music.oneAtATime'))); return; } picker.click(); } }, bicon('upload', 'sm'), t('music.upload'));
+  const upBtn = h('button', { type: 'button', class: 'btn primary', onclick: () => { if (upload) { err.replaceChildren(errBox(t('music.oneAtATime'))); return; } picker.click(); } }, glyph('upload', 'sm'), t('music.upload'));
   let data = null, editing = false;
   const me = ctx.user;
   const canEdit = (f) => f.can_edit;

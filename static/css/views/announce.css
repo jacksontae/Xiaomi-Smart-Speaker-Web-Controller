@@ -4,7 +4,7 @@
 .ann-grid { display: flex; flex-direction: column; gap: 20px; }
 .ann-main, .ann-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
-/* mode switch: css/views/a-modeswitch.css (shared with Schedule) */
+/* mode switch: css/views/modeswitch.css (shared with Schedule) */
 
 /* card (composer / talk) */
 .ann-card { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--r-xl); background: var(--glass-strong); border: 1px solid var(--glass-edge); box-shadow: var(--glass-hi); }

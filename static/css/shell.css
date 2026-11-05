@@ -131,9 +131,11 @@ button.spside:hover, .spside[aria-expanded="true"] { background: var(--glass-sof
 /* ======================= large screens ======================= */
 @media (min-width: 744px) {
   .topbar, .tabdock { display: none; }
-  .toasts, body:has(.tabdock) .toasts { --toast-bottom: 28px; left: 260px; }
+  /* --sb-x: the sidebar's gap from the screen edge; wider on an iPhone in landscape so it clears the notch */
+  :root { --sb-x: max(20px, var(--safe-l)); }
+  .toasts, body:has(.tabdock) .toasts { --toast-bottom: 28px; left: calc(var(--sb-x) + 240px); }
   .sb {
-    position: fixed; z-index: 30; left: 20px; top: 20px; bottom: 20px; width: 216px; padding: 20px 12px;
+    position: fixed; z-index: 30; left: var(--sb-x); top: max(20px, var(--safe-t)); bottom: max(20px, var(--safe-b)); width: 216px; padding: 20px 12px;
     display: flex; flex-direction: column; gap: 4px; border-radius: var(--r-2xl);
     background: var(--side); border: 1px solid var(--glass-edge); box-shadow: var(--glass-shadow);
     -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6);
@@ -149,20 +151,24 @@ button.spside:hover, .spside[aria-expanded="true"] { background: var(--glass-sof
   .sb-foot { position: relative; margin-top: 8px; flex: 0 0 auto; }
   .sb .popover.acct { position: absolute; left: 0; bottom: 64px; width: 320px; }
 
-  .main { padding: 28px 20px 40px 260px; }
+  .main { padding: 28px max(20px, var(--safe-r)) calc(40px + var(--safe-b)) calc(var(--sb-x) + 240px); }
   .page { max-width: 680px; }
   .phd { position: sticky; z-index: 20; top: 0; margin-top: -28px; padding: 28px 0 10px; }
-  .phd::before { content: ""; position: absolute; z-index: -1; inset: 0 -24px; background: var(--bar); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); box-shadow: 0 1px 0 var(--line); opacity: 0; transition: opacity var(--t-mid) var(--ease); pointer-events: none; }
+  /* Scrolled, the header becomes a floating glass bar like the sidebar: same top line (20px), its own gap from the
+     sidebar, radius concentric with the 44px buttons inside it. ::after blurs and fades what scrolls above it. */
+  .phd::before, .phd::after { content: ""; position: absolute; opacity: 0; transition: opacity var(--t-mid) var(--ease); pointer-events: none; }
+  .phd::before { z-index: -1; inset: 20px -8px 2px; border-radius: 30px; background: var(--bar); border: 1px solid var(--glass-edge); box-shadow: var(--glass-shadow), var(--glass-hi); -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); }
+  .phd::after { z-index: -2; left: -8px; right: -8px; top: 0; height: 52px; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); -webkit-mask-image: linear-gradient(#000 45%, transparent); mask-image: linear-gradient(#000 45%, transparent); }
   .phd .pt { transform-origin: left center; transition: transform var(--t-mid) var(--ease); }
-  html[data-scrolled] .phd::before { opacity: 1; }
-  html[data-scrolled] .phd .pt { transform: scale(.7); }
+  html[data-scrolled] .phd::before, html[data-scrolled] .phd::after { opacity: 1; }
+  html[data-scrolled] .phd .pt { transform: translateX(12px) scale(.7); }
   .phd-r .spchip, .phd-r .help-btn { display: inline-flex; }
 }
 @media (min-width: 1280px) {
   .sb { width: 248px; }
   .sb .popover.acct { width: 320px; }
-  .toasts { left: 292px; }
-  .main { padding: 28px 28px 40px 292px; }
+  .toasts { left: calc(var(--sb-x) + 272px); }
+  .main { padding: 28px max(28px, var(--safe-r)) calc(40px + var(--safe-b)) calc(var(--sb-x) + 272px); }
   .page { max-width: 1200px; }
   .page.narrow { max-width: 680px; }
 }

@@ -360,3 +360,20 @@ def test_build_id_follows_static_content(app, tmp_path):
     assert build.refresh().id == first  # content, not timestamps
     (tmp_path / "js" / "new.js").write_text("")
     assert build.refresh().id != first
+
+
+def test_seek_on_cast(client, app, fake_speaker, as_role):
+    mc = fake_speaker.media_controller
+    assert client.get("/status").json()["media"]["seekable"] is False  # nothing playing
+    client.post("/play", json={"url": "https://media.example.com/a.mp3", "content_type": "audio/mpeg"})
+    mc.status.duration = 180.0
+    assert client.get("/status").json()["media"]["seekable"] is True
+    r = client.post("/seek", json={"position": 42.5})
+    assert r.status_code == 200 and mc.status.current_time == 42.5
+    assert client.get("/status").json()["media"]["position"] == 42.5
+    for bad in (-1, 86400, "soon"):
+        assert client.post("/seek", json={"position": bad}).status_code in (400, 422)
+    mc.status.duration = None  # a live stream: nothing to seek in
+    app._status_cache = None
+    assert client.get("/status").json()["media"]["seekable"] is False
+    assert as_role("viewer").post("/seek", json={"position": 10}).status_code == 403

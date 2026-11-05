@@ -132,6 +132,12 @@ class CastTransport:
     def resume(self):
         self.get_cast().media_controller.play()
 
+    def can_seek(self):
+        return True
+
+    def seek(self, position):
+        self.get_cast().media_controller.seek(position)
+
     def stop(self):
         self.get_cast().quit_app()
 
@@ -209,6 +215,7 @@ class MqttRelayTransport:
         self._speaker_at = None  # clock() when _speaker was reported fresh; None = not fresh (e.g. retained)
         self._info = {}  # version, ip, rssi, heap from <base>/status
         self._pushes = False  # the relay publishes status on change (proto >= 1)
+        self._proto = 0  # the relay's protocol level from <base>/status; 2 adds "seek"
         self._loaded = OrderedDict()  # url -> content type
         self.client = client_factory(cfg)
         self.client.on_connect = self._on_connect
@@ -265,7 +272,8 @@ class MqttRelayTransport:
                 return
             if leaf == "status":
                 self._info = {k: doc.get(k) for k in ("version", "ip", "rssi", "heap")}
-                self._pushes = isinstance(doc.get("proto"), int) and doc["proto"] >= 1
+                self._proto = doc["proto"] if isinstance(doc.get("proto"), int) else 0
+                self._pushes = self._proto >= 1
                 if isinstance(doc.get("speaker"), dict):
                     self._take_speaker(doc["speaker"], fresh=not msg.retain)
                 if not msg.retain:
@@ -361,6 +369,12 @@ class MqttRelayTransport:
 
     def resume(self):
         self.command("resume")
+
+    def can_seek(self):
+        return self._proto >= 2  # firmware 0.2.0 and later
+
+    def seek(self, position):
+        self.command("seek", position=position)
 
     def stop(self):
         self.command("stop")

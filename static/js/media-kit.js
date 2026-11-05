@@ -1,4 +1,4 @@
-// Shared bits for the Music, Playlists and Schedule pages (page team B): media rows and thumbs, the
+// Shared bits for the Music, Playlists and Schedule pages: media rows and thumbs, the
 // "Add to playlist" picker, the Add item sheet (all six item kinds), a play/stop tracker that follows /status,
 // and delayed deletes with Undo. Views stay thin; anything two of them need lives here.
 import { h, icon, field, busy, segmented, tip } from './ui.js';
@@ -6,8 +6,8 @@ import { register, t, lang, fmtDur } from './i18n.js';
 import { errorText } from './api.js';
 import { isPhone } from './sheet.js';
 import { isAndroid } from './prefs.js';
-import { bicon } from './teamb-icons.js';
 import { isDevice } from './local-player.js';
+import { glyph } from './icons.js';
 
 register({
   en: {
@@ -135,7 +135,7 @@ export function size(bytes) {
 const KIND_ICON = { youtube: 'yt', url: 'link', tts: 'announce', radio: 'radio', podcast: 'mic', file: 'file', playlist: 'playlists' };
 /** Square-ish thumb tinted by kind; an image (YouTube, radio favicon, podcast art) covers it when it loads. */
 export function thumb(kind, { img, badge, wide = false } = {}) {
-  const el = h('span', { class: `tb-th k-${kind}${wide ? ' wide' : ''}`, 'aria-hidden': 'true' }, bicon(KIND_ICON[kind] || kind, 'sm'));
+  const el = h('span', { class: `tb-th k-${kind}${wide ? ' wide' : ''}`, 'aria-hidden': 'true' }, glyph(KIND_ICON[kind] || kind, 'sm'));
   if (img) {
     const im = h('img', { src: img, alt: '', loading: 'lazy', decoding: 'async', referrerPolicy: 'no-referrer' });
     im.addEventListener('load', () => el.classList.add('has-img'));
@@ -156,18 +156,18 @@ export function mediaRow({ th, title, sub, actions = [], cls = '', props = {} })
 }
 /** Round 44px button. kind: 'primary' (filled play) | 'soft' (grey). */
 export function roundBtn(name, label, onclick, kind = 'soft') {
-  const b = h('button', { type: 'button', class: `tb-rb ${kind}`, 'aria-label': label, onclick }, bicon(name, 'sm'));
+  const b = h('button', { type: 'button', class: `tb-rb ${kind}`, 'aria-label': label, onclick }, glyph(name, 'sm'));
   tip(b, label);
   return b;
 }
 /** Icon-only button using the team icons (aria-label + tooltip, like ui.iconBtn). */
 export function ibtn(name, label, onclick, cls = '') {
-  const b = h('button', { type: 'button', class: `iconbtn ${cls}`.trim(), 'aria-label': label, onclick }, bicon(name));
+  const b = h('button', { type: 'button', class: `iconbtn ${cls}`.trim(), 'aria-label': label, onclick }, glyph(name));
   tip(b, label);
   return b;
 }
 export function setRound(b, name, label) {
-  b.replaceChildren(bicon(name, 'sm'));
+  b.replaceChildren(glyph(name, 'sm'));
   b.setAttribute('aria-label', label);
   tip(b, label);
 }
@@ -199,11 +199,11 @@ export function androidSearch(form, input, btn) {
   const clear = ibtn('close', t('tb.clear'), () => { input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); }, 'tb-clear');
   input.addEventListener('input', sync);
   sync();
-  form.prepend(bicon('search', 'tb-sic'));
+  form.prepend(glyph('search', 'tb-sic'));
   if (btn) {
     const label = btn.textContent;
     btn.setAttribute('aria-label', label);
-    btn.replaceChildren(h('span', { class: 'tb-go-l' }, label), bicon('arrow-fwd', 'tb-go-ic'));
+    btn.replaceChildren(h('span', { class: 'tb-go-l' }, label), glyph('arrow-fwd', 'tb-go-ic'));
     btn.before(clear);
   } else form.append(clear);
 }
@@ -569,7 +569,7 @@ export function addItemSheet(ctx, playlist, onChange) {
           input.addEventListener('input', paint);
           out.append(spinnerLine(''));
           ctx.api('/files').then((r) => { files = r.items; paint(); }).catch((e) => out.replaceChildren(errBox(errorText(e, ctx.user))));
-          const more = h('a', { class: 'linkbtn', href: '#/music/files', onclick: () => sheet.close() }, bicon('upload', 'xs'), t('add.uploadMore'));
+          const more = h('a', { class: 'linkbtn', href: '#/music/files', onclick: () => sheet.close() }, glyph('upload', 'xs'), t('add.uploadMore'));
           return h('div', { class: 'tb-pane' }, input, out, more);
         },
         url() {

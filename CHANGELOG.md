@@ -6,6 +6,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-05
+
+### Added
+- This device plays HLS radio through the server: `GET /local/hls` (signed) rewrites the playlist so variant
+  playlists, segments, keys and init sections go through signed relay links. Browsers that can't play HLS say so
+  and point to the speaker, Safari or a recent Chrome.
+- A live stream on This device that ends or drops (including the relay's 6-hour cut) reconnects by itself with a
+  fresh link after 1, 2, 4, 8 and 16 s, at most 5 times in a row; 60 s of playing resets the count.
+- Owners unlink a member's Google account and remove their passkeys in Members, for a lost phone or a Google
+  account that isn't theirs any more (`GET /users/{id}/passkeys`, `DELETE /users/{id}/passkeys/{pid}`,
+  `DELETE /users/{id}/google`). The member is signed out of every device; the API won't take away their only way in.
+- Seek on the speaker: operators drag the Now page's progress bar (or use the arrow keys) and one `POST /seek`
+  is sent when they let go. `/status` media has `seekable` (false for live streams and for a relay before
+  protocol 2).
+- Relay firmware 0.2.0 (not tested on hardware): a `seek` command (`POST /api/seek`, `{"cmd":"seek"}`) and
+  status `proto` 2.
+- Every member can change their own display name with the pencil next to it in Account (`PATCH /me`). Role,
+  disabled and password stay with owners and `/auth/password`.
+
+### Fixed
+- Leaving Activity while it was still loading could throw a page error (a body read cut short by the page change
+  was treated as an empty answer).
+- Relay firmware: a play onto a cold speaker runs step by step from the main loop, so MQTT, HTTP and status
+  keep running while the speaker starts (it used to block for up to ~40 s).
+- On iPad, desktop and iPhone in landscape the scrolled page header is a floating glass bar instead of a flat strip
+  that ran into the sidebar, and the sidebar clears the iPhone notch in landscape.
+- The relay plays SHOUTcast v1 stations that answer `ICY 200 OK`.
+- The relay connects only to the public addresses it checked, so a DNS answer that changes after the check can't
+  point it inside the network (DNS rebinding).
+
+### Changed
+- One icon set for the whole web app (`js/icons.js`); a few icons on Music, Schedule, Help, Settings and Account are
+  redrawn to match the rest. Front-end modules are named for what they do instead of the team that wrote them.
+
+### Docs
+- README.en.md (full English guide) and a language switch on both READMEs. The Thai README gains a schedules API
+  section, Docker first-run steps and limits it was missing, and corrections where it no longer matched the code.
+
 ## [0.5.1] - 2026-11-04
 
 ### Added

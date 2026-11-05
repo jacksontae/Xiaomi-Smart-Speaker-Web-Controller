@@ -9,7 +9,7 @@ import { ROUTES, RANK, href } from './routes.js';
 import { openSheet, popover, isPhone, closePopover } from './sheet.js';
 import { errorText } from './api.js';
 import { isAndroid } from './prefs.js';
-import { aicon } from './a-icons.js';
+import { glyph } from './icons.js';
 
 /**
  * Android nav pill and rail: press and slide along it (touch or pen), the destination under the finger lights up
@@ -286,7 +286,7 @@ export function buildShell({ user, api, allowed, onSignOut, onPickSpeaker, onCom
       playing = on;
       bar.classList.toggle('paused', !on);
       const label = t(on ? 'nb.pause' : 'nb.resume');
-      btn.replaceChildren(aicon(on ? 'pause' : 'play', 'sm'));
+      btn.replaceChildren(glyph(on ? 'pause' : 'play', 'sm'));
       btn.setAttribute('aria-label', label);
       tip(btn, label);
     }

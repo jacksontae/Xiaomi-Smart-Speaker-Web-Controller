@@ -1,4 +1,4 @@
-/* Playlists list + detail (boards Playlists / PlaylistDetail and T_/D_ variants). Shared rows: teamb.css. */
+/* Playlists list + detail (boards Playlists / PlaylistDetail and T_/D_ variants). Shared rows: media.css. */
 .pl-new-l { display: none; }
 .pl-row.sel { background: var(--accent-tint); }
 .pl-row.sel .tb-t { color: var(--accent); }

@@ -50,16 +50,16 @@ export const RANK = { viewer: 0, operator: 1, admin: 2 };
 // css: the stylesheets the view loads with ctx.css(); the router fetches them alongside the module (keep in sync).
 export const ROUTES = [
   { id: 'now', label: 'nav.now', tab: 'tab.now', icon: 'now', min: 'viewer', section: 'main', chip: true, css: ['speaker3d.css', 'views/now.css'], load: () => import('./views/now.js') },
-  { id: 'announce', label: 'nav.announce', tab: 'nav.announce', icon: 'announce', min: 'viewer', section: 'main', css: ['views/announce.css', 'views/a-modeswitch.css'], load: () => import('./views/announce.js') },
-  { id: 'music', label: 'nav.music', tab: 'nav.music', icon: 'music', min: 'operator', device: 'viewer', section: 'main', css: ['views/teamb.css', 'views/music.css'], load: () => import('./views/music.js') },
-  { id: 'playlists', label: 'nav.playlists', tab: 'nav.playlists', icon: 'playlists', min: 'viewer', section: 'main', css: ['views/teamb.css', 'views/playlists.css'], load: () => import('./views/playlists.js') },
-  { id: 'schedule', label: 'sched.title', icon: 'announce', min: 'viewer', section: 'none', parent: 'announce', css: ['views/teamb.css', 'views/schedule.css', 'views/a-modeswitch.css'], load: () => import('./views/schedule.js') },
-  { id: 'members', label: 'nav.members', icon: 'members', min: 'admin', section: 'admin', css: ['views/c-common.css', 'views/members.css'], load: () => import('./views/members.js') },
-  { id: 'settings', label: 'nav.settings', icon: 'settings', min: 'admin', section: 'admin', css: ['views/c-common.css', 'views/settings.css'], load: () => import('./views/settings.js') },
-  { id: 'activity', label: 'nav.activity', icon: 'activity', min: 'admin', section: 'admin', css: ['views/c-common.css', 'views/activity.css'], load: () => import('./views/activity.js') },
-  { id: 'auth', label: 'nav.auth', icon: 'lock', min: 'admin', section: 'none', css: ['views/c-common.css'], load: () => import('./views/methods.js') },
-  { id: 'account', label: 'nav.account', icon: 'user', min: 'viewer', section: 'none', css: ['views/c-common.css', 'views/prefs.css'], load: () => import('./views/account.js') },
-  { id: 'prefs', label: 'nav.prefs', icon: 'user', min: 'viewer', section: 'none', css: ['views/c-common.css', 'views/prefs.css'], load: () => import('./views/prefs.js') },
+  { id: 'announce', label: 'nav.announce', tab: 'nav.announce', icon: 'announce', min: 'viewer', section: 'main', css: ['views/announce.css', 'views/modeswitch.css'], load: () => import('./views/announce.js') },
+  { id: 'music', label: 'nav.music', tab: 'nav.music', icon: 'music', min: 'operator', device: 'viewer', section: 'main', css: ['views/media.css', 'views/music.css'], load: () => import('./views/music.js') },
+  { id: 'playlists', label: 'nav.playlists', tab: 'nav.playlists', icon: 'playlists', min: 'viewer', section: 'main', css: ['views/media.css', 'views/playlists.css'], load: () => import('./views/playlists.js') },
+  { id: 'schedule', label: 'sched.title', icon: 'announce', min: 'viewer', section: 'none', parent: 'announce', css: ['views/media.css', 'views/schedule.css', 'views/modeswitch.css'], load: () => import('./views/schedule.js') },
+  { id: 'members', label: 'nav.members', icon: 'members', min: 'admin', section: 'admin', css: ['views/common.css', 'views/members.css'], load: () => import('./views/members.js') },
+  { id: 'settings', label: 'nav.settings', icon: 'settings', min: 'admin', section: 'admin', css: ['views/common.css', 'views/settings.css'], load: () => import('./views/settings.js') },
+  { id: 'activity', label: 'nav.activity', icon: 'activity', min: 'admin', section: 'admin', css: ['views/common.css', 'views/activity.css'], load: () => import('./views/activity.js') },
+  { id: 'auth', label: 'nav.auth', icon: 'lock', min: 'admin', section: 'none', css: ['views/common.css'], load: () => import('./views/methods.js') },
+  { id: 'account', label: 'nav.account', icon: 'user', min: 'viewer', section: 'none', css: ['views/common.css', 'views/prefs.css'], load: () => import('./views/account.js') },
+  { id: 'prefs', label: 'nav.prefs', icon: 'user', min: 'viewer', section: 'none', css: ['views/common.css', 'views/prefs.css'], load: () => import('./views/prefs.js') },
   { id: 'help', label: 'nav.help', icon: 'help', min: 'viewer', section: 'none', css: ['views/help.css'], load: () => import('./views/help.js') },
 ];
 

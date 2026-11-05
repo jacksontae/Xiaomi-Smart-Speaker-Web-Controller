@@ -6,7 +6,7 @@
    How it works: the glass tokens from base.css are re-pointed at Material 3 roles of the same lagoon seed, so pages
    pick up Android colours without knowing about it; then the shared components (shell, buttons, button groups,
    switches, fields, chips, cards, sheets, popovers, snackbars, picker, tips, tour, loading) are restyled below.
-   Page layouts (css/views/*) are the page teams' (phase 2).
+   Page layouts live in css/views/*.
 
    CPU on phones: no glass except the nav pill (small) and the sheet scrim (6 px, measured cheap), no infinite animation unless something is happening
    (the Now Bar equalizer only while playing, the progress bar only while a page loads). Motion follows
@@ -226,7 +226,10 @@
   :root[data-os="android"] .phd { margin-top: -32px; padding: 32px 0 12px; }
   :root[data-os="android"] .phd .pt { font-size: 34px; }
   :root[data-os="android"] .phd-r .help-btn { display: none; } /* Help is in the rail */
-  :root[data-os="android"] .phd::before { background: var(--md-bar); box-shadow: none; }
+  /* flat Material bar flush with the rail (same surface colour), not the floating glass bar */
+  :root[data-os="android"] .phd::before { inset: 0 -24px; border: 0; border-radius: 0; background: var(--md-bar); box-shadow: none; }
+  :root[data-os="android"] .phd::after { content: none; }
+  :root[data-os="android"][data-scrolled] .phd .pt { transform: scale(.7); }
 
   :root[data-os="android"] .nowbar { left: var(--rail); bottom: calc(16px + var(--safe-b)); width: min(560px, calc(100% - var(--rail) - 48px)); }
   :root[data-os="android"] .toasts, :root[data-os="android"] body:has(.tabdock) .toasts { --toast-bottom: 24px; left: calc(var(--rail) + 24px); right: 24px; }
@@ -284,7 +287,7 @@
   content: ""; display: inline-block; width: 18px; height: 18px; margin-right: 6px; vertical-align: -4px; background: currentColor;
   -webkit-mask: var(--ck) center / 18px no-repeat; mask: var(--ck) center / 18px no-repeat;
 }
-/* the shared Announce mode switch (css/views/a-modeswitch.css) gives the track glass: not on Android */
+/* the shared Announce mode switch (css/views/modeswitch.css) gives the track glass: not on Android */
 :root[data-os="android"] .seg.ann-seg { background: transparent; border: 0; }
 :root[data-os="android"] .seg.ann-seg > button[aria-selected="true"] { color: var(--md-on-primary); }
 
@@ -353,7 +356,7 @@
 :root[data-os="android"] .c-badge.plain { background: transparent; color: var(--md-on-surface-variant); }
 :root[data-os="android"] .tb-rb { transition: border-radius var(--t-slow) var(--md-spring), background-color var(--t-mid) var(--ease); }
 :root[data-os="android"] .tb-rb:active { transform: none; border-radius: 14px; }
-/* a chosen soft toggle (.on / aria-pressed) keeps teamb.css's filled state */
+/* a chosen soft toggle (.on / aria-pressed) keeps media.css's filled state */
 :root[data-os="android"] .tb-rb.soft:not(.on):not([aria-pressed="true"]), :root[data-os="android"] .tb-rb.tint { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
 
 /* bottom sheets (phone) and dialogs (tablet): 30 px top corners, drag handle 36x4, springy entrance */

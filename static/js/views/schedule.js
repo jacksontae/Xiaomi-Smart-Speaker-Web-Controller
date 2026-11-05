@@ -8,11 +8,11 @@
 import { h, icon, field, busy, segmented, tip } from '../ui.js';
 import { register, t, locale } from '../i18n.js';
 import { errorText } from '../api.js';
-import { bicon } from '../teamb-icons.js';
-import { errBox, note, spinnerLine, playlistMeta, TTS_LANGS, langNative } from '../teamb-common.js';
-import { modeSwitch } from '../a-modeswitch.js';
+import { errBox, note, spinnerLine, playlistMeta, TTS_LANGS, langNative } from '../media-kit.js';
+import { modeSwitch } from '../modeswitch.js';
 import { isAndroid } from '../prefs.js';
 import { kitCss, fab, fullDialog } from '../android-kit.js';
+import { glyph } from '../icons.js';
 
 register({
   en: {
@@ -118,7 +118,7 @@ function zoneName(tz) {
 }
 
 export async function render(ctx) {
-  await Promise.all([ctx.css('views/teamb.css'), ctx.css('views/schedule.css'), ctx.css('views/a-modeswitch.css'), kitCss(ctx)]);
+  await Promise.all([ctx.css('views/media.css'), ctx.css('views/schedule.css'), ctx.css('views/modeswitch.css'), kitCss(ctx)]);
   const op = ctx.can('operator');
   const desk = isDesk();
   let data = null, playlists = [], offset = 0, selected = null; // selected: schedule id | 'new' (desktop)
@@ -198,7 +198,7 @@ export async function render(ctx) {
       else groups.later.push(s);
     }
     if (!data.items.length) {
-      listEl.replaceChildren(h('div', { class: 'sc-empty glass' }, bicon('clock', 'lg'), note(t(op ? 'sched.noneOp' : 'sched.none'))));
+      listEl.replaceChildren(h('div', { class: 'sc-empty glass' }, glyph('clock', 'lg'), note(t(op ? 'sched.noneOp' : 'sched.none'))));
       if (desk && selected !== 'new') { selected = null; paintPane(); }
       return;
     }
@@ -212,7 +212,7 @@ export async function render(ctx) {
   function row(s) {
     const isSay = s.action === 'say';
     const mins = s.enabled && s.next_run ? Math.round((Date.parse(s.next_run) - now()) / 60000) : null;
-    const sub = h('span', { class: 'tb-s sc-sub' }, bicon(isSay ? 'announce' : 'playlists', 'xs'),
+    const sub = h('span', { class: 'tb-s sc-sub' }, glyph(isSay ? 'announce' : 'playlists', 'xs'),
       h('span', {}, isSay ? daysText(s) : `${plName(s.playlist_id) || '—'}, ${daysText(s)}`),
       s.enabled && s.next_run && s.days.length && (mins == null || mins > 60) && !isToday(s.next_run) ? h('span', { class: 'sc-nextday' }, t('sched.nextShort', nextDay(s.next_run))) : null,
       mins != null && mins >= 0 && mins <= 60 ? h('b', { class: 'sc-soon' }, t('sched.soon', Math.max(1, mins))) : null);
@@ -394,7 +394,7 @@ export async function render(ctx) {
       });
     }
 
-    const testBtn = op ? h('button', { type: 'button', class: 'btn tonal wide sc-test' }, bicon('play', 'sm'), t('sched.test')) : null;
+    const testBtn = op ? h('button', { type: 'button', class: 'btn tonal wide sc-test' }, glyph('play', 'sm'), t('sched.test')) : null;
     if (testBtn) testBtn.addEventListener('click', () => {
       const b = body();
       if (b.action === 'say' && !b.text) { check(); return; }
@@ -417,7 +417,7 @@ export async function render(ctx) {
     const delBox = h('div', { class: 'sc-del' });
     const paintDel = (asking) => {
       if (!s || !op) return;
-      if (!asking) { delBox.replaceChildren(h('button', { type: 'button', class: 'linkbtn sc-delbtn', onclick: () => { paintDel(true); delBox.querySelector('.btn')?.focus(); } }, bicon('trash', 'xs'), t('sched.del'))); return; }
+      if (!asking) { delBox.replaceChildren(h('button', { type: 'button', class: 'linkbtn sc-delbtn', onclick: () => { paintDel(true); delBox.querySelector('.btn')?.focus(); } }, glyph('trash', 'xs'), t('sched.del'))); return; }
       const yes = h('button', { type: 'button', class: 'btn danger', onclick: () => busy(yes, async () => {
         try {
           await ctx.api(`/schedules/${s.id}`, { method: 'DELETE' });

@@ -2,18 +2,19 @@
 // "Account & app settings"): profile + display name, linked Google account, passkeys, app preferences.
 // Server: GET /auth/state (fresh user + methods), PATCH /users/{me} (display name; owners only — there is no
 // self-service name endpoint), POST/DELETE /me/google, GET/PATCH/DELETE /me/passkeys*, POST /me/passkeys(/options).
-import { h, icon, busy, segmented, toast, field, helpLink } from './ui.js';
+import { h, icon, busy, segmented, toast, field, helpLink, tip } from './ui.js';
 import { register, t, roleLabel } from './i18n.js';
 import { errorText } from './api.js';
 import { get as getPref, set as setPref, motionReduced, onChange as onPrefs } from './prefs.js';
 import { googleCredential } from './signin.js';
-import { createPasskey, createError, passkeyCapable, deviceName } from './c-passkey-offer.js';
-import { card, badge, tile, gMark, fmtDay, fmtWhen, toneOf, initialOf, settingRow, linkRow } from './c-kit.js';
+import { createPasskey, createError, passkeyCapable, deviceName } from './passkey-offer.js';
+import { glyph } from './icons.js';
+import { card, badge, tile, gMark, fmtDay, fmtWhen, toneOf, initialOf, settingRow, linkRow } from './kit.js';
 
 register({
   en: {
     'ca.username': (u) => `Username ${u}`, 'ca.displayName': 'Display name', 'ca.nameHelp': 'Shown to other members and in Activity.',
-    'ca.nameSaved': 'Name saved', 'ca.errName': 'Enter a display name first',
+    'ca.nameSaved': 'Name saved', 'ca.errName': 'Enter a display name first', 'ca.editName': 'Edit display name',
     'ca.password': 'Password', 'ca.pwSub': 'Changing it signs out your other devices.',
     'ca.google': 'Google account', 'ca.gLinkedTitle': 'Linked Google account', 'ca.gNone': 'Not linked',
     'ca.gLink': 'Link', 'ca.gUnlink': 'Unlink', 'ca.gLinked': 'Google account linked', 'ca.gUnlinked': 'Google account unlinked',
@@ -45,7 +46,7 @@ register({
   },
   th: {
     'ca.username': (u) => `ชื่อผู้ใช้ ${u}`, 'ca.displayName': 'ชื่อที่แสดง', 'ca.nameHelp': 'สมาชิกคนอื่นเห็นชื่อนี้ และแสดงในประวัติการใช้งาน',
-    'ca.nameSaved': 'บันทึกชื่อแล้ว', 'ca.errName': 'ใส่ชื่อที่แสดงก่อน',
+    'ca.nameSaved': 'บันทึกชื่อแล้ว', 'ca.errName': 'ใส่ชื่อที่แสดงก่อน', 'ca.editName': 'แก้ชื่อที่แสดง',
     'ca.password': 'รหัสผ่าน', 'ca.pwSub': 'เปลี่ยนแล้ว อุปกรณ์อื่นที่เข้าบัญชีนี้อยู่จะถูกออกจากระบบ',
     'ca.google': 'บัญชี Google', 'ca.gLinkedTitle': 'บัญชี Google ที่เชื่อมไว้', 'ca.gNone': 'ยังไม่ได้เชื่อม',
     'ca.gLink': 'เชื่อม', 'ca.gUnlink': 'เลิกเชื่อม', 'ca.gLinked': 'เชื่อมบัญชี Google แล้ว', 'ca.gUnlinked': 'เลิกเชื่อมบัญชี Google แล้ว',
@@ -82,36 +83,48 @@ export async function freshAuth(ctx) {
   try { return await ctx.api('/auth/state', { signal: ctx.signal }); } catch (e) { if (e.name === 'AbortError') throw e; return ctx.auth || {}; }
 }
 
-/** Avatar, name, username and role. */
-export function profileHead(user) {
+/** Avatar, name (with the pencil when ctx is given), username and role. */
+export function profileHead(user, ctx) {
   return h('div', { class: 'ca-head' },
     h('span', { class: 'avatar lg', style: { background: toneOf(user.id) }, 'aria-hidden': 'true' }, initialOf(user.display_name)),
-    h('div', { class: 'ca-head-tx' }, h('p', { class: 'ca-name' }, user.display_name), h('p', { class: 'small' }, t('ca.username', user.username))),
+    h('div', { class: 'ca-head-tx' }, ctx ? nameLine(ctx, user) : h('p', { class: 'ca-name' }, user.display_name), h('p', { class: 'small' }, t('ca.username', user.username))),
     badge(roleLabel(user.role), user.role === 'admin' ? '' : 'plain'));
 }
 
-/** Display name field (owners can PATCH their own member row). Null for others. */
-export function nameEditor(ctx, user) {
-  if (!ctx.can('admin')) return null;
-  const input = h('input', { class: 'input', value: user.display_name, maxLength: 64, autocomplete: 'name' });
-  const err = h('span', { class: 'hint err', role: 'alert' });
-  const btn = h('button', { type: 'button', class: 'btn' }, t('common.save'));
-  btn.addEventListener('click', () => {
-    const v = input.value.trim();
-    if (!v) { err.textContent = t('ca.errName'); input.setAttribute('aria-invalid', 'true'); return; }
-    if (v === user.display_name) return;
-    busy(btn, async () => {
-      try {
-        const nu = await ctx.api(`/users/${user.id}`, { method: 'PATCH', body: { display_name: v } });
-        toast(t('ca.nameSaved'), 'ok');
-        ctx.signedIn(Object.assign(ctx.user, nu)); // rebuilds the shell so the sidebar shows the new name
-      } catch (e) { err.textContent = errorText(e, ctx.user); }
-    });
+/** The name with a pencil beside it; any member renames themselves in a sheet (PATCH /me), like a passkey. */
+export function nameLine(ctx, user) {
+  const label = t('ca.editName');
+  const pen = h('button', { type: 'button', class: 'iconbtn ca-pen', 'aria-label': label, onclick: () => editName(ctx, user) }, glyph('pencil'));
+  tip(pen, label);
+  return h('div', { class: 'ca-nameline' }, h('p', { class: 'ca-name' }, user.display_name), pen);
+}
+
+function editName(ctx, user) {
+  ctx.sheet({
+    title: t('ca.displayName'),
+    build(body, s) {
+      const input = h('input', { class: 'input', value: user.display_name, maxLength: 64, autocomplete: 'name' });
+      const err = h('p', { class: 'form-error', role: 'alert' });
+      const save = h('button', { type: 'submit', class: 'btn primary big wide' }, t('common.save'));
+      const form = h('form', { novalidate: true, class: 'ca-form' }, field(t('ca.displayName'), input, t('ca.nameHelp')), err, save);
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const v = input.value.trim();
+        if (!v) { err.textContent = t('ca.errName'); input.setAttribute('aria-invalid', 'true'); input.focus(); return; }
+        if (v === user.display_name) { s.close(); return; }
+        busy(save, async () => {
+          try {
+            const nu = await ctx.api('/me', { method: 'PATCH', body: { display_name: v } });
+            s.close();
+            toast(t('ca.nameSaved'), 'ok');
+            ctx.signedIn(Object.assign(ctx.user, nu)); // rebuilds the shell so the sidebar and this page show the new name
+          } catch (e2) { err.textContent = errorText(e2, ctx.user); }
+        });
+      });
+      body.append(form);
+      requestAnimationFrame(() => { input.focus(); input.select(); });
+    },
   });
-  const f = field(t('ca.displayName'), h('div', { class: 'c-inline' }, input, btn), t('ca.nameHelp'));
-  f.append(err);
-  f.classList.add('ca-namefield');
-  return f;
 }
 
 /* ---------- Google ---------- */

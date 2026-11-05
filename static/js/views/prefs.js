@@ -5,8 +5,9 @@
 import { h, icon } from '../ui.js';
 import { register, t, roleLabel } from '../i18n.js';
 import { isPhone } from '../sheet.js';
-import { caption, card, settingRow, linkRow, tile, cIcon, phoneBack } from '../c-kit.js';
-import { freshAuth, profileHead, nameEditor, googleRow, passkeySection, appPrefsCard } from '../c-account.js';
+import { caption, card, settingRow, linkRow, tile, phoneBack } from '../kit.js';
+import { freshAuth, profileHead, googleRow, passkeySection, appPrefsCard } from '../account-kit.js';
+import { glyph } from '../icons.js';
 
 register({
   en: {
@@ -28,7 +29,7 @@ register({
 export async function render(ctx) {
   const fresh = isPhone() ? null : freshAuth(ctx); // ask the server while the stylesheet loads, not after
   ctx.css('views/prefs.css');
-  await ctx.css('views/c-common.css');
+  await ctx.css('views/common.css');
   if (!fresh) return phone(ctx);
   return large(ctx, await fresh, t('nav.prefs'));
 }
@@ -46,7 +47,7 @@ export function large(ctx, auth, title) {
   const user = { ...ctx.user, ...(auth.user || {}) };
   const pwBtn = h('button', { type: 'button', class: 'btn', onclick: () => ctx.changePassword() }, t('acct.changePw'));
   const acctCard = card(
-    h('div', { class: 'c-pad' }, profileHead(user), nameEditor(ctx, user)),
+    h('div', { class: 'c-pad' }, profileHead(user, ctx)),
     settingRow({ title: t('ca.password'), sub: t('pref.pwSub'), control: pwBtn }),
     googleRow(ctx, auth, user, { title: t('ca.gLinkedTitle') }));
   const pk = passkeySection(ctx, auth);
@@ -55,6 +56,6 @@ export function large(ctx, auth, title) {
     pk ? [caption(t('ca.passkeys')), pk.card, pk.note] : null,
     ctx.can('admin') ? [caption(roleLabel('admin')), card(linkRow({ href: '#/auth', title: t('nav.auth'), sub: t('pref.methodsSub'), lead: tile(icon('lock'), 'plain') }))] : null);
   const right = h('div', { class: 'c-col' }, caption(t('pref.app')), appPrefsCard(ctx), h('p', { class: 'c-note' }, t('pref.deviceNote')),
-    ctx.can('admin') ? [caption(t('pref.speaker')), card(linkRow({ href: '#/settings', title: t('nav.settings'), sub: t('pref.speakerSub'), lead: tile(cIcon('gear'), 'lamp') }))] : null);
+    ctx.can('admin') ? [caption(t('pref.speaker')), card(linkRow({ href: '#/settings', title: t('nav.settings'), sub: t('pref.speakerSub'), lead: tile(glyph('gear'), 'lamp') }))] : null);
   return h('div', { class: 'page p-page' }, ctx.header({ title }), h('div', { class: 'c-cols' }, left, right));
 }

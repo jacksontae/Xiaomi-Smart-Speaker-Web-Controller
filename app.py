@@ -37,6 +37,7 @@ from typing import Annotated, Literal
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import httpcore
 import httpx
 import pychromecast.discovery
 import yt_dlp
@@ -133,6 +134,7 @@ STREAM_MAX_BYTES = 512 * 1024 * 1024  # one relayed stream ends after this much 
 STREAM_MAX_SECONDS = 6 * 3600  # ... or after this long; the browser then asks for a fresh link
 STREAM_MAX_OPEN = 8  # relayed streams at once (all browsers together)
 STREAM_REDIRECTS = 5
+HLS_MAX_BYTES = 512 * 1024  # an HLS playlist the relay rewrites (a live radio one is a few kB)
 STATION_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 ITUNES_NS = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
 TALK_START_TIMEOUT = 10.0  # seconds a new /talk connection has to send its start message
@@ -429,8 +431,78 @@ app = FastAPI(title="Speaker Service", lifespan=lifespan)
 http = httpx.AsyncClient(timeout=30, follow_redirects=True)
 # For URLs users type in (podcast feeds): redirects are followed by hand so each hop is checked first.
 feed_http = httpx.AsyncClient(timeout=20, follow_redirects=False)
+
+
+class IcyStream(httpcore.AsyncNetworkStream):
+    """A connection that reads SHOUTcast v1's "ICY 200 OK" status line as "HTTP/1.0 200 OK" (httpx refuses the
+    former). Only the first bytes a connection receives are looked at; everything after passes as is."""
+
+    def __init__(self, inner):
+        self.inner, self.checked = inner, False
+
+    async def read(self, max_bytes, timeout=None):
+        if self.checked:
+            return await self.inner.read(max_bytes, timeout)
+        head = b""
+        while len(head) < 4:  # enough to tell "ICY " from "HTTP"
+            chunk = await self.inner.read(max_bytes, timeout)
+            if not chunk:
+                break
+            head += chunk
+        self.checked = True
+        return b"HTTP/1.0" + head[3:] if head.startswith(b"ICY ") else head
+
+    async def write(self, buffer, timeout=None):
+        await self.inner.write(buffer, timeout)
+
+    async def aclose(self):
+        await self.inner.aclose()
+
+    async def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+        return IcyStream(await self.inner.start_tls(ssl_context, server_hostname, timeout))
+
+    def get_extra_info(self, info):
+        return self.inner.get_extra_info(info)
+
+
+class RelayBackend(httpcore.AsyncNetworkBackend):
+    """Connections for the stream relay: to an address checked public right then (so a host whose DNS answer
+    changes after check_public_url can't point the relay inside), reading ICY status lines (IcyStream)."""
+
+    def __init__(self):
+        self.inner = httpcore.AnyIOBackend()
+
+    async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        try:
+            addresses = await asyncio.to_thread(public_addresses, host)
+        except (OSError, ValueError) as e:
+            raise httpcore.ConnectError(f"{host}: {e}") from e
+        error = None
+        for address in addresses:
+            try:
+                return IcyStream(await self.inner.connect_tcp(address, port, timeout, local_address, socket_options))
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as e:
+                error = e
+        raise error
+
+    async def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        raise httpcore.ConnectError("the relay only connects to internet hosts")
+
+    async def sleep(self, seconds):
+        await self.inner.sleep(seconds)
+
+
+def relay_transport():
+    """httpx's own transport on RelayBackend connections (httpx has no public option for a network backend)."""
+    transport = httpx.AsyncHTTPTransport()
+    transport._pool = httpcore.AsyncConnectionPool(ssl_context=httpx.create_ssl_context(),
+                                                   network_backend=RelayBackend())
+    return transport
+
+
 # For the "This device" stream proxy: a stalled upstream (no bytes for 30 s) ends the relay.
-stream_http = httpx.AsyncClient(timeout=httpx.Timeout(10, read=30), follow_redirects=False)
+stream_http = httpx.AsyncClient(transport=relay_transport(), timeout=httpx.Timeout(10, read=30),
+                                follow_redirects=False)
 cast_lock = asyncio.Lock()
 bearer = HTTPBearer(auto_error=False, description="The api_token from config.json (`./speakerctl token`)")
 
@@ -1327,6 +1399,10 @@ class VolumeBody(BaseModel):
     level: float
 
 
+class SeekBody(BaseModel):
+    position: float
+
+
 class SetupBody(BaseModel):
     api_token: str
     username: str
@@ -1350,6 +1426,10 @@ class PasskeyBody(BaseModel):
 
 class PasskeyName(BaseModel):
     name: str
+
+
+class MeBody(BaseModel):
+    display_name: str
 
 
 class PasswordBody(BaseModel):
@@ -1712,6 +1792,18 @@ async def change_password(body: PasswordBody, who: SignedIn, request: Request):
     return {"ok": True}
 
 
+@app.patch("/me")
+async def update_me(body: MeBody, who: SignedIn):
+    """Any member renames themselves (role, disabled and password stay with owners and /auth/password)."""
+    user = account_of(who)
+    name = clean_text(body.display_name, "display_name", 64)
+    if name == user["display_name"]:
+        return user
+    updated = db.update_user(user["id"], {"display_name": name})
+    record(who, "member update", f"{user['username']}: display_name={name}")
+    return updated
+
+
 @app.post("/me/google")
 async def link_google(body: GoogleBody, who: SignedIn, request: Request):
     user = account_of(who)
@@ -1862,6 +1954,52 @@ async def delete_user(user_id: int, who: Who):
     record(who, "member delete", target["username"])
 
 
+# Owner reset: take back a lost phone's passkey or a Google account that isn't the member's any more.
+# Members add these themselves in Account (/me/...); each removal signs the member out of every device.
+
+def reset_target(user_id, who):
+    if who.user is not None and who.user["id"] == user_id:
+        raise HTTPException(409, "Use Account to change your own sign-in methods")
+    target = db.get_user(user_id)
+    if target is None:
+        raise HTTPException(404, "No such member")
+    return target
+
+
+@admin_api.get("/users/{user_id}/passkeys")
+async def member_passkeys(user_id: int):
+    if db.get_user(user_id) is None:
+        raise HTTPException(404, "No such member")
+    return db.list_passkeys(user_id)
+
+
+@admin_api.delete("/users/{user_id}/passkeys/{passkey_id}", status_code=204)
+async def remove_member_passkey(user_id: int, passkey_id: int, who: Who):
+    target = reset_target(user_id, who)
+    names = {p["id"]: p["name"] for p in db.list_passkeys(user_id)}
+    try:  # never leave them with no way in: set a new password for them first
+        gone = db.delete_passkey(user_id, passkey_id, keep_one=not sign_in_methods(target) - {"passkey"})
+    except Conflict as e:
+        raise HTTPException(409, "This is their only way to sign in; set a new password for them first") from e
+    if not gone:
+        raise HTTPException(404, "No such passkey")
+    db.delete_sessions(user_id)
+    record(who, "member update", f"{target['username']}: removed passkey {names.get(passkey_id)}")
+
+
+@admin_api.delete("/users/{user_id}/google")
+async def unlink_member_google(user_id: int, who: Who):
+    target = reset_target(user_id, who)
+    if not target["google_email"]:
+        raise HTTPException(404, "No Google account is linked")
+    if not sign_in_methods(target) - {"google"}:
+        raise HTTPException(409, "This is their only way to sign in; set a new password for them first")
+    user = db.unlink_google(user_id)
+    db.delete_sessions(user_id)
+    record(who, "member update", f"{target['username']}: unlinked Google {target['google_email']}")
+    return user
+
+
 # --- Player ---
 
 @viewer_api.get("/status")
@@ -1885,6 +2023,9 @@ async def status(who: Who):
             "state": m.player_state,
             "duration": m.duration,
             "position": round(m.adjusted_current_time, 1) if m.current_time is not None else None,
+            # live streams have no duration; a relay before firmware 0.2.0 can't seek
+            "seekable": bool(m.duration) and m.player_state in ("PLAYING", "PAUSED", "BUFFERING")
+                        and transport.can_seek(),
             "thumbnail": thumbnail_for(m.content_id),
         },
         "resume_pending": _resume and _resume["title"],
@@ -1972,6 +2113,17 @@ async def pause():
 async def resume():
     await run_cast(transport.resume)
     return {"ok": True}
+
+
+@operator_api.post("/seek")
+async def seek(body: SeekBody):
+    """Jump to `position` seconds in what the speaker is playing (not live streams)."""
+    if not 0 <= body.position < 86400:
+        raise HTTPException(400, "position must be between 0 and 86400 seconds")
+    if not transport.can_seek():
+        raise HTTPException(409, "The relay's firmware can't seek; update it to 0.2.0 or later")
+    await run_cast(transport.seek, body.position)
+    return {"ok": True, "position": body.position}
 
 
 async def stop_everything():
@@ -2465,9 +2617,21 @@ def check_public_url(url, what="feed"):
         addresses = resolve_host(host)
     except OSError as e:
         raise HTTPException(502, f"Can't resolve {host}") from e
-    for address in addresses:
-        if not ipaddress.ip_address(address.split("%")[0]).is_global:
-            raise HTTPException(400, f"{what} must be on the public internet")
+    if not all(map(is_public_address, addresses)):
+        raise HTTPException(400, f"{what} must be on the public internet")
+
+
+def is_public_address(address):
+    return ipaddress.ip_address(address.split("%")[0]).is_global
+
+
+def public_addresses(host):
+    """The addresses the relay may connect to for `host`, checked again at connect time; ValueError when any
+    of them is inside this machine's networks."""
+    addresses = resolve_host(host)
+    if not addresses or not all(map(is_public_address, addresses)):
+        raise ValueError("not on the public internet")
+    return sorted(addresses, key=lambda a: ":" in a)  # IPv4 first
 
 
 async def fetch_feed(url):
@@ -2765,12 +2929,18 @@ async def local_item(body, who):
 
 
 def local_proxy_path(item, url, content_type):
-    """A signed /local/stream link relaying `url` through this server, for streams a browser can't fetch itself
-    (http:// on an https page, a type it doesn't know). None for this server's own links and for HLS playlists,
-    whose segment links a relay of the playlist alone would break."""
-    if url.startswith("/") or "mpegurl" in (content_type or ""):
+    """A signed link relaying `url` through this server, for streams a browser can't fetch itself (http:// on an
+    https page, a type it doesn't know): /local/stream, or /local/hls for an HLS playlist. None for this server's
+    own links."""
+    if url.startswith("/"):
         return None
+    if "mpegurl" in (content_type or "") or is_hls_url(url):
+        return media_path("/local/hls", u=url, n=next(_nonce))
     return media_path("/local/stream", u=url, t=content_type or "", n=next(_nonce))
+
+
+def is_hls_url(url):
+    return urllib.parse.urlsplit(url).path.lower().endswith(".m3u8")
 
 
 @viewer_api.post("/local/resolve")
@@ -2809,16 +2979,23 @@ async def local_played(body: LocalPlayedBody, who: Who):
 STREAM_TYPES = ("audio/", "application/ogg", "video/mp4", "video/webm")
 STREAM_TYPE_ALIASES = {"audio/aacp": "audio/aac", "audio/x-aac": "audio/aac", "audio/mp3": "audio/mpeg",
                        "audio/x-mp3": "audio/mpeg", "audio/x-mpeg": "audio/mpeg", "audio/mpeg3": "audio/mpeg"}
+# ... and what the parts of an HLS stream may also be: MPEG-TS segments, fMP4 init sections, AES keys
+HLS_PART_TYPES = ("video/mp2t", "application/mp4", "application/octet-stream", "binary/octet-stream")
+# Tags whose URI="..." names another playlist (the others name a segment, a key or an init section).
+HLS_PLAYLIST_TAGS = ("#EXT-X-MEDIA:", "#EXT-X-I-FRAME-STREAM-INF:", "#EXT-X-RENDITION-REPORT:")
+HLS_URI_RE = re.compile(r'URI="([^"]*)"')
 _streams_open = 0
 
 
-def stream_type(upstream, expected):
-    """The content type to send for a relayed stream, or None when it isn't audio."""
+def stream_type(upstream, expected, part=False):
+    """The content type to send for a relayed stream (or HLS part), or None when it isn't audio."""
     value = (upstream or "").split(";")[0].strip().lower()
-    if value in ("", "application/octet-stream"):
+    if part:
+        value = value or "application/octet-stream"
+    elif value in ("", "application/octet-stream"):
         value = (expected or "").strip().lower() or "audio/mpeg"
     value = STREAM_TYPE_ALIASES.get(value, value)
-    return value if value.startswith(STREAM_TYPES) else None
+    return value if value.startswith(STREAM_TYPES + (HLS_PART_TYPES if part else ())) else None
 
 
 async def open_stream(url, range_header):
@@ -2841,9 +3018,10 @@ async def open_stream(url, range_header):
 
 
 @app.get("/local/stream", dependencies=[Depends(verify_media)])
-async def local_stream(request: Request, u: str, t: str = ""):
+async def local_stream(request: Request, u: str, t: str = "", h: str = ""):
     """Relay a radio stream or audio link for "This device" (signed link from POST /local/resolve, so only a
-    signed-in member gets one). Bytes are passed on as they arrive, never stored; only public http(s) hosts."""
+    signed-in member gets one). Bytes are passed on as they arrive, never stored; only public http(s) hosts.
+    `h=1` (signed links in a playlist from GET /local/hls): an HLS segment, key or init section."""
     global _streams_open
     if _streams_open >= STREAM_MAX_OPEN:
         raise HTTPException(503, "Too many streams are being relayed right now")
@@ -2853,7 +3031,7 @@ async def local_stream(request: Request, u: str, t: str = ""):
     except BaseException:
         _streams_open -= 1
         raise
-    content_type = stream_type(r.headers.get("content-type"), t)
+    content_type = stream_type(r.headers.get("content-type"), t, part=h == "1")
     if r.status_code not in (200, 206) or content_type is None:
         await r.aclose()
         _streams_open -= 1
@@ -2893,6 +3071,58 @@ async def local_stream(request: Request, u: str, t: str = ""):
 
     return StreamingResponse(relay(), status_code=r.status_code, media_type=content_type, headers=headers,
                              background=BackgroundTask(close))
+
+
+def hls_link(uri, base, playlist):
+    """A signed relay link for a URI in an HLS playlist fetched from `base`: /local/hls for another playlist,
+    /local/stream for a segment, key or init section. Non-http URIs (skd://) stay as they are."""
+    url = urllib.parse.urljoin(base, uri.strip())
+    if urllib.parse.urlsplit(url).scheme not in ("http", "https") or len(url) > 2000:
+        return uri
+    return media_path("/local/hls", u=url) if playlist else media_path("/local/stream", u=url, h="1")
+
+
+def hls_rewrite(text, base):
+    """The playlist with every link in it pointing at this server's relay."""
+    master = "#EXT-X-STREAM-INF" in text  # its URI lines are variant playlists, not segments
+    lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("#EXT-X-SERVER-CONTROL"):
+            continue  # blocking reloads add query parameters, which the signed links refuse
+        if line.startswith("#"):
+            playlist = line.startswith(HLS_PLAYLIST_TAGS)
+            line = HLS_URI_RE.sub(lambda m, p=playlist: f'URI="{hls_link(m.group(1), base, p)}"', line)
+        elif line:
+            line = hls_link(line, base, master)
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+@app.get("/local/hls", dependencies=[Depends(verify_media)])
+async def local_hls(u: str):
+    """An HLS playlist for "This device" with its links turned into signed relay links (segments, keys and init
+    sections through /local/stream, variant playlists through here again), so a browser that plays HLS can play
+    an http:// station on an https:// page. Signed links only; public http(s) hosts only, each hop checked."""
+    r = await open_stream(u, None)
+    try:
+        if r.status_code != 200:
+            raise HTTPException(502, f"The playlist failed: HTTP {r.status_code}")
+        body = bytearray()
+        async for chunk in r.aiter_bytes():
+            body += chunk
+            if len(body) > HLS_MAX_BYTES:
+                raise HTTPException(502, "The playlist is too large")
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"The playlist is unreachable ({type(e).__name__})") from e
+    finally:
+        await r.aclose()
+    text = body.decode("utf-8", "replace").lstrip("\ufeff \t\r\n")
+    if not text.startswith("#EXTM3U"):
+        raise HTTPException(502, "The link isn't an HLS playlist")
+    return Response(hls_rewrite(text, str(r.url)), media_type="application/vnd.apple.mpegurl",
+                    headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+                             "Content-Security-Policy": "sandbox"})
 
 
 # --- Quick phrases ---
