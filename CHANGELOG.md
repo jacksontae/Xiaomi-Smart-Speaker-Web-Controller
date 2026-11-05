@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- Podcast subscriptions: every member (viewers too) follows shows with the Follow button on a show's episodes,
+  and finds them under "Following" in Music > Podcasts with a count of episodes published since they last opened
+  the show; those episodes are marked New. Subscriptions are personal and go with the member
+  (`GET`/`POST /podcasts/subs`, `POST /podcasts/subs/{id}/seen`, `DELETE /podcasts/subs/{id}`; `/podcasts/episodes`
+  has the caller's `subscription`). Feeds are read a few at a time and cached for 15 minutes; database schema 7.
+
 ## [0.6.0] - 2026-11-05
 
 ### Added

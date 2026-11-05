@@ -325,11 +325,11 @@ def test_migration_from_5_keeps_rows_shared(tmp_path):
     db.close()
 
     upgraded = store.Store(path)
-    assert upgraded.schema_version() == store.SCHEMA_VERSION == 6
+    assert upgraded.schema_version() == store.SCHEMA_VERSION
     pl = upgraded.get_playlist(1)
     assert pl["owner_id"] is None and pl["owner_name"] is None
     f = upgraded.get_file(5)
     assert f["owner_id"] is None and f["uploader_id"] == 3 and f["uploader"] == "Op"  # the uploader is kept
     assert upgraded.delete_user(3) == []  # their old uploads were shared, so they stay
     assert upgraded.get_file(5)["uploader_id"] is None and upgraded.get_playlist(1) is not None
-    assert store.Store(path).schema_version() == 6  # reopening doesn't migrate again
+    assert store.Store(path).schema_version() == store.SCHEMA_VERSION  # reopening doesn't migrate again

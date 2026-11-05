@@ -238,7 +238,10 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 | DELETE | `/radio/favorites/{id}` | operator | – | ลบสถานีโปรด |
 | POST | `/radio/play` | operator | `{"favorite_id"}` หรือ `{"uuid"}` หรือ `{"url", "name"}` + `"volume"` | เล่นวิทยุแบบ LIVE (ล้างคิว) |
 | GET | `/podcasts/search?q=&country=TH&limit=20` | viewer | – | ค้นรายการจาก iTunes Search API ได้ `feed_url` |
-| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | viewer | – | อ่าน RSS ได้รายละเอียดรายการและตอนล่าสุด |
+| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | viewer | – | อ่าน RSS ได้รายละเอียดรายการและตอนล่าสุด + `subscription` ของผู้เรียก (หรือ `null`) |
+| GET · POST | `/podcasts/subs` | viewer | `{"feed_url", "title", "author", "artwork"}` | รายการที่ติดตาม (ส่วนตัว) พร้อม `new_count` · ติดตาม (ซ้ำได้ ได้แถวเดิม · ไม่ส่ง `title` จะอ่านจากฟีด) |
+| POST | `/podcasts/subs/{id}/seen` | viewer | – | เปิดดูรายการแล้ว: ตอนที่มีอยู่ไม่นับเป็นตอนใหม่อีก |
+| DELETE | `/podcasts/subs/{id}` | viewer | – | เลิกติดตาม |
 | POST | `/podcasts/play` | operator | `{"url", "title", "thumbnail", "content_type", "volume"}` | เล่นตอนหนึ่ง (ล้างคิว) |
 | GET | `/files` | viewer | – | `{"items", "used", "quota", "max_size", "types"}` (เฉพาะไฟล์ที่เห็นได้) |
 | POST | `/files?name=<ชื่อไฟล์>&duration=<วินาที>&personal=1` | viewer | ตัวไฟล์เสียงเป็น body ตรงๆ (ไม่ใช่ form) | อัปโหลด |

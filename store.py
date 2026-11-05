@@ -1,5 +1,5 @@
 """SQLite storage for accounts, passkeys, sessions, playlists, quick phrases, schedules, radio favourites,
-uploaded files and the activity log.
+uploaded files, podcast subscriptions and the activity log.
 
 Every call opens its own short-lived connection, so the store is safe to use from any thread.
 Writes that check-then-change (last-admin guard, reorder, first-run setup) run in one
@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 SESSION_TTL = 30 * 24 * 3600
 ACTIVITY_KEEP = 5000
 
@@ -168,6 +168,22 @@ MIGRATIONS = {
         "ALTER TABLE media_files ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE",
         "CREATE INDEX IF NOT EXISTS media_files_owner ON media_files(owner_id)",
     ],
+    7: [
+        # Podcast subscriptions: personal (each member follows their own shows). latest_at = newest episode seen
+        # in the feed so far, seen_at = when the member last opened the show (episodes after it count as new).
+        """CREATE TABLE IF NOT EXISTS podcast_subs (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            feed_url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            author TEXT,
+            artwork TEXT,
+            latest_at TEXT,
+            seen_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (user_id, feed_url)
+        )""",
+    ],
 }
 USER_SELECT = "SELECT u.*, EXISTS (SELECT 1 FROM passkeys p WHERE p.user_id = u.id) AS has_passkey FROM users u"
 SCHEDULE_COLUMNS = (
@@ -193,6 +209,7 @@ FILE_SELECT = (
     " m.created_at FROM media_files m LEFT JOIN users u ON u.id = m.uploaded_by"
     " LEFT JOIN users o ON o.id = m.owner_id"
 )
+SUB_COLUMNS = "id, feed_url, title, author, artwork, latest_at, seen_at, created_at"
 PLAYLIST_COLUMNS = "p.id, p.name, p.updated_at, p.owner_id, o.display_name AS owner_name"
 PLAYLIST_FROM = "playlists p LEFT JOIN users o ON o.id = p.owner_id"
 
@@ -759,6 +776,52 @@ class Store:
             db.executemany("UPDATE playlists SET updated_at = ? WHERE id = ?", [(now_iso(), p) for p in playlists])
             db.execute("DELETE FROM media_files WHERE id = ?", (file_id,))
             return row
+
+    # --- Podcast subscriptions (personal: every call names the member) ---
+
+    def list_subs(self, user_id):
+        with self.tx() as db:
+            return [dict(r) for r in db.execute(
+                f"SELECT {SUB_COLUMNS} FROM podcast_subs WHERE user_id = ? ORDER BY title COLLATE NOCASE, id",
+                (user_id,),
+            )]
+
+    def get_sub(self, user_id, sub_id=None, feed_url=None, db=None):
+        """The member's subscription by id or by feed URL, or None."""
+        if db is None:
+            with self.tx() as db:
+                return self.get_sub(user_id, sub_id, feed_url, db)
+        column, value = ("id", sub_id) if sub_id is not None else ("feed_url", feed_url)
+        row = db.execute(
+            f"SELECT {SUB_COLUMNS} FROM podcast_subs WHERE user_id = ? AND {column} = ?", (user_id, value)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def add_sub(self, user_id, feed_url, title, author=None, artwork=None, latest_at=None):
+        """Follow a show; following it again keeps the row (and when it was last seen) and refreshes its details."""
+        now = now_iso()
+        with self.tx(immediate=True) as db:
+            db.execute(
+                "INSERT INTO podcast_subs (user_id, feed_url, title, author, artwork, latest_at, seen_at, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (user_id, feed_url) DO UPDATE SET title = excluded.title,"
+                " author = COALESCE(excluded.author, author), artwork = COALESCE(excluded.artwork, artwork),"
+                " latest_at = COALESCE(excluded.latest_at, latest_at)",
+                (user_id, feed_url, title, author, artwork, latest_at, now, now),
+            )
+            return self.get_sub(user_id, feed_url=feed_url, db=db)
+
+    def set_sub_latest(self, sub_id, latest_at):
+        with self.tx() as db:
+            db.execute("UPDATE podcast_subs SET latest_at = ? WHERE id = ?", (latest_at, sub_id))
+
+    def mark_sub_seen(self, user_id, sub_id):
+        with self.tx() as db:
+            db.execute("UPDATE podcast_subs SET seen_at = ? WHERE user_id = ? AND id = ?", (now_iso(), user_id, sub_id))
+            return self.get_sub(user_id, sub_id, db=db)
+
+    def delete_sub(self, user_id, sub_id):
+        with self.tx() as db:
+            return db.execute("DELETE FROM podcast_subs WHERE user_id = ? AND id = ?", (user_id, sub_id)).rowcount > 0
 
     # --- Activity ---
 

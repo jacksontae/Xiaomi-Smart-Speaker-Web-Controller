@@ -5,7 +5,7 @@ from fastapi.routing import APIRoute
 
 # (method, path) -> minimum role; None = public. Adding a route without listing it here fails the suite.
 # Viewers may also edit their own personal playlists and files (checked per row, 403/404 in the handler), skip
-# through the speaker's queue, and search music sources for This device.
+# through the speaker's queue, search music sources for This device, and follow podcasts (personal to each member).
 ROLE_TABLE = {
     ("GET", "/auth/state"): None,
     ("POST", "/auth/setup"): None,
@@ -76,6 +76,10 @@ ROLE_TABLE = {
     ("GET", "/podcasts/search"): "viewer",
     ("GET", "/podcasts/episodes"): "viewer",
     ("POST", "/podcasts/play"): "operator",
+    ("GET", "/podcasts/subs"): "viewer",
+    ("POST", "/podcasts/subs"): "viewer",
+    ("POST", "/podcasts/subs/{sub_id}/seen"): "viewer",
+    ("DELETE", "/podcasts/subs/{sub_id}"): "viewer",
     ("GET", "/files"): "viewer",
     ("POST", "/files"): "viewer",
     ("PATCH", "/files/{file_id}"): "viewer",
@@ -137,7 +141,7 @@ def test_role_table_covers_every_route(app):
 
 def _url(path):
     return path.format(user_id=999, playlist_id=999, item_id=999, phrase_id=999, schedule_id=999,
-                       passkey_id=999, favorite_id=999, file_id=999, filename="x.m4a")
+                       passkey_id=999, favorite_id=999, file_id=999, sub_id=999, filename="x.m4a")
 
 
 def _call(client, method, path):
