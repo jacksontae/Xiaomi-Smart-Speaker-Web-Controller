@@ -1,8 +1,6 @@
 /* Talkie (views/talkie.js): the Announce route on "This device". Prototype .temp/proto-talkie (owner-approved).
    Glass look first; the Android look (M3) at the end. The live bars (.tw-bars) are in shell.css (the pill uses them too). */
-.tw-host { display: contents; }
 .tw-page > :not(.phd) { width: 100%; max-width: 640px; } /* the header keeps the page's width (chip, Help at the right) */
-.tw-side { align-self: stretch; }
 
 .tw-online { display: flex; align-items: center; gap: 10px; margin: 0 4px; min-height: 28px; }
 .tw-faces { display: flex; }

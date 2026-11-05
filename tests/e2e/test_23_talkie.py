@@ -1,6 +1,6 @@
-"""Talkie: on "This device" the Announce page is a walkie-talkie between members. Operators can switch back to the
-speaker's Announce page, viewers only get the Talkie; two members, one holds to talk with Chrome's fake mic, the
-other hears it live and then plays it back from Recent."""
+"""Talkie: on "This device" the Announce page is a walkie-talkie between members, for every role (nothing goes to the
+speaker from there, so there is no speaker side to switch to); two members, one holds to talk with Chrome's fake mic,
+the other hears it live and then plays it back from Recent."""
 import re
 
 import pytest
@@ -17,30 +17,24 @@ def on_this_device(app, route="announce"):
     return p
 
 
-def test_operator_switches_between_talkie_and_speaker(make_app, seeded):
+def test_operator_gets_only_talkie(make_app, seeded):
     app = make_app("operator", device="desktop", route="now")
     p = on_this_device(app)
     app.header("Talkie")
     expect(p.locator(".sb [data-route='announce']")).to_have_text("Talkie")
     assert p.title().startswith("Talkie")
-    mode = p.get_by_role("radiogroup", name="Talk to")
-    expect(mode.get_by_role("radio", name="Talkie")).to_have_attribute("aria-checked", "true")
+    expect(p.locator(".tw-page [role='radiogroup']")).to_have_count(0)  # no Talkie | Speaker switch
+    expect(p.locator("form.ann-card")).to_have_count(0)
     expect(p.get_by_role("button", name="Talk to everyone. Hold to talk")).to_be_visible()
     expect(p.locator(".tw-help")).to_have_text(
         "Everyone with the app open hears you live; others can play it back for 24 h.")
     expect(p.locator(".tw-count")).to_have_text(re.compile(r"\d+ online"))
-    mode.get_by_role("radio", name="Speaker").click()
-    app.header("Announce")
-    expect(p.locator("form.ann-card")).to_be_visible()
-    expect(p.locator(".out-note")).to_be_visible()  # announcements still go to the speaker
-    p.get_by_role("radiogroup", name="Talk to").get_by_role("radio", name="Talkie").click()
-    app.header("Talkie")
     # back on the speaker output the page is Announce again
     p.evaluate("localStorage.setItem('spk.output', 'speaker')")
     p.reload()
     app.header("Announce")
     expect(p.locator(".sb [data-route='announce']")).to_have_text("Announce")
-    expect(p.get_by_role("radiogroup", name="Talk to")).to_have_count(0)
+    expect(p.locator("form.ann-card")).to_be_visible()
     app.clean("talkie operator")
 
 
@@ -49,7 +43,7 @@ def test_viewer_gets_only_talkie(make_app, seeded):
     p = on_this_device(app)
     app.header("ทอล์คกี้")
     expect(p.locator(".tabbar [data-route='announce']")).to_have_text("ทอล์คกี้")
-    expect(p.get_by_role("radiogroup", name="พูดกับ")).to_have_count(0)
+    expect(p.locator(".tw-page [role='radiogroup']")).to_have_count(0)
     expect(p.locator(".tw-label")).to_have_text("กดค้างเพื่อพูด")
     app.clean("talkie viewer")
 

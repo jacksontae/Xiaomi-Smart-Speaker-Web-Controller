@@ -15,8 +15,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Talkie, a walkie-talkie between members: while This device is the music output, the Announce page (and its nav
   label) is Talkie. Hold to talk; everyone with the app open hears it live on any page (a small "is talking" pill,
   "Tap to listen" when the browser blocks the sound), and each talk is kept as a clip for 24 hours under Recent with
-  "Not played yet" per device. One room, one talker at a time, 60 seconds at most; operators and owners switch to
-  the speaker's Announce page at the top, viewers talk too. "Hear Talkie on this device" in App settings
+  "Not played yet" per device. One room, one talker at a time, 60 seconds at most, the same for every role (to
+  announce on the speaker, switch the output back to it). "Hear Talkie on this device" in App settings
   (`WebSocket /talkie`, `GET /talkie/clips`, `GET /talkie/clips/{id}.mp3`, `GET /talkie/live/{id}`; clips in
   `TALKIE_DIR`; database schema 8).
 - UI design reference in `docs/design/`: one HTML page with screenshots of every screen on each device, theme and
