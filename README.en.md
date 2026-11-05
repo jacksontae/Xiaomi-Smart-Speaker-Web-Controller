@@ -286,7 +286,10 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 | DELETE | `/radio/favorites/{id}` | operator | – | Remove a favourite |
 | POST | `/radio/play` | operator | `{"favorite_id"}` or `{"uuid"}` or `{"url", "name"}`, plus `"volume"` | Play radio live (clears the queue) |
 | GET | `/podcasts/search?q=&country=TH&limit=20` | viewer | – | Search shows with the iTunes Search API; results include `feed_url` |
-| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | viewer | – | Read the RSS feed: show details and latest episodes (`limit` up to 200) |
+| GET | `/podcasts/episodes?feed=<feed_url>&limit=50` | viewer | – | Read the RSS feed: show details and latest episodes (`limit` up to 200), plus the caller's `subscription` (or `null`) |
+| GET · POST | `/podcasts/subs` | viewer | `{"feed_url", "title", "author", "artwork"}` | Your followed shows (personal) with `new_count` · follow one (again is fine: same row; without `title` the feed is read) |
+| POST | `/podcasts/subs/{id}/seen` | viewer | – | You opened the show: its episodes so far stop counting as new |
+| DELETE | `/podcasts/subs/{id}` | viewer | – | Unfollow |
 | POST | `/podcasts/play` | operator | `{"url", "title", "thumbnail", "content_type", "volume"}` | Play one episode (clears the queue) |
 | GET | `/files` | viewer | – | `{"items", "used", "quota", "max_size", "types"}` (files you can see) |
 | POST | `/files?name=<file name>&duration=<seconds>&personal=1` | viewer | The audio file itself as the body (not a form) | Upload |

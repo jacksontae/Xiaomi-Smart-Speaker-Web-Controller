@@ -128,6 +128,10 @@ PODCAST_SEARCH = os.environ.get("PODCAST_SEARCH_URL", "https://itunes.apple.com/
 FEED_MAX = 10 * 1024 * 1024  # bytes of RSS we read at most
 FEED_REDIRECTS = 5
 EPISODES_MAX = 200
+FEED_CACHE_TTL = 15 * 60  # a followed show's feed is read at most this often for its "N new" count
+FEED_FAIL_TTL = 5 * 60  # ... and a feed that failed isn't tried again sooner than this
+FEED_CHECKS = 4  # feeds read at once for the Following list
+FEED_CHECK_TIMEOUT = 10  # seconds one feed may take there before it just shows no count
 USER_AGENT = "speaker-service/0.2"  # radio-browser asks clients to identify themselves
 # "This device" stream proxy (/local/stream): for radio a browser can't fetch itself (http:// on an https page)
 STREAM_MAX_BYTES = 512 * 1024 * 1024  # one relayed stream ends after this much (about 9 h of 128 kbit/s radio)
@@ -1493,6 +1497,14 @@ class EpisodePlayBody(BaseModel):
     volume: float | None = Field(None, ge=0, le=1)
 
 
+class SubBody(BaseModel):
+    """Follow a show; without a title the feed is read for its details."""
+    feed_url: str
+    title: str | None = None
+    author: str | None = None
+    artwork: str | None = None
+
+
 class FilePatch(BaseModel):
     title: str
 
@@ -2750,9 +2762,105 @@ async def search_podcasts(
 
 @viewer_api.get("/podcasts/episodes")
 async def podcast_episodes(
-    feed: Annotated[str, Query(min_length=1, max_length=2000)], limit: int = Query(50, ge=1, le=EPISODES_MAX)
+    who: Who,
+    feed: Annotated[str, Query(min_length=1, max_length=2000)], limit: int = Query(50, ge=1, le=EPISODES_MAX),
 ):
-    return parse_feed(await fetch_feed(feed), limit)
+    """The show and its episodes; `subscription` is the caller's (with the seen_at to mark new episodes by) or null."""
+    url = http_url(feed, "feed")
+    show = parse_feed(await fetch_feed(url), EPISODES_MAX)
+    sub = db.get_sub(who.user["id"], feed_url=url) if who.user else None
+    if sub:
+        _feed_cache[url] = (time.monotonic(), show)  # fresh for the Following list too
+        sub = refresh_latest(sub, show)
+    return {**show, "episodes": show["episodes"][:limit], "subscription": sub}
+
+
+# --- Podcast subscriptions: personal, each member follows their own shows ---
+
+_feed_cache = {}  # feed URL -> (monotonic time, parsed show or None when it failed)
+
+
+async def cached_feed(url, gate):
+    """The parsed feed, read again only after FEED_CACHE_TTL; None when it can't be read (no count shown)."""
+    at, show = _feed_cache.get(url, (None, None))
+    if at is not None and time.monotonic() - at < (FEED_CACHE_TTL if show else FEED_FAIL_TTL):
+        return show
+    async with gate:
+        try:
+            show = parse_feed(await asyncio.wait_for(fetch_feed(url), FEED_CHECK_TIMEOUT), EPISODES_MAX)
+        except (HTTPException, TimeoutError):
+            show = None
+    _feed_cache[url] = (time.monotonic(), show)
+    return show
+
+
+def newest_episode(show):
+    return max((ep["published"] for ep in show["episodes"] if ep["published"]), default=None,
+               key=datetime.fromisoformat)
+
+
+def refresh_latest(sub, show):
+    """The subscription with latest_at moved up to the feed's newest episode (stored, so it shows when the feed
+    is down later)."""
+    latest = newest_episode(show)
+    if latest and (not sub["latest_at"] or datetime.fromisoformat(latest) > datetime.fromisoformat(sub["latest_at"])):
+        db.set_sub_latest(sub["id"], latest)
+        sub = sub | {"latest_at": latest}
+    return sub
+
+
+def with_new_count(sub, show):
+    """The row plus `new_count`: episodes published after the member last opened the show (None: feed unreadable)."""
+    if show is None:
+        return sub | {"new_count": None}
+    seen = datetime.fromisoformat(sub["seen_at"])
+    fresh = sum(1 for ep in show["episodes"] if ep["published"] and datetime.fromisoformat(ep["published"]) > seen)
+    return refresh_latest(sub, show) | {"new_count": fresh}
+
+
+def sub_or_404(who, sub_id):
+    sub = db.get_sub(account_of(who)["id"], sub_id)
+    if sub is None:
+        raise HTTPException(404, "No such subscription")
+    return sub
+
+
+@viewer_api.get("/podcasts/subs")
+async def list_subs(who: SignedIn):
+    """The caller's followed shows, each with `new_count` (feeds read a few at a time, cached FEED_CACHE_TTL)."""
+    subs = db.list_subs(account_of(who)["id"])
+    gate = asyncio.Semaphore(FEED_CHECKS)
+    shows = await asyncio.gather(*(cached_feed(s["feed_url"], gate) for s in subs))
+    return [with_new_count(s, show) for s, show in zip(subs, shows, strict=True)]
+
+
+@viewer_api.post("/podcasts/subs")
+async def follow_show(body: SubBody, who: SignedIn):
+    """Follow a show (following it again is fine: the same row comes back). Episodes from now on count as new."""
+    user = account_of(who)
+    url = http_url(body.feed_url, "feed_url")
+    await asyncio.to_thread(check_public_url, url, "feed_url")
+    title = body.title.strip()[:200] if body.title and body.title.strip() else None
+    author, artwork, latest = (body.author or "").strip()[:200] or None, optional_http_url(body.artwork), None
+    if title is None:
+        show = parse_feed(await fetch_feed(url), EPISODES_MAX)
+        _feed_cache[url] = (time.monotonic(), show)
+        title, author, artwork = show["title"] or url[:200], show["author"], show["artwork"]
+        latest = newest_episode(show)
+    return db.add_sub(user["id"], url, title, author, artwork, latest) | {"new_count": 0}
+
+
+@viewer_api.post("/podcasts/subs/{sub_id}/seen")
+async def mark_seen(sub_id: int, who: SignedIn):
+    """The member opened the show: its episodes so far stop counting as new."""
+    sub_or_404(who, sub_id)
+    return db.mark_sub_seen(who.user["id"], sub_id) | {"new_count": 0}
+
+
+@viewer_api.delete("/podcasts/subs/{sub_id}", status_code=204)
+async def unfollow_show(sub_id: int, who: SignedIn):
+    sub_or_404(who, sub_id)
+    db.delete_sub(who.user["id"], sub_id)
 
 
 @operator_api.post("/podcasts/play")

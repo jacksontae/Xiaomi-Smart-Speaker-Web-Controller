@@ -297,7 +297,8 @@ export function trackPlay(tracker, key, { btn, row, title, idleSub, live = false
     if (state === 'playing') setRound(btn, 'stop', t('tb.stopX', title));
     else if (state === 'loading') setRound(btn, 'play', t('tb.loadingX', title));
     else setRound(btn, 'play', here('tb.playOn', title));
-    row.sub.textContent = state === 'loading' ? here('tb.loading') : state === 'playing' ? here(live ? 'tb.live' : 'tb.playing') : idleSub;
+    // idleSub: text, or a list of nodes and text (e.g. a "New" badge before the date) put back when it stops
+    row.sub.replaceChildren(...(state === 'loading' ? [here('tb.loading')] : state === 'playing' ? [here(live ? 'tb.live' : 'tb.playing')] : [].concat(idleSub ?? '')));
   }, row);
 }
 

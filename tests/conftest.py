@@ -132,6 +132,7 @@ def fresh_state(monkeypatch, tmp_path):
     app_module.clear_queue()
     app_module._talk = app_module._talk_last = app_module._talk_on_speaker = None
     app_module._downloads.clear()
+    app_module._feed_cache.clear()
     spawned = SimpleNamespace(watchers=0, prefetch=[], probes=0, cuts=[])
     app_module.reset_reachability()
     monkeypatch.setattr(app_module, "cast_lock", asyncio.Lock())  # a contended lock binds to its test's event loop
