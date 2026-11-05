@@ -25,11 +25,12 @@ register({
     'act.talk': 'Talked live', 'act.device': 'Played on their device', 'act.msgDel': 'Deleted a voice message',
     'act.login': 'Signed in', 'act.loginFail': 'Sign-in failed', 'act.logout': 'Signed out',
     'act.pw': 'Changed their password', 'act.memNew': 'Added a member', 'act.memEdit': 'Changed a member', 'act.memDel': 'Deleted a member',
+    'act.export': 'Downloaded their data',
     'act.gLink': 'Linked a Google account', 'act.gUnlink': 'Unlinked a Google account',
     'act.pkAdd': 'Added a passkey', 'act.pkRename': 'Renamed a passkey', 'act.pkDel': 'Removed a passkey',
     'act.settings': 'Changed speaker settings',
     'act.d.from': (ip) => `From ${ip}`, 'act.d.gFrom': (ip) => `With Google, from ${ip}`, 'act.d.pkFrom': (ip) => `With a passkey, from ${ip}`,
-    'act.d.setup': 'First-time setup', 'act.d.allDevices': 'On all devices',
+    'act.d.setup': 'First-time setup', 'act.d.allDevices': 'On all devices', 'act.d.ownAccount': (u) => `${u} (their own account)`,
   },
   th: {
     'act.ctxN': (n) => `${n} รายการวันนี้`, 'act.ctxNone': 'วันนี้ยังไม่มีรายการ',
@@ -46,11 +47,12 @@ register({
     'act.talk': 'พูดสด', 'act.device': 'เล่นที่อุปกรณ์ของตัวเอง', 'act.msgDel': 'ลบข้อความเสียง',
     'act.login': 'เข้าสู่ระบบ', 'act.loginFail': 'เข้าสู่ระบบไม่สำเร็จ', 'act.logout': 'ออกจากระบบ',
     'act.pw': 'เปลี่ยนรหัสผ่าน', 'act.memNew': 'เพิ่มสมาชิก', 'act.memEdit': 'แก้ไขสมาชิก', 'act.memDel': 'ลบสมาชิก',
+    'act.export': 'ดาวน์โหลดข้อมูลของตัวเอง',
     'act.gLink': 'เชื่อมบัญชี Google', 'act.gUnlink': 'เลิกเชื่อมบัญชี Google',
     'act.pkAdd': 'เพิ่มพาสคีย์', 'act.pkRename': 'เปลี่ยนชื่อพาสคีย์', 'act.pkDel': 'ลบพาสคีย์',
     'act.settings': 'เปลี่ยนการตั้งค่าลำโพง',
     'act.d.from': (ip) => `จาก ${ip}`, 'act.d.gFrom': (ip) => `ด้วย Google จาก ${ip}`, 'act.d.pkFrom': (ip) => `ด้วยพาสคีย์ จาก ${ip}`,
-    'act.d.setup': 'ตั้งค่าครั้งแรก', 'act.d.allDevices': 'ทุกอุปกรณ์',
+    'act.d.setup': 'ตั้งค่าครั้งแรก', 'act.d.allDevices': 'ทุกอุปกรณ์', 'act.d.ownAccount': (u) => `${u} (ลบบัญชีของตัวเอง)`,
   },
 });
 
@@ -86,6 +88,7 @@ const KINDS = {
   'member create': ['act.memNew', own('user-plus'), 'accent', 'acct'],
   'member update': ['act.memEdit', sprite('members'), 'accent', 'acct'],
   'member delete': ['act.memDel', sprite('members'), 'accent', 'acct'],
+  'data export': ['act.export', own('download'), 'plain', 'acct'], // Account > Download my data
   'google link': ['act.gLink', own('link'), 'plain', 'acct'],
   'google unlink': ['act.gUnlink', own('link'), 'plain', 'acct'],
   'passkey add': ['act.pkAdd', sprite('passkey'), 'accent', 'acct'],
@@ -110,6 +113,8 @@ function detailOf(e) {
     if (d === 'first-run setup') return t('act.d.setup');
   }
   if (e.action === 'logout' && d === 'all sessions') return t('act.d.allDevices');
+  const mine = e.action === 'member delete' && d.match(/^(.+) \(own account\)$/); // DELETE /me
+  if (mine) return t('act.d.ownAccount', mine[1]);
   return d;
 }
 

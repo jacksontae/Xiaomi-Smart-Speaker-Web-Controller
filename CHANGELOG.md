@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- "Your data" in Account (phone and Android: under My account; iPad/desktop: Account & app settings), for every
+  member. "Download my data" saves the `GET /me/export` JSON file. "Delete my account" says what goes and what stays
+  and asks for your username before the red button works (`DELETE /me`); then you're signed out on every device.
+  The only owner gets "Can't delete this account yet" with a way to Members instead. Activity names "data export"
+  ("Downloaded their data") and marks a member who deleted their own account. Privacy describes both buttons.
+
 ## [0.6.1] - 2026-11-05
 
 ### Added

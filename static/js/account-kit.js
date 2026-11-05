@@ -1,7 +1,8 @@
 // Account pieces shared by views/account.js (phone Account page) and views/prefs.js (iPad/desktop
 // "Account & app settings"): profile + display name, linked Google account, passkeys, app preferences.
 // Server: GET /auth/state (fresh user + methods), PATCH /users/{me} (display name; owners only — there is no
-// self-service name endpoint), POST/DELETE /me/google, GET/PATCH/DELETE /me/passkeys*, POST /me/passkeys(/options).
+// self-service name endpoint), POST/DELETE /me/google, GET/PATCH/DELETE /me/passkeys*, POST /me/passkeys(/options),
+// GET /me/export (download my data), DELETE /me (delete my account).
 import { h, icon, busy, segmented, toast, field, helpLink, tip } from './ui.js';
 import { register, t, roleLabel } from './i18n.js';
 import { errorText } from './api.js';
@@ -9,7 +10,7 @@ import { get as getPref, set as setPref, motionReduced, onChange as onPrefs } fr
 import { googleCredential } from './signin.js';
 import { createPasskey, createError, passkeyCapable, deviceName } from './passkey-offer.js';
 import { glyph } from './icons.js';
-import { card, badge, tile, gMark, fmtDay, fmtWhen, toneStyle, initialOf, settingRow, linkRow, switchInput } from './kit.js';
+import { caption, card, badge, tile, gMark, fmtDay, fmtWhen, toneStyle, initialOf, settingRow, linkRow, switchInput } from './kit.js';
 import { hearing as hearTalkie, setHearing as setHearTalkie } from './talkie.js';
 
 register({
@@ -45,6 +46,18 @@ register({
     'ca.tour': 'Show quick tour again', 'ca.tourSub': 'A short walk through Now playing and the main pages.',
     'ca.talkie': 'Hear Talkie on this device', 'ca.talkieSub': 'Play other members’ Walkie talks live while the Walkie is open here.',
     'ca.deviceOnly': 'Saved on this device only.',
+    'ca.data': 'Your data',
+    'ca.dl': 'Download my data', 'ca.dlSub': 'A JSON file of your profile, playlists, file list, followed shows and activity',
+    'ca.dlBtn': 'Download', 'ca.dlDone': (f) => `Downloaded ${f}`,
+    'ca.del': 'Delete my account', 'ca.delSub': 'Removes your account and everything personal. This can\'t be undone.',
+    'ca.delBtn': 'Delete account…', 'ca.delTitle': 'Delete your account?',
+    'ca.delGone': 'This removes for good: your sign-in on every device (password, passkeys, linked Google account), your personal playlists and files, followed shows and voice messages.',
+    'ca.delStays': 'Shared playlists, files and schedules you made stay for everyone. Download your data first if you want a copy.',
+    'ca.delType': (u) => `Type your username (${u}) to confirm`, 'ca.delWrong': 'That isn\'t your username.',
+    'ca.deleted': 'Your account was deleted',
+    'ca.lastTitle': 'Can\'t delete this account yet',
+    'ca.last': 'You\'re the only owner. Make another member an owner first, then you can delete your account.',
+    'ca.lastMembers': 'Open Members',
   },
   th: {
     'ca.username': (u) => `ชื่อผู้ใช้ ${u}`, 'ca.displayName': 'ชื่อที่แสดง', 'ca.nameHelp': 'สมาชิกคนอื่นเห็นชื่อนี้ และแสดงในประวัติการใช้งาน',
@@ -78,6 +91,18 @@ register({
     'ca.tour': 'ดูทัวร์แนะนำอีกครั้ง', 'ca.tourSub': 'พาดูหน้าเล่นอยู่และหน้าหลักต่าง ๆ แบบสั้น ๆ',
     'ca.talkie': 'ฟังทอล์คกี้บนอุปกรณ์นี้', 'ca.talkieSub': 'เล่นเสียงวอล์กกี้ของสมาชิกคนอื่นสดๆ ขณะเปิดวอล์กกี้บนเครื่องนี้',
     'ca.deviceOnly': 'บันทึกไว้เฉพาะในอุปกรณ์นี้',
+    'ca.data': 'ข้อมูลของคุณ',
+    'ca.dl': 'ดาวน์โหลดข้อมูลของฉัน', 'ca.dlSub': 'ไฟล์ JSON ของโปรไฟล์ เพลย์ลิสต์ รายชื่อไฟล์ รายการที่ติดตาม และประวัติการใช้งานของคุณ',
+    'ca.dlBtn': 'ดาวน์โหลด', 'ca.dlDone': (f) => `ดาวน์โหลด ${f} แล้ว`,
+    'ca.del': 'ลบบัญชีของฉัน', 'ca.delSub': 'ลบบัญชีและทุกอย่างที่เป็นของคุณ ย้อนกลับไม่ได้',
+    'ca.delBtn': 'ลบบัญชี…', 'ca.delTitle': 'ลบบัญชีของคุณไหม',
+    'ca.delGone': 'สิ่งที่จะถูกลบถาวร: การเข้าสู่ระบบทุกแบบในทุกอุปกรณ์ (รหัสผ่าน พาสคีย์ บัญชี Google ที่ผูกไว้) เพลย์ลิสต์และไฟล์ส่วนตัว รายการที่ติดตาม และข้อความเสียง',
+    'ca.delStays': 'เพลย์ลิสต์ ไฟล์ และตารางเวลาที่แชร์ไว้ยังอยู่ให้ทุกคนใช้ ถ้าอยากเก็บสำเนา ดาวน์โหลดข้อมูลก่อน',
+    'ca.delType': (u) => `พิมพ์ชื่อผู้ใช้ของคุณ (${u}) เพื่อยืนยัน`, 'ca.delWrong': 'ชื่อผู้ใช้ไม่ตรงกับบัญชีของคุณ',
+    'ca.deleted': 'ลบบัญชีของคุณแล้ว',
+    'ca.lastTitle': 'ยังลบบัญชีนี้ไม่ได้',
+    'ca.last': 'คุณเป็นเจ้าของคนเดียว ตั้งสมาชิกคนอื่นเป็นเจ้าของก่อน แล้วจึงลบบัญชีของคุณได้',
+    'ca.lastMembers': 'ไปที่สมาชิก',
   },
 });
 
@@ -266,6 +291,91 @@ export function passkeySection(ctx, auth) {
   }
   load();
   return { card: box, note };
+}
+
+/* ---------- your data ---------- */
+/** "Your data": download my data, delete my account. [caption, card]; phone rows open on tap (Account page),
+ *  iPad/desktop rows have buttons (Account & app settings). */
+export function dataSection(ctx, user, { phone = false } = {}) {
+  let rows;
+  if (phone) {
+    const row = (ic, title, sub, tone, cls, onclick) => h('button', { type: 'button', class: `c-row c-link ${cls}`.trim(), onclick },
+      tile(ic, tone), h('span', { class: 'c-row-tx' }, h('span', { class: 'c-title' }, title), h('span', { class: 'c-sub' }, sub)),
+      h('span', { class: 'c-chev', 'aria-hidden': 'true' }, '›'));
+    rows = [
+      row(glyph('download'), t('ca.dl'), t('ca.dlSub'), 'plain', '', (e) => downloadMine(ctx, e.currentTarget)),
+      row(glyph('trash'), t('ca.del'), t('ca.delSub'), 'danger', 'danger', () => confirmDelete(ctx, user))];
+  } else {
+    const dl = h('button', { type: 'button', class: 'btn' }, glyph('download'), t('ca.dlBtn'));
+    dl.addEventListener('click', () => downloadMine(ctx, dl));
+    const del = h('button', { type: 'button', class: 'btn ca-danger', onclick: () => confirmDelete(ctx, user) }, t('ca.delBtn'));
+    rows = [settingRow({ title: t('ca.dl'), sub: t('ca.dlSub'), control: dl }),
+      settingRow({ title: t('ca.del'), sub: t('ca.delSub'), control: del, cls: 'danger' })];
+  }
+  return [caption(t('ca.data')), card(...rows)];
+}
+
+/** GET /me/export saved as a file. The server's attachment name (speaker-my-data-YYYY-MM-DD.json) is made here
+ *  again: a fetched body isn't a navigation, so the browser never sees its Content-Disposition. */
+function downloadMine(ctx, btn) {
+  return busy(btn, async () => {
+    try {
+      const data = await ctx.api('/me/export');
+      const name = `speaker-my-data-${new Date().toLocaleDateString('en-CA')}.json`;
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+      const a = h('a', { href: url, download: name, hidden: true });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      toast(t('ca.dlDone', name), 'ok');
+    } catch (e) { ctx.fail(e); }
+  }).catch(() => {});
+}
+
+/** Type your username to enable the red button; then DELETE /me signs out here (the server already ended every
+ *  session). The only owner gets a sheet that points to Members instead. */
+function confirmDelete(ctx, user) {
+  const username = user.username;
+  ctx.sheet({
+    title: t('ca.delTitle'),
+    build(body, s) {
+      const input = h('input', { class: 'input', autocomplete: 'off', autocapitalize: 'none', spellcheck: false });
+      const err = h('p', { class: 'form-error', role: 'alert' });
+      const go = h('button', { type: 'button', class: 'btn danger big wide', disabled: true }, t('ca.del'));
+      const typed = () => input.value.trim().toLowerCase();
+      input.addEventListener('input', () => {
+        go.disabled = typed() !== username;
+        err.textContent = '';
+        input.removeAttribute('aria-invalid');
+      });
+      go.addEventListener('click', () => busy(go, async () => {
+        try {
+          await ctx.api('/me', { method: 'DELETE', body: { confirm: typed() } });
+        } catch (e) {
+          if (e.status === 409) { s.close(); lastOwner(ctx); return; }
+          if (e.status === 400) { err.textContent = t('ca.delWrong'); input.setAttribute('aria-invalid', 'true'); input.focus(); return; }
+          err.textContent = errorText(e, ctx.user);
+          return;
+        }
+        await ctx.signOut(null, t('ca.deleted'));
+      }).catch(() => {}));
+      body.append(h('p', {}, t('ca.delGone')), h('p', { class: 'muted' }, t('ca.delStays')),
+        field(t('ca.delType', username), input), err, go,
+        h('button', { type: 'button', class: 'btn big wide', onclick: () => s.close() }, t('common.cancel')));
+    },
+  });
+}
+
+function lastOwner(ctx) {
+  ctx.sheet({
+    title: t('ca.lastTitle'),
+    build(body, s) {
+      body.append(h('div', { class: 'c-confirm' }, h('p', { class: 'form-error', role: 'alert' }, t('ca.last'))),
+        h('a', { class: 'btn primary big wide', href: '#/members' }, t('ca.lastMembers')),
+        h('button', { type: 'button', class: 'btn big wide', onclick: () => s.close() }, t('common.close')));
+    },
+  });
 }
 
 /* ---------- app preferences (per device) ---------- */
