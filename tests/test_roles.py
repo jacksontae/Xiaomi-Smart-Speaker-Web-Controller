@@ -16,6 +16,8 @@ ROLE_TABLE = {
     ("POST", "/auth/password"): "viewer",
     ("POST", "/auth/google"): None,
     ("PATCH", "/me"): "viewer",
+    ("DELETE", "/me"): "viewer",
+    ("GET", "/me/export"): "viewer",
     ("POST", "/me/google"): "viewer",
     ("DELETE", "/me/google"): "viewer",
     ("POST", "/auth/passkey/options"): None,

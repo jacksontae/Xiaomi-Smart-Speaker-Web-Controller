@@ -240,6 +240,10 @@ def now_iso():
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def _iso(timestamp):
+    return datetime.fromtimestamp(timestamp, UTC).isoformat(timespec="seconds")
+
+
 def _schedule(row):
     if row is None:
         return None
@@ -425,6 +429,64 @@ class Store:
             )
             db.execute("DELETE FROM users WHERE id = ?", (user_id,))  # cascades to their playlists and files
             return [f["stored_name"] for f in files]
+
+    def export_user(self, user_id, current_session=None):
+        """Everything stored about one member, for their own download (GET /me/export): no key material, no session
+        token hashes, no file bytes, nothing about other members. A session's last use is known to the hour (the
+        cookie is refreshed at most hourly). Activity rows are matched by display name (`actor` is free text), so
+        they are left out while another member shares that name."""
+        with self.tx() as db:
+            user = _user(db.execute(f"{USER_SELECT} WHERE u.id = ?", (user_id,)).fetchone())
+            if user is None:
+                return None
+            sessions = db.execute(
+                "SELECT token_hash, created_at, expires_at FROM sessions WHERE user_id = ? AND expires_at >= ?"
+                " ORDER BY created_at, rowid", (user_id, time.time()),
+            ).fetchall()
+            passkeys = db.execute("SELECT * FROM passkeys WHERE user_id = ? ORDER BY id", (user_id,)).fetchall()
+            playlists = []
+            for p in db.execute(
+                "SELECT id, name, created_at, updated_at FROM playlists WHERE owner_id = ? ORDER BY id", (user_id,)
+            ).fetchall():
+                items = db.execute(
+                    "SELECT kind, title, source, duration, lang FROM playlist_items WHERE playlist_id = ?"
+                    " ORDER BY position, id", (p["id"],),
+                ).fetchall()
+                playlists.append({k: p[k] for k in ("name", "created_at", "updated_at")}
+                                 | {"items": [dict(i) for i in items]})
+            files = db.execute(
+                "SELECT title, original_name, content_type, size, duration, owner_id IS NOT NULL AS personal,"
+                " created_at FROM media_files WHERE owner_id = ? OR uploaded_by = ? ORDER BY created_at, id",
+                (user_id, user_id),
+            ).fetchall()
+            subs = db.execute(
+                "SELECT feed_url, title, author, artwork, latest_at, seen_at, created_at FROM podcast_subs"
+                " WHERE user_id = ? ORDER BY title COLLATE NOCASE, id", (user_id,),
+            ).fetchall()
+            clips = db.execute(
+                "SELECT id, seconds, created_at FROM talkie_clips WHERE user_id = ? ORDER BY created_at", (user_id,)
+            ).fetchall()
+            shared_name = db.execute(
+                "SELECT 1 FROM users WHERE display_name = ? AND id != ?", (user["display_name"], user_id)
+            ).fetchone()
+            activity = [] if shared_name else db.execute(
+                "SELECT at, action, detail FROM activity WHERE actor = ? ORDER BY id", (user["display_name"],)
+            ).fetchall()
+        return {
+            "profile": {k: user[k] for k in ("username", "display_name", "role", "created_at", "last_login_at",
+                                             "google_email")},
+            "passkeys": [{k: v for k, v in _passkey(r).items() if k != "id"} for r in passkeys],
+            "sessions": [
+                {"created_at": r["created_at"], "last_seen_at": _iso(r["expires_at"] - SESSION_TTL),
+                 "expires_at": _iso(r["expires_at"]), "current": r["token_hash"] == current_session}
+                for r in sessions
+            ],
+            "playlists": playlists,
+            "files": [dict(r) | {"personal": bool(r["personal"])} for r in files],
+            "podcast_subscriptions": [dict(r) for r in subs],
+            "talkie_clips": [dict(r) for r in clips],
+            "activity": [dict(r) for r in activity],
+        }
 
     @staticmethod
     def _check_other_admin(db, user_id):

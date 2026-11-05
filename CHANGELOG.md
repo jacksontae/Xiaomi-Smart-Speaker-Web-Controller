@@ -32,6 +32,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `owner_contact` setting (Speaker settings, "Contact for members"): how members reach the owner; About shows it to
   signed-in members and hides the row when it's empty.
 - `GET /about` (anyone): `version` and `build`; signed in also `server` (`speaker`, `transport`, `owner_contact`).
+- Self-service account data (API only for now): `GET /me/export` downloads the member's own data as JSON
+  (`speaker-my-data-YYYY-MM-DD.json`: profile, passkey names, sessions, personal playlists, uploaded file names and
+  sizes, podcast subscriptions, Talkie clips and their own activity rows; no key material, token hashes or other
+  members), logged as "data export". `DELETE /me` with `{"confirm": "<username>"}` deletes the member's own account
+  with the same cascade as an owner deleting them and signs them out; the only owner gets `409`.
 
 ### Changed
 - The version lives in `version.py` (0.6.0), kept equal to `pyproject.toml` (was 0.2.0) and the newest CHANGELOG

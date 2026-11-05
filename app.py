@@ -1472,6 +1472,10 @@ class MeBody(BaseModel):
     display_name: str
 
 
+class DeleteMeBody(BaseModel):
+    confirm: str = Field(max_length=64)  # the member's username
+
+
 class PasswordBody(BaseModel):
     current: str
     new: str
@@ -1951,6 +1955,36 @@ async def delete_passkey(passkey_id: int, who: SignedIn):
     record(who, "passkey remove", names.get(passkey_id))
 
 
+@app.get("/me/export")
+async def export_me(who: SignedIn):
+    """The member's own data as a JSON download. Device preferences aren't included: they live only in the
+    browser (localStorage), never on the server."""
+    user = account_of(who)
+    data = db.export_user(user["id"], who.session)
+    record(who, "data export")
+    body = {"exported_at": utc_iso(datetime.now(UTC)), "server_version": __version__} | data
+    filename = f"speaker-my-data-{datetime.now(ZONE).date().isoformat()}.json"
+    return JSONResponse(body, headers={"Content-Disposition": f'attachment; filename="{filename}"',
+                                       "Cache-Control": "no-store"})
+
+
+@app.delete("/me", status_code=204)
+async def delete_me(body: DeleteMeBody, who: SignedIn, request: Request, response: Response):
+    """A member deletes their own account, typing their username to confirm (every member has one, whatever
+    their sign-in methods). Same cascade as an owner deleting them; the last owner can't leave the server orphaned."""
+    user = account_of(who)
+    if body.confirm.strip().lower() != user["username"]:
+        raise HTTPException(400, "Type your username to confirm")
+    try:
+        gone = remove_member(user["id"])
+    except Conflict as e:
+        raise HTTPException(409, "You're the only owner; make another member an owner first") from e
+    if not gone:
+        raise HTTPException(404, "No such member")
+    clear_session_cookie(request, response)
+    record(who, "member delete", f"{user['username']} (own account)")
+
+
 # --- Members ---
 
 @admin_api.get("/users")
@@ -2003,18 +2037,28 @@ async def delete_user(user_id: int, who: Who):
     if who.user is not None and who.user["id"] == user_id:
         raise HTTPException(409, "You can't delete yourself")
     target = db.get_user(user_id)
-    clips = db.user_clip_files(user_id) if target is not None else []
     try:
-        stored = db.delete_user(user_id) if target is not None else None
+        gone = target is not None and remove_member(user_id)
     except Conflict as e:
         raise HTTPException(409, str(e)) from e
-    if stored is None:
+    if not gone:
         raise HTTPException(404, "No such member")
+    record(who, "member delete", target["username"])
+
+
+def remove_member(user_id):
+    """Delete the member with everything personal (sessions, passkeys, podcast subscriptions, personal playlists
+    and files, Talkie clips) and the files of those on disk; False if there is no such member. Raises Conflict for
+    the last enabled admin."""
+    clips = db.user_clip_files(user_id)
+    stored = db.delete_user(user_id)
+    if stored is None:
+        return False
     for name in stored:  # their personal files went with them
         (MEDIA_DIR / name).unlink(missing_ok=True)
     for name in clips:  # ... and so did their Talkie clips
         (TALKIE_DIR / name).unlink(missing_ok=True)
-    record(who, "member delete", target["username"])
+    return True
 
 
 # Owner reset: take back a lost phone's passkey or a Google account that isn't the member's any more.
