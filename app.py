@@ -3781,7 +3781,7 @@ async def talk_status():
 #            speaker's /talk is separate). Listeners play GET /talkie/live/{id}, an MP3 stream of the talk as it is
 #            spoken.
 #   message  kept only: never live, takes no lock (several members may record at once), kept as a clip for a day.
-# A start without a mode is both (live, then kept), as before the modes: the app sends none until it knows them.
+# A start must say its mode (the app before the modes, which sent none, never shipped).
 # "In the room" is a connection whose app has the Walkie open (it says so with "room"; one that never said counts
 # as in, as before the room). Only they get the live audio and may start a walkie talk; everyone hears who talks.
 #
@@ -3807,7 +3807,6 @@ async def talk_status():
 # frame and is closed (44xx), as /talk. Only deletes go to the activity log: the rest is chat.
 
 TALKIE_MODES = {"walkie": (True, False), "message": (False, True)}  # mode -> (live, kept)
-TALKIE_UNSAID = (True, True)  # a start without a mode: the app from before the modes
 
 
 @dataclass(eq=False)
@@ -4021,11 +4020,11 @@ async def talkie_start(conn, msg):
     if conn.talk is not None:
         return  # already talking
     mode = msg.get("mode")
-    if mode is not None and mode not in TALKIE_MODES:
+    if not isinstance(mode, str) or mode not in TALKIE_MODES:
         await conn.send({"type": "error", "code": "bad_request",
-                         "detail": f"Unknown mode; use one of {', '.join(sorted(TALKIE_MODES))}"})
+                         "detail": f"Missing or unknown mode; use one of {', '.join(sorted(TALKIE_MODES))}"})
         return
-    live, kept = TALKIE_MODES.get(mode, TALKIE_UNSAID)
+    live, kept = TALKIE_MODES[mode]
     fmt = talk.input_format(msg.get("mime") if isinstance(msg.get("mime"), str) else "")
     if fmt is None:
         await conn.send({"type": "error", "code": "bad_request",

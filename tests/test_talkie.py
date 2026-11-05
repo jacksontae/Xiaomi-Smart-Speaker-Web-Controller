@@ -75,9 +75,13 @@ def drain(ws):
     return kinds
 
 
-def record(ws, mode=None, audio=b"audio"):
-    """Start a talk (in `mode`, or none as the app before the modes), send `audio`, stop; the talker's "ended"."""
-    ws.send_json({"type": "start", "mime": WEBM} | ({"mode": mode} if mode else {}))
+def start(ws, mode="walkie", mime=WEBM):
+    ws.send_json({"type": "start", "mime": mime, "mode": mode})
+
+
+def record(ws, mode, audio=b"audio"):
+    """Start a talk in `mode`, send `audio`, stop; the talker's "ended"."""
+    start(ws, mode)
     until(ws, "ready")
     ws.send_bytes(audio)
     ws.send_json({"type": "stop"})
@@ -102,13 +106,12 @@ def test_presence_counts_a_member_once(room):
             assert names(until(a, "online")["online"]) == ["Alice"]
 
 
-def test_talk_without_a_mode_goes_live_and_is_kept(room, app, talkie):
-    """The app from before the modes: no mode, no room message; the talk is live and kept, as it was."""
+def test_walkie_goes_live_to_the_room(room, app, talkie):
     alice, bob = room("alice"), room("bob", "viewer")
     with alice.websocket_connect("/talkie") as a, bob.websocket_connect("/talkie") as b:
         hello(a), hello(b)
         until(a, "online")
-        a.send_json({"type": "start", "mime": WEBM})
+        start(a)
         ready = a.receive_json()
         assert ready == {"type": "ready", "id": ready["id"], "max_seconds": 60}
         live = until(b, "live")
@@ -119,27 +122,45 @@ def test_talk_without_a_mode_goes_live_and_is_kept(room, app, talkie):
         a.send_json({"type": "stop"})
         ended = until(a, "ended")
         assert until(b, "ended") == ended
-        assert ended["id"] == ready["id"] and ended["reason"] == "stopped"
-        clip = ended["clip"]
-        assert clip["id"] == ready["id"] and clip["name"] == "Alice"
-        assert clip["url"] == f"/talkie/clips/{clip['id']}.mp3"
-        assert until(a, "clip") == until(b, "clip") == {"type": "clip", "clip": clip}
+        assert ended["id"] == ready["id"] and ended["reason"] == "stopped" and ended["clip"] is None
         assert app._talkie is None and talkie.made[0].fmt == "webm" and talkie.made[0].finished
+        assert bob.get(live["url"]).content == b"MP3:oneMP3:two"  # the live stream, for a slow listener
+    assert not any(e["action"] == "talk" for e in app.db.activity())  # chat isn't logged
+
+
+def test_message_is_kept_for_everyone(room, app, talkie):
+    alice, bob = room("alice"), room("bob", "viewer")
+    with alice.websocket_connect("/talkie") as a, bob.websocket_connect("/talkie?room=0") as b:
+        hello(a), hello(b)
+        until(a, "online")
+        clip = record(a, "message", b"hello")["clip"]
+        assert clip["name"] == "Alice" and clip["url"] == f"/talkie/clips/{clip['id']}.mp3"
+        assert until(a, "clip") == until(b, "clip") == {"type": "clip", "clip": clip}  # also outside the room
         with bob.websocket_connect("/talkie") as b2:  # a tab opened later sees the clip
             assert hello(b2)["clips"] == [clip]
-        assert bob.get(live["url"]).content == b"MP3:oneMP3:two"  # the live stream, for a slow listener
     assert bob.get("/talkie/clips").json() == [clip]
     played = bob.get(clip["url"])
-    assert played.content == b"MP3:oneMP3:two" and played.headers["content-type"] == "audio/mpeg"
-    assert (app.TALKIE_DIR / f"{clip['id']}.mp3").read_bytes() == b"MP3:oneMP3:two"
-    assert not any(e["action"] == "talk" for e in app.db.activity())  # chat isn't logged
+    assert played.content == b"MP3:hello" and played.headers["content-type"] == "audio/mpeg"
+    assert (app.TALKIE_DIR / f"{clip['id']}.mp3").read_bytes() == b"MP3:hello"
+
+
+def test_start_must_say_its_mode(room, talkie):
+    alice = room("alice")
+    with alice.websocket_connect("/talkie") as a:
+        hello(a)
+        for mode in ({}, {"mode": None}, {"mode": "shout"}, {"mode": ["walkie"]}):
+            a.send_json({"type": "start", "mime": WEBM} | mode)
+            error = a.receive_json()
+            assert error["code"] == "bad_request" and "Missing or unknown mode" in error["detail"]
+        pong(a)
+    assert talkie.made == []
 
 
 def test_live_stream_follows_the_talk(room, app, talkie):
     alice = room("alice")
     with alice.websocket_connect("/talkie") as a:
         hello(a)
-        a.send_json({"type": "start", "mime": "audio/mp4"})
+        start(a, mime="audio/mp4")
         talk_id = a.receive_json()["id"]
         a.send_bytes(b"x")
         pong(a)
@@ -155,15 +176,15 @@ def test_one_talker_at_a_time(room, talkie):
     alice, bob = room("alice"), room("bob", "viewer")
     with alice.websocket_connect("/talkie") as a, bob.websocket_connect("/talkie") as b:
         hello(a), hello(b)
-        a.send_json({"type": "start", "mime": WEBM})
+        start(a)
         until(a, "ready")
         until(b, "live")
-        b.send_json({"type": "start", "mime": WEBM})
+        start(b)
         assert b.receive_json() == {"type": "error", "code": "busy", "detail": "Alice is talking right now"}
         pong(b)  # the socket stays open
         a.send_json({"type": "stop"})
         until(b, "ended")
-        b.send_json({"type": "start", "mime": WEBM})
+        start(b)
         assert b.receive_json()["type"] == "ready"
         b.send_json({"type": "stop"})
         until(b, "ended")
@@ -268,8 +289,6 @@ def test_walkie_only_from_the_room(room, app, talkie):
         hello(a), hello(b)
         a.send_json({"type": "start", "mime": WEBM, "mode": "walkie"})
         assert until(a, "error") == {"type": "error", "code": "not_in_room", "detail": "Open the Walkie to talk live"}
-        a.send_json({"type": "start", "mime": WEBM})  # no mode is live too
-        assert a.receive_json()["code"] == "not_in_room"
         assert record(a, "message")["clip"]["name"] == "Alice"  # a message needs no room
         a.send_json({"type": "room", "in": True})
         a.send_json({"type": "start", "mime": WEBM, "mode": "walkie"})
@@ -278,9 +297,6 @@ def test_walkie_only_from_the_room(room, app, talkie):
         a.send_json({"type": "room", "in": False})  # leaving the Walkie ends the talk
         assert until(b, "ended")["reason"] == "left_room"
         assert app._talkie is None
-        a.send_json({"type": "start", "mime": WEBM, "mode": "shout"})
-        error = until(a, "error")
-        assert error["code"] == "bad_request" and "Unknown mode" in error["detail"]
     assert len(talkie.made) == 2
 
 
@@ -288,7 +304,7 @@ def test_speaker_talk_is_separate(room, app, talkie, fake_speaker):
     alice = room("alice")
     with alice.websocket_connect("/talkie") as a:
         hello(a)
-        a.send_json({"type": "start", "mime": WEBM})
+        start(a)
         assert a.receive_json()["type"] == "ready"
         with alice.websocket_connect("/talk") as t:
             t.send_json({"type": "start", "mime": WEBM})
@@ -304,7 +320,7 @@ def test_short_talk_keeps_no_clip(room, app, talkie, monkeypatch):
     alice = room("alice")
     with alice.websocket_connect("/talkie") as a:
         hello(a)
-        a.send_json({"type": "start", "mime": WEBM})
+        start(a, "message")
         a.receive_json()
         a.send_bytes(b"blip")
         a.send_json({"type": "stop"})
@@ -312,19 +328,23 @@ def test_short_talk_keeps_no_clip(room, app, talkie, monkeypatch):
     assert alice.get("/talkie/clips").json() == [] and not any(app.TALKIE_DIR.glob("*"))
 
 
-def test_hanging_up_ends_the_talk(room, app, talkie):
+@pytest.mark.parametrize("mode", ["walkie", "message"])
+def test_hanging_up_ends_the_talk(mode, room, app, talkie):
     alice, bob = room("alice"), room("bob", "viewer")
     with bob.websocket_connect("/talkie") as b:
         hello(b)
         with alice.websocket_connect("/talkie") as a:
             hello(a)
-            a.send_json({"type": "start", "mime": WEBM})
+            start(a, mode)
             a.receive_json()
             a.send_bytes(b"hi")
             pong(a)
             a.close()
-            ended = until(b, "ended")
-            assert ended["reason"] == "disconnected" and ended["clip"]["name"] == "Alice"
+            if mode == "walkie":
+                ended = until(b, "ended")
+                assert ended["reason"] == "disconnected" and ended["clip"] is None
+            else:  # what was said is kept
+                assert until(b, "clip")["clip"]["name"] == "Alice"
             assert names(until(b, "online")["online"]) == ["Bob"]
     assert app._talkie is None and talkie.made[0].finished
 
@@ -335,7 +355,7 @@ def test_timers_end_the_talk(limit, reason, room, app, talkie, monkeypatch):
     alice = room("alice")
     with alice.websocket_connect("/talkie") as a:
         hello(a)
-        a.send_json({"type": "start", "mime": WEBM})
+        start(a)
         a.receive_json()
         assert until(a, "ended")["reason"] == reason
         pong(a)  # a member stays connected after their talk
@@ -346,7 +366,7 @@ def test_too_much_audio(room, app, talkie, monkeypatch):
     alice = room("alice")
     with alice.websocket_connect("/talkie") as a:
         hello(a)
-        a.send_json({"type": "start", "mime": WEBM})
+        start(a)
         a.receive_json()
         a.send_bytes(b"x" * 100)
         assert until(a, "ended")["reason"] == "too_large"
@@ -367,7 +387,7 @@ def test_refused_callers(who, headers, code, close, anon, as_role, talkie):
 def test_viewers_may_talk(as_role, talkie):
     with as_role("viewer").websocket_connect("/talkie", headers={"origin": "http://testserver"}) as ws:
         hello(ws)
-        ws.send_json({"type": "start", "mime": WEBM})
+        start(ws)
         assert ws.receive_json()["type"] == "ready"
         ws.send_json({"type": "stop"})
         until(ws, "ended")
@@ -376,11 +396,11 @@ def test_viewers_may_talk(as_role, talkie):
 def test_bad_start(app, as_role, talkie, monkeypatch):
     with as_role("viewer").websocket_connect("/talkie") as ws:
         hello(ws)
-        ws.send_json({"type": "start", "mime": "audio/wav"})
+        start(ws, mime="audio/wav")
         error = ws.receive_json()
         assert error["code"] == "bad_request" and "Unsupported recording format" in error["detail"]
         monkeypatch.setattr(app, "talk_available", lambda: False)
-        ws.send_json({"type": "start", "mime": WEBM})
+        start(ws)
         error = ws.receive_json()
         assert error["code"] == "unavailable" and "ffmpeg" in error["detail"]
         ws.send_bytes(b"stray audio")  # ignored: not talking

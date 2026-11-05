@@ -22,7 +22,7 @@ register({
     'act.schedNew': 'Added a schedule', 'act.schedEdit': 'Changed a schedule', 'act.schedDel': 'Deleted a schedule',
     'act.radioFav': 'Saved a station', 'act.radioUnfav': 'Removed a saved station',
     'act.fileUp': 'Uploaded a file', 'act.fileRename': 'Renamed a file', 'act.fileDel': 'Deleted a file',
-    'act.talk': 'Talked live', 'act.device': 'Played on their device',
+    'act.talk': 'Talked live', 'act.device': 'Played on their device', 'act.msgDel': 'Deleted a voice message',
     'act.login': 'Signed in', 'act.loginFail': 'Sign-in failed', 'act.logout': 'Signed out',
     'act.pw': 'Changed their password', 'act.memNew': 'Added a member', 'act.memEdit': 'Changed a member', 'act.memDel': 'Deleted a member',
     'act.gLink': 'Linked a Google account', 'act.gUnlink': 'Unlinked a Google account',
@@ -43,7 +43,7 @@ register({
     'act.schedNew': 'เพิ่มการตั้งเวลา', 'act.schedEdit': 'แก้การตั้งเวลา', 'act.schedDel': 'ลบการตั้งเวลา',
     'act.radioFav': 'บันทึกสถานีวิทยุ', 'act.radioUnfav': 'เอาสถานีวิทยุออก',
     'act.fileUp': 'อัปโหลดไฟล์', 'act.fileRename': 'เปลี่ยนชื่อไฟล์', 'act.fileDel': 'ลบไฟล์',
-    'act.talk': 'พูดสด', 'act.device': 'เล่นที่อุปกรณ์ของตัวเอง',
+    'act.talk': 'พูดสด', 'act.device': 'เล่นที่อุปกรณ์ของตัวเอง', 'act.msgDel': 'ลบข้อความเสียง',
     'act.login': 'เข้าสู่ระบบ', 'act.loginFail': 'เข้าสู่ระบบไม่สำเร็จ', 'act.logout': 'ออกจากระบบ',
     'act.pw': 'เปลี่ยนรหัสผ่าน', 'act.memNew': 'เพิ่มสมาชิก', 'act.memEdit': 'แก้ไขสมาชิก', 'act.memDel': 'ลบสมาชิก',
     'act.gLink': 'เชื่อมบัญชี Google', 'act.gUnlink': 'เลิกเชื่อมบัญชี Google',
@@ -78,6 +78,7 @@ const KINDS = {
   'file delete': ['act.fileDel', own('music'), 'lotus', 'play'],
   talk: ['act.talk', own('mic'), 'accent', 'play'],
   'device play': ['act.device', sprite('phone'), 'lotus', 'play'], // "This device": only they heard it
+  'message delete': ['act.msgDel', own('trash'), 'accent', 'play'], // a Talkie voice message (the rest of Talkie isn't logged)
   'login ok': ['act.login', own('user'), 'plain', 'acct'],
   'login failed': ['act.loginFail', sprite('key'), 'danger', 'fail'],
   logout: ['act.logout', sprite('logout'), 'plain', 'acct'],
