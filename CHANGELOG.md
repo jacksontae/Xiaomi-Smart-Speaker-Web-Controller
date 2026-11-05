@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-05
+
 ### Added
 - Podcast subscriptions: every member (viewers too) follows shows with the Follow button on a show's episodes,
   and finds them under "Following" in Music > Podcasts with a count of episodes published since they last opened
