@@ -93,6 +93,7 @@ ROLE_TABLE = {
     ("GET", "/talkie/live/{talk_id}"): "viewer",
     ("GET", "/talkie/clips"): "viewer",
     ("GET", "/talkie/clips/{clip_id}.mp3"): "viewer",
+    ("DELETE", "/talkie/clips/{clip_id}"): "viewer",  # and only its author
     # Fetched by the speaker with signed URLs, or the public web UI.
     ("GET", "/tts.mp3"): "signed",
     ("GET", "/yt/{filename}"): "signed",

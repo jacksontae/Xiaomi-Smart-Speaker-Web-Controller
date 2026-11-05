@@ -18,7 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   "Not played yet" per device. One room, one talker at a time, 60 seconds at most, the same for every role (to
   announce on the speaker, switch the output back to it). "Hear Talkie on this device" in App settings
   (`WebSocket /talkie`, `GET /talkie/clips`, `GET /talkie/clips/{id}.mp3`, `GET /talkie/live/{id}`; clips in
-  `TALKIE_DIR`; database schema 8).
+  `TALKIE_DIR`; database schema 8). A talk's `mode` is `walkie` (live to the members in the room, not kept) or
+  `message` (kept, never live, several at once); members delete their own messages (`DELETE /talkie/clips/{id}`).
 - UI design reference in `docs/design/`: one HTML page with screenshots of every screen on each device, theme and
   language, for anyone designing on top of the app.
 

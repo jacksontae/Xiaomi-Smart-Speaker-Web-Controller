@@ -1,4 +1,5 @@
-"""Talkie: the /talkie WebSocket (presence, one talker at a time, live stream, clips) with the fake transcoder."""
+"""Talkie: the /talkie WebSocket (presence and the room, walkie talks one at a time, messages, live stream, clips)
+with the fake transcoder."""
 import asyncio
 import os
 import sqlite3
@@ -61,11 +62,34 @@ def names(online):
     return [m["name"] for m in online]
 
 
+def rooms(online):
+    return {m["name"]: m["in_room"] for m in online}
+
+
+def drain(ws):
+    """The types of the frames that came before the answer to a ping (what this socket was told meanwhile)."""
+    ws.send_json({"type": "ping"})
+    kinds = []
+    while (msg := ws.receive_json())["type"] != "pong":
+        kinds.append(msg["type"])
+    return kinds
+
+
+def record(ws, mode=None, audio=b"audio"):
+    """Start a talk (in `mode`, or none as the app before the modes), send `audio`, stop; the talker's "ended"."""
+    ws.send_json({"type": "start", "mime": WEBM} | ({"mode": mode} if mode else {}))
+    until(ws, "ready")
+    ws.send_bytes(audio)
+    ws.send_json({"type": "stop"})
+    return until(ws, "ended")
+
+
 def test_presence_counts_a_member_once(room):
     alice, bob = room("alice"), room("bob", "viewer")
     with alice.websocket_connect("/talkie") as a:
         first = hello(a)
-        assert first["me"] == alice.user_id and names(first["online"]) == ["Alice"]
+        assert first["me"] == alice.user_id and first["online"] == [{"id": alice.user_id, "name": "Alice",
+                                                                     "in_room": True}]
         assert first["live"] is None and first["clips"] == []
         with bob.websocket_connect("/talkie") as b:
             assert names(hello(b)["online"]) == ["Alice", "Bob"]
@@ -78,7 +102,8 @@ def test_presence_counts_a_member_once(room):
             assert names(until(a, "online")["online"]) == ["Alice"]
 
 
-def test_talk_goes_live_and_is_kept(room, app, talkie):
+def test_talk_without_a_mode_goes_live_and_is_kept(room, app, talkie):
+    """The app from before the modes: no mode, no room message; the talk is live and kept, as it was."""
     alice, bob = room("alice"), room("bob", "viewer")
     with alice.websocket_connect("/talkie") as a, bob.websocket_connect("/talkie") as b:
         hello(a), hello(b)
@@ -98,13 +123,14 @@ def test_talk_goes_live_and_is_kept(room, app, talkie):
         clip = ended["clip"]
         assert clip["id"] == ready["id"] and clip["name"] == "Alice"
         assert clip["url"] == f"/talkie/clips/{clip['id']}.mp3"
+        assert until(a, "clip") == until(b, "clip") == {"type": "clip", "clip": clip}
         assert app._talkie is None and talkie.made[0].fmt == "webm" and talkie.made[0].finished
         with bob.websocket_connect("/talkie") as b2:  # a tab opened later sees the clip
             assert hello(b2)["clips"] == [clip]
+        assert bob.get(live["url"]).content == b"MP3:oneMP3:two"  # the live stream, for a slow listener
     assert bob.get("/talkie/clips").json() == [clip]
     played = bob.get(clip["url"])
     assert played.content == b"MP3:oneMP3:two" and played.headers["content-type"] == "audio/mpeg"
-    assert bob.get(live["url"]).content == b"MP3:oneMP3:two"  # the live stream, for a slow listener
     assert (app.TALKIE_DIR / f"{clip['id']}.mp3").read_bytes() == b"MP3:oneMP3:two"
     assert not any(e["action"] == "talk" for e in app.db.activity())  # chat isn't logged
 
@@ -120,8 +146,9 @@ def test_live_stream_follows_the_talk(room, app, talkie):
         assert app._talkie.id == talk_id and talkie.made[0].fmt == "mp4"
         a.send_json({"type": "stop"})
         until(a, "ended")
-    assert alice.get(f"/talkie/live/{talk_id}").content == b"MP3:x"
-    assert alice.get("/talkie/live/other").status_code == 404
+        assert alice.get(f"/talkie/live/{talk_id}").content == b"MP3:x"
+        assert alice.get("/talkie/live/other").status_code == 404
+    assert alice.get(f"/talkie/live/{talk_id}").status_code == 403  # no longer in the room (nor connected)
 
 
 def test_one_talker_at_a_time(room, talkie):
@@ -140,6 +167,120 @@ def test_one_talker_at_a_time(room, talkie):
         assert b.receive_json()["type"] == "ready"
         b.send_json({"type": "stop"})
         until(b, "ended")
+    assert len(talkie.made) == 2
+
+
+def test_walkie_is_live_and_keeps_no_clip(room, app, talkie):
+    alice, bob = room("alice"), room("bob", "viewer")
+    with alice.websocket_connect("/talkie") as a, bob.websocket_connect("/talkie") as b:
+        hello(a), hello(b)
+        ended = record(a, "walkie", b"hi")
+        assert ended["clip"] is None and ended["reason"] == "stopped"
+        assert drain(b) == ["live", "ended"]  # no "clip"
+        assert bob.get(f"/talkie/live/{ended['id']}").content == b"MP3:hi"
+        assert "clip" not in drain(a)
+    assert alice.get("/talkie/clips").json() == [] and not any(app.TALKIE_DIR.glob("*"))
+
+
+def test_messages_are_never_live_and_take_no_lock(room, app, talkie):
+    alice, bob, carol = room("alice"), room("bob", "viewer"), room("carol", "viewer")
+    with (alice.websocket_connect("/talkie") as a, bob.websocket_connect("/talkie") as b,
+          carol.websocket_connect("/talkie?room=0") as c):
+        hello(a), hello(b), hello(c)
+        drain(a), drain(b)
+        a.send_json({"type": "start", "mime": WEBM, "mode": "message"})
+        b.send_json({"type": "start", "mime": WEBM, "mode": "message"})
+        assert a.receive_json()["type"] == b.receive_json()["type"] == "ready"  # both at once
+        assert app._talkie is None
+        with carol.websocket_connect("/talkie") as c2:  # nor does a walkie talk wait for them
+            hello(c2)
+            assert record(c2, "walkie")["clip"] is None
+            assert drain(a)[-1] == drain(b)[-1] == "ended"
+        drain(c)
+        a.send_bytes(b"from alice")
+        b.send_bytes(b"from bob")
+        a.send_json({"type": "stop"})
+        b.send_json({"type": "stop"})
+        mine = until(a, "ended")["clip"]
+        assert mine["name"] == "Alice" and until(b, "ended")["clip"]["name"] == "Bob"
+        assert drain(c) == ["clip", "clip"]  # nobody else hears of a message until it is kept
+        assert "live" not in drain(a) + drain(b)
+    assert {c["name"] for c in alice.get("/talkie/clips").json()} == {"Alice", "Bob"}
+    assert alice.get(mine["url"]).content == b"MP3:from alice"
+    assert alice.get(f"/talkie/live/{mine['id']}").status_code == 404  # never live
+
+
+def test_message_shorter_than_the_minimum_is_dropped(room, app, talkie, monkeypatch):
+    monkeypatch.setattr(app, "TALKIE_MIN_SECONDS", 0.5)
+    alice = room("alice")
+    with alice.websocket_connect("/talkie") as a:
+        hello(a)
+        assert record(a, "message", b"blip")["clip"] is None
+        assert "clip" not in drain(a)
+    assert alice.get("/talkie/clips").json() == []
+
+
+def test_live_audio_goes_only_to_the_room(room, app, talkie):
+    alice, bob, carol = room("alice"), room("bob", "viewer"), room("carol", "viewer")
+    with alice.websocket_connect("/talkie?room=1") as a, bob.websocket_connect("/talkie?room=0") as b:
+        hello(a)
+        assert rooms(hello(b)["online"]) == {"Alice": True, "Bob": False}
+        drain(a)
+        with carol.websocket_connect("/talkie") as c:  # never says: in the room, as the app before the room
+            hello(c)
+            assert rooms(until(a, "online")["online"]) == {"Alice": True, "Bob": False, "Carol": True}
+            a.send_json({"type": "start", "mime": WEBM, "mode": "walkie"})
+            talk_id = until(a, "ready")["id"]
+            outside, inside = until(b, "live"), until(c, "live")
+            assert "url" not in outside and outside["name"] == "Alice"  # who talks, for "Join"
+            assert inside["url"] == f"/talkie/live/{talk_id}"
+            with bob.websocket_connect("/talkie?room=0") as b2:  # a tab opening mid-talk: who, no audio
+                assert hello(b2)["live"] == {"id": talk_id, "user_id": alice.user_id, "name": "Alice"}
+            assert bob.get(f"/talkie/live/{talk_id}").status_code == 403
+            b.send_json({"type": "room", "in": True})  # Join: the audio comes now
+            assert until(b, "live")["url"] == f"/talkie/live/{talk_id}"
+            assert rooms(until(a, "online")["online"])["Bob"] is True
+            a.send_bytes(b"x")
+            a.send_json({"type": "stop"})
+            until(b, "ended")
+            assert bob.get(f"/talkie/live/{talk_id}").content == b"MP3:x"
+            b.send_json({"type": "room", "in": False})
+            assert rooms(until(a, "online")["online"])["Bob"] is False
+            b.send_json({"type": "room", "in": False})  # no change: nobody is told
+            assert drain(a) == []
+
+
+def test_member_in_the_room_from_any_tab(room, talkie):
+    alice, bob = room("alice"), room("bob", "viewer")
+    with alice.websocket_connect("/talkie?room=0") as a, bob.websocket_connect("/talkie?room=0") as b:
+        hello(a), hello(b)
+        until(a, "online")
+        with bob.websocket_connect("/talkie?room=1") as b2:
+            hello(b2)
+            assert rooms(until(a, "online")["online"]) == {"Alice": False, "Bob": True}
+            b2.close()
+            assert rooms(until(a, "online")["online"]) == {"Alice": False, "Bob": False}
+
+
+def test_walkie_only_from_the_room(room, app, talkie):
+    alice, bob = room("alice"), room("bob", "viewer")
+    with alice.websocket_connect("/talkie?room=0") as a, bob.websocket_connect("/talkie") as b:
+        hello(a), hello(b)
+        a.send_json({"type": "start", "mime": WEBM, "mode": "walkie"})
+        assert until(a, "error") == {"type": "error", "code": "not_in_room", "detail": "Open the Walkie to talk live"}
+        a.send_json({"type": "start", "mime": WEBM})  # no mode is live too
+        assert a.receive_json()["code"] == "not_in_room"
+        assert record(a, "message")["clip"]["name"] == "Alice"  # a message needs no room
+        a.send_json({"type": "room", "in": True})
+        a.send_json({"type": "start", "mime": WEBM, "mode": "walkie"})
+        assert until(a, "ready")["type"] == "ready"
+        until(b, "live")
+        a.send_json({"type": "room", "in": False})  # leaving the Walkie ends the talk
+        assert until(b, "ended")["reason"] == "left_room"
+        assert app._talkie is None
+        a.send_json({"type": "start", "mime": WEBM, "mode": "shout"})
+        error = until(a, "error")
+        assert error["code"] == "bad_request" and "Unknown mode" in error["detail"]
     assert len(talkie.made) == 2
 
 
@@ -261,11 +402,7 @@ def test_signed_out_member_is_dropped(app, talkie):
 def saved_clip(app, client):
     with client.websocket_connect("/talkie") as ws:
         hello(ws)
-        ws.send_json({"type": "start", "mime": WEBM})
-        ws.receive_json()
-        ws.send_bytes(b"audio")
-        ws.send_json({"type": "stop"})
-        return until(ws, "ended")["clip"]
+        return record(ws, "message")["clip"]
 
 
 def test_clips_expire_after_a_day(app, as_role, anon, talkie):
@@ -283,6 +420,35 @@ def test_clips_expire_after_a_day(app, as_role, anon, talkie):
     os.utime(orphan, (time.time() - 90000,) * 2)
     app.talkie_sweep(force=True)
     assert not path.exists() and not orphan.exists() and app.db.get_clip(clip["id"]) is None
+
+
+def test_only_the_author_deletes_a_message(room, app, client, talkie):
+    alice, bob, owner = room("alice", "viewer"), room("bob"), room("olivia", "admin")
+    with alice.websocket_connect("/talkie") as a, bob.websocket_connect("/talkie") as b:
+        hello(a), hello(b)
+        clip = record(a, "message")["clip"]
+        path = app.TALKIE_DIR / f"{clip['id']}.mp3"
+        assert bob.delete(f"/talkie/clips/{clip['id']}").status_code == 403
+        assert owner.delete(f"/talkie/clips/{clip['id']}").status_code == 403  # not even the owner
+        assert client.delete(f"/talkie/clips/{clip['id']}").status_code == 400  # the API token is no member
+        assert path.exists()
+        assert alice.delete(f"/talkie/clips/{clip['id']}").status_code == 204
+        assert until(a, "clip_deleted") == until(b, "clip_deleted") == {"type": "clip_deleted", "id": clip["id"]}
+        assert not path.exists() and app.db.get_clip(clip["id"]) is None
+        assert alice.get("/talkie/clips").json() == [] and alice.get(clip["url"]).status_code == 404
+        assert alice.delete(f"/talkie/clips/{clip['id']}").status_code == 404
+        assert alice.delete("/talkie/clips/nothing").status_code == 404
+    logged = [e for e in app.db.activity() if e["action"] == "message delete"]
+    assert len(logged) == 1 and logged[0]["actor"] == "Alice"
+
+
+def test_expired_message_cannot_be_deleted(app, as_role, talkie):
+    viewer = as_role("viewer")
+    clip = saved_clip(app, viewer)
+    old = (datetime.now(UTC) - timedelta(hours=25)).isoformat(timespec="seconds")
+    with app.db.tx() as db:
+        db.execute("UPDATE talkie_clips SET created_at = ?", (old,))
+    assert viewer.delete(f"/talkie/clips/{clip['id']}").status_code == 404
 
 
 def test_sweep_runs_at_most_hourly(app, talkie, monkeypatch):
