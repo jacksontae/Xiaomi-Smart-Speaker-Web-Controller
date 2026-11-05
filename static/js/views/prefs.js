@@ -1,12 +1,12 @@
 // App settings (boards Prefs / T_Prefs / D_Prefs). Everyone.
 // Phone: per-device app settings only (language, appearance, reduce motion) + a link to Speaker settings for owners.
 // iPad/desktop: "Account & app settings": the account (profile, password, Google, passkeys, sign-in methods link
-// for owners) next to the app settings. Preferences use prefs.js and apply app-wide right away.
+// for owners, your data) next to the app settings. Preferences use prefs.js and apply app-wide right away.
 import { h, icon } from '../ui.js';
 import { register, t, roleLabel } from '../i18n.js';
 import { isPhone } from '../sheet.js';
 import { caption, card, settingRow, linkRow, tile, phoneBack } from '../kit.js';
-import { freshAuth, profileHead, googleRow, passkeySection, appPrefsCard } from '../account-kit.js';
+import { freshAuth, profileHead, googleRow, passkeySection, appPrefsCard, dataSection } from '../account-kit.js';
 import { glyph } from '../icons.js';
 
 register({
@@ -60,7 +60,8 @@ export function large(ctx, auth, title) {
   const left = h('div', { class: 'c-col' },
     caption(t('pref.account')), acctCard,
     pk ? [caption(t('ca.passkeys')), pk.card, pk.note] : null,
-    ctx.can('admin') ? [caption(roleLabel('admin')), card(linkRow({ href: '#/auth', title: t('nav.auth'), sub: t('pref.methodsSub'), lead: tile(icon('lock'), 'plain') }))] : null);
+    ctx.can('admin') ? [caption(roleLabel('admin')), card(linkRow({ href: '#/auth', title: t('nav.auth'), sub: t('pref.methodsSub'), lead: tile(icon('lock'), 'plain') }))] : null,
+    dataSection(ctx, user));
   const right = h('div', { class: 'c-col' }, caption(t('pref.app')), appPrefsCard(ctx), h('p', { class: 'c-note' }, t('pref.deviceNote')),
     ctx.can('admin') ? [caption(t('pref.speaker')), card(linkRow({ href: '#/settings', title: t('nav.settings'), sub: t('pref.speakerSub'), lead: tile(glyph('gear'), 'lamp') }))] : null,
     caption(t('pref.about')), card(linkRow({ href: '#/about', title: t('pref.aboutApp'), sub: aboutSub, lead: tile(icon('info'), 'plain') })));

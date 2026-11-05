@@ -39,6 +39,7 @@ is installed.
 | `test_13_phone_app.py` | phone feels like an app: no zoom (viewport, 16 px fields, iOS gestures), no sideways scroll under stress (320/390 px, long text, toasts, sheets, animations), toasts always go away, touch tooltips open on tap only, same Announce mode switch on Announce and Schedule, no blank frame on page change |
 | `test_17_this_device.py` | "This device" output: picker, a playlist's TTS item played in the browser (signed link, no speaker call), seek, notes, persistence, viewer |
 | `test_24_about_policy.py` | About / Privacy / Licenses: signed out from the sign-in page, Account → About, owner contact shown/hidden, Licenses rows, Thai |
+| `test_25_self_service.py` | Your data: Download my data (JSON with the member's username), Delete my account (username to confirm, signed out, can't sign in again, Activity entry), the only owner's refusal sheet → Members; phone and desktop |
 
 ## Run it
 

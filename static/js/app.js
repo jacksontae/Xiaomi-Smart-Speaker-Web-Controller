@@ -91,7 +91,8 @@ function makeCtx(params = [], route = null) {
       motionReduced,
       accountItems: (close) => (shell ? shell.accountItems(close) : []),
       changePassword: () => shell && shell.changePassword(),
-      signOut: (path = '/auth/logout') => signOut(path),
+      /** path null: the session is already gone (the account was deleted); `note` replaces "Signed out". */
+      signOut: (path = '/auth/logout', note) => signOut(path, note),
       /** Signed in (login/setup screens): start the app with this user. */
       signedIn: (user) => { state.user = user; startApp(); },
     },
@@ -228,15 +229,17 @@ function pickOutput(s) {
   render(false); // pages word things by output (notes, "on this device"): build the current one again
 }
 
-async function signOut(path) {
+async function signOut(path, note) {
   local.stop(); // the output choice stays for this browser; the music stops with the session
   talkie.stop();
-  try { await api(path, { method: 'POST', allow401: true }); } catch (e) { if (e.status !== 401) { fail(e); throw e; } }
+  if (path) {
+    try { await api(path, { method: 'POST', allow401: true }); } catch (e) { if (e.status !== 401) { fail(e); throw e; } }
+  }
   state.user = null;
   state.status = null;
   closeAllSheets();
   history.replaceState(null, '', '#/');
-  toast(t('acct.signedOut'), 'ok');
+  toast(note || t('acct.signedOut'), 'ok');
   boot();
 }
 
