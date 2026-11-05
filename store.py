@@ -513,13 +513,20 @@ class Store:
             rows = db.execute(
                 f"""SELECT {PLAYLIST_COLUMNS},
                           (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id) AS item_count,
+                          (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id AND i.kind != 'tts')
+                              AS media_count,
                           (SELECT COALESCE(SUM(duration), 0) FROM playlist_items i WHERE i.playlist_id = p.id)
                               AS total_duration,
                           (SELECT thumbnail FROM playlist_items i WHERE i.playlist_id = p.id
                               AND thumbnail IS NOT NULL ORDER BY position, id LIMIT 1) AS cover
                    FROM {PLAYLIST_FROM} ORDER BY p.name COLLATE NOCASE, p.id"""
             ).fetchall()
-        return [dict(r) | {"total_duration": float(r["total_duration"])} for r in rows]
+        # tts_only: every item is an announcement (the Playlists page files it under Announcements; empty is music)
+        return [
+            {k: v for k, v in dict(r).items() if k != "media_count"}
+            | {"total_duration": float(r["total_duration"]), "tts_only": bool(r["item_count"]) and not r["media_count"]}
+            for r in rows
+        ]
 
     def get_playlist(self, playlist_id, db=None):
         if db is None:

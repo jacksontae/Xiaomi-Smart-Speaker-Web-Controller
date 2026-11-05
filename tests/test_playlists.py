@@ -115,8 +115,19 @@ def test_playlist_summary_list(client, fake_yt):
     assert empty["item_count"] == 0 and empty["total_duration"] == 0 and empty["cover"] is None
     assert full["item_count"] == 3 and full["total_duration"] == 813.5
     assert full["cover"] == "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"
-    assert set(full) == {"id", "name", "item_count", "total_duration", "updated_at", "cover",
+    assert set(full) == {"id", "name", "item_count", "total_duration", "updated_at", "cover", "tts_only",
                          "owner_id", "owner_name", "mine", "can_edit"}
+    assert empty["tts_only"] is False and full["tts_only"] is False  # empty and mixed playlists count as music
+
+
+def test_playlist_list_tts_only(client):
+    pid = new_playlist(client, "Notices")["id"]
+    add(client, pid, kind="tts", source="first")
+    add(client, pid, kind="tts", source="second")
+    [p] = client.get("/playlists").json()
+    assert p["tts_only"] is True and p["item_count"] == 2
+    assert add(client, pid, kind="url", source="https://radio.example/live.mp3", title="Radio").status_code == 200
+    assert client.get("/playlists").json()[0]["tts_only"] is False
 
 
 def test_reorder_and_delete_items(client):

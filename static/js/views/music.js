@@ -3,7 +3,7 @@
 // "My files" (upload with progress, rename, delete). Every result plays on the speaker or goes into a playlist.
 // Spotify is not offered this round and Joox / Apple Music can't be: a Help link explains (no fake buttons).
 // The source is part of the hash (#/music/radio) so other pages can link straight to one.
-import { h, icon, iconBtn, field, busy, segmented, helpLink } from '../ui.js';
+import { h, icon, iconBtn, field, busy, segmented, helpLink, headerSub } from '../ui.js';
 import { register, t, fmtDur, lang } from '../i18n.js';
 import { errorText, ApiError } from '../api.js';
 import {
@@ -15,6 +15,9 @@ import { glyph } from '../icons.js';
 
 register({
   en: {
+    // the header's context line (Android): what's playing, else what the page is for
+    'music.ctxIdle': 'Pick a source, then play it on the speaker', 'music.ctxIdle.here': 'Pick a source, then play it on this device',
+    'music.ctxPlaying': (x) => `Speaker is playing ${x}`, 'music.ctxPlaying.here': (x) => `Playing ${x} on this device`,
     'music.sources': 'Music source',
     'music.src.youtube': 'YouTube', 'music.src.radio': 'Radio', 'music.src.podcasts': 'Podcasts', 'music.src.files': 'My files',
     'music.whyJoox': 'Why isn’t Spotify, Joox or Apple Music here?', 'music.whyJooxShort': 'Where are Spotify, Joox and Apple Music?',
@@ -44,6 +47,8 @@ register({
     'music.filesPrivate': 'Files you upload are private: only you and the owner can see them.',
   },
   th: {
+    'music.ctxIdle': 'เลือกแหล่งเพลง แล้วเล่นที่ลำโพงได้ทันที', 'music.ctxIdle.here': 'เลือกแหล่งเพลง แล้วเล่นที่อุปกรณ์นี้ได้ทันที',
+    'music.ctxPlaying': (x) => `ลำโพงกำลังเล่น ${x}`, 'music.ctxPlaying.here': (x) => `กำลังเล่น ${x} ที่อุปกรณ์นี้`,
     'music.sources': 'แหล่งเพลง',
     'music.src.youtube': 'YouTube', 'music.src.radio': 'วิทยุ', 'music.src.podcasts': 'พอดแคสต์', 'music.src.files': 'ไฟล์ของฉัน',
     'music.whyJoox': 'ทำไมไม่มี Spotify, Joox หรือ Apple Music', 'music.whyJooxShort': 'Spotify, Joox และ Apple Music อยู่ไหน',
@@ -104,8 +109,9 @@ export async function render(ctx) {
     },
   });
 
+  const head = ctx.header({ title: t('nav.music'), actions: why('mu-why-lg'), sub: here('music.ctxIdle') });
   const node = h('div', { class: 'page mu' },
-    ctx.header({ title: t('nav.music'), actions: why('mu-why-lg') }),
+    head,
     seg, panel, why('mu-why-ph'));
 
   function show() {
@@ -115,7 +121,15 @@ export async function render(ctx) {
     panel.classList.remove('enter'); void panel.offsetWidth; panel.classList.add('enter');
   }
   show();
-  return { node, onStatus: (s) => tracker.onStatus(s) };
+  return {
+    node,
+    onStatus(s) {
+      tracker.onStatus(s);
+      const m = s.status && !s.error && s.status.media;
+      const playing = m && m.title && m.title !== 'Announcement' && (m.state === 'PLAYING' || m.state === 'BUFFERING');
+      headerSub(head, playing ? here('music.ctxPlaying', m.title) : here('music.ctxIdle'));
+    },
+  };
 }
 
 /* ---------- shared row builders ---------- */

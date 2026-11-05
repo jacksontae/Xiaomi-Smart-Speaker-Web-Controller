@@ -6,7 +6,7 @@
 // as the output (status.local, local-player.js) it seeks the browser's player directly.
 // The page marks its state in data-np (playing, paused, loading, announce, idle, off): Android tints the player card
 // with it and draws the wavy progress (wavy.js), whose wave only moves while playing.
-import { h, icon, iconBtn, tip, busy } from '../ui.js';
+import { h, icon, iconBtn, tip, busy, headerSub } from '../ui.js';
 import { register, t, fmtDur, fmtRel } from '../i18n.js';
 import { speaker3d } from '../speaker3d.js';
 import { isAndroid } from '../prefs.js';
@@ -65,6 +65,12 @@ register({
     'now.idleLocal': 'Nothing is playing on this device. Pick a playlist or some music.',
     'now.localNote': (x) => `Music plays on this device only. Announcements, live talk and schedules still play on ${x || 'the speaker'}.`,
     'now.seekHint': 'Use the arrow keys to move 10 seconds',
+    // the header's context line (Android): what the output is doing; x = speaker name
+    'now.ctxPlaying': (x) => `${x || 'Speaker'} is playing`, 'now.ctxPaused': (x) => `${x || 'Speaker'} is paused`,
+    'now.ctxLoading': (x) => `${x || 'Speaker'} is loading…`, 'now.ctxAnnouncing': (x) => `${x || 'Speaker'} is announcing`,
+    'now.ctxIdle': (x) => `${x || 'Speaker'} connected, nothing playing`, 'now.ctxOff': (x) => `${x || 'Speaker'} is offline`,
+    'now.ctxPlaying.here': 'Playing on this device', 'now.ctxPaused.here': 'Paused on this device',
+    'now.ctxLoading.here': 'Loading on this device…', 'now.ctxIdle.here': 'Playing on this device, nothing yet',
   },
   th: {
     'now.idleTitle': 'ไม่ได้เล่นอะไร',
@@ -116,6 +122,11 @@ register({
     'now.idleLocal': 'อุปกรณ์นี้ไม่ได้เล่นอะไร เลือกเพลย์ลิสต์หรือเพลงได้เลย',
     'now.localNote': (x) => `เพลงเล่นเฉพาะที่อุปกรณ์นี้ ส่วนประกาศ พูดสด และตารางเวลายังออกที่${x || 'ลำโพง'}`,
     'now.seekHint': 'กดปุ่มลูกศรเพื่อเลื่อนทีละ 10 วินาที',
+    'now.ctxPlaying': (x) => `${x || 'ลำโพง'} กำลังเล่น`, 'now.ctxPaused': (x) => `${x || 'ลำโพง'} พักไว้`,
+    'now.ctxLoading': (x) => `${x || 'ลำโพง'} กำลังโหลด…`, 'now.ctxAnnouncing': (x) => `${x || 'ลำโพง'} กำลังประกาศ`,
+    'now.ctxIdle': (x) => `${x || 'ลำโพง'} เชื่อมต่ออยู่ ยังไม่ได้เล่นอะไร`, 'now.ctxOff': (x) => `${x || 'ลำโพง'} ออฟไลน์`,
+    'now.ctxPlaying.here': 'กำลังเล่นที่อุปกรณ์นี้', 'now.ctxPaused.here': 'พักไว้ที่อุปกรณ์นี้',
+    'now.ctxLoading.here': 'กำลังโหลดที่อุปกรณ์นี้…', 'now.ctxIdle.here': 'เล่นที่อุปกรณ์นี้ ยังไม่ได้เล่นอะไร',
   },
 });
 
@@ -255,7 +266,8 @@ export async function render(ctx) {
   const mainCol = h('div', { class: 'np-col' },
     h('div', { class: 'np-hero' }, h('div', { class: 'np-stage' }, spk.el), meta),
     prog, liveTag, h('div', { class: 'np-ctrls' }, transport, volume), idleActs, offActs, localNote);
-  const node = h('div', { class: 'page now-page' }, ctx.header({ title: t('nav.now') }),
+  const head = ctx.header({ title: t('nav.now') });
+  const node = h('div', { class: 'page now-page' }, head,
     h('div', { class: 'np-grid' }, mainCol, h('div', { class: 'np-side' }, queueBox, relayBox)));
 
   /* ----- commands ----- */
@@ -299,9 +311,19 @@ export async function render(ctx) {
     art.hidden = false;
   }
 
+  /** The header's context line: the output and what it's doing (the state in data-np), live with each poll. */
+  function paintSub() {
+    const np = node.dataset.np;
+    if (np === 'off') { headerSub(head, t('now.ctxOff', st && st.speaker)); return; }
+    const key = { playing: 'now.ctxPlaying', paused: 'now.ctxPaused', loading: 'now.ctxLoading', announce: 'now.ctxAnnouncing', idle: 'now.ctxIdle' }[np];
+    if (!key || !st) return;
+    headerSub(head, st.local && np !== 'announce' ? t(`${key}.here`) : t(key, st.speaker));
+  }
+
   function showOffline(e) {
     spk.setState('spk-off');
     node.dataset.np = 'off';
+    paintSub();
     kindEl.textContent = '';
     title.textContent = t('now.offTitle');
     line.textContent = e && e.status === 0 ? t('now.offServer') : t('now.offLine');
@@ -354,6 +376,7 @@ export async function render(ctx) {
 
     renderQueue(q, m);
     tick();
+    paintSub();
   }
 
   function statusLine(m, q, announcing) {
