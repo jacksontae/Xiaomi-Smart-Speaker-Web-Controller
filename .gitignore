@@ -20,7 +20,15 @@ firmware/.pio/
 data.db
 data.db-*
 
-# Remote deployment secrets (deploy/remote/.env.example is the template)
+# Docker settings and secrets (.env.example and deploy/vm/.env.example are the templates)
+/.env
+deploy/vm/.env
+deploy/vm/mosquitto/passwd
+deploy/vm/mosquitto/acl
+# Where they lived before the stack moved to deploy/vm/ (may still sit on a VM checkout)
 deploy/remote/.env
 deploy/remote/mosquitto/passwd
 deploy/remote/mosquitto/acl
+
+# Nightly backups of the home setup (compose.yaml)
+/backups/

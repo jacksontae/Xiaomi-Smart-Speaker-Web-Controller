@@ -1,0 +1,44 @@
+# Home / LAN setup (e.g. the Mac next to the speaker): the service talks Cast to the speaker directly, and the
+# speaker fetches audio from the service over HTTP. The remote VM stack is deploy/vm/compose.yaml.
+#
+#   cp .env.example .env            # set PUBLIC_BASE_URL to this computer's LAN address
+#   scripts/speaker up              # = docker compose up -d --build
+#
+# Docker Desktop runs containers in a small VM, so inside the container the service only sees its own
+# private address, which the speaker can't reach. PUBLIC_BASE_URL tells it the address to put in the
+# media links instead: this computer's LAN IP and the published port below.
+
+name: speaker
+
+x-speaker-build: &speaker-build
+  context: .
+  dockerfile: Dockerfile
+
+services:
+  speaker-service:
+    build: *speaker-build
+    restart: unless-stopped
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL in .env (http://<this computer's LAN IP>:8090)}
+      TZ: ${TZ:-UTC}                            # schedules run in this zone
+    volumes:
+      - speaker-data:/data                      # config.json, data.db, uploads, YouTube cache
+    # On every interface, like the old LaunchAgent: browsers and the speaker on the LAN connect here.
+    # The port inside the container is config.json's "port" (keep it 8090); change the outside one here.
+    ports:
+      - "${SPEAKER_PORT:-8090}:8090"
+
+  # Nightly backup of data.db and config.json into ./backups (a plain folder, so Time Machine sees it).
+  backup:
+    build: *speaker-build
+    restart: unless-stopped
+    command: ["python", "-m", "server.backup", "--daemon"]
+    environment:
+      BACKUP_TIME: ${BACKUP_TIME:-03:30}        # HH:MM, UTC
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}           # newest backups kept
+    volumes:
+      - speaker-data:/data
+      - ./backups:/backups
+
+volumes:
+  speaker-data:

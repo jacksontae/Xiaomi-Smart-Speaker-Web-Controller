@@ -1,0 +1,106 @@
+#!/bin/sh
+# Run the speaker service with Docker Compose, on the home Mac (compose.yaml) or the VM (deploy/vm/compose.yaml).
+#
+#   scripts/speaker [--vm] <command>      (or SPEAKER_STACK=vm scripts/speaker <command>)
+#
+#   up                  build and start (also after changing .env)
+#   down                stop and remove the containers; volumes (database, settings, backups) are kept
+#   restart [service]   restart everything, or one service (speaker-service, backup, mosquitto, cloudflared)
+#   status              containers and their state
+#   logs [n] [service]  follow the logs, last n lines first (default 50), default service speaker-service
+#   update              back up, git pull, rebuild from scratch (newest yt-dlp) and restart
+#   backup              one backup now          backups   list backups
+#   token [--rotate]    print the API token; --rotate makes a new one (old token and media links stop working)
+#   config              edit config.json in the volume, then restart the service
+#   import <dir>        Mac only, once: copy config.json, data.db and media/ from an old (LaunchAgent) checkout
+set -eu
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+STACK=${SPEAKER_STACK:-local}
+[ "${1:-}" = "--vm" ] && { STACK=vm; shift; }
+case "${1:-}" in
+  up|down|restart|status|logs|update|backup|backups|token|config|import) ;;
+  *) sed -n '2,16s/^# \{0,1\}//p' "$0"; exit 1 ;;
+esac
+
+if [ "$STACK" = vm ]; then
+  FILE=$ROOT/deploy/vm/compose.yaml ENV=$ROOT/deploy/vm/.env
+  # The stack moved from deploy/remote/; its git-ignored secrets don't move with a git pull.
+  for f in .env mosquitto/passwd mosquitto/acl; do
+    if [ -e "$ROOT/deploy/remote/$f" ] && [ ! -e "$ROOT/deploy/vm/$f" ]; then
+      echo "deploy/remote/$f must move to deploy/vm/$f first (see README, "Moving from the LaunchAgent")" >&2; exit 1
+    fi
+  done
+else
+  FILE=$ROOT/compose.yaml ENV=$ROOT/.env
+fi
+[ -f "$ENV" ] || { echo "missing ${ENV#"$ROOT"/}: copy it from ${ENV#"$ROOT"/}.example and fill it in" >&2; exit 1; }
+dc() { docker compose -f "$FILE" "$@"; }
+
+# Run Python inside the running service (it reads and writes config.json as the service's own user).
+py() { dc exec -T speaker-service python -c "$1"; }
+
+case "${1:-}" in
+  up)       dc up -d --build ;;
+  down)     dc down ;;
+  restart)  shift; dc restart "$@" ;;
+  status)   dc ps ;;
+  logs)     n=50; case "${2:-}" in ''|*[!0-9]*) ;; *) n=$2; shift ;; esac
+            dc logs -f --tail "$n" "${2:-speaker-service}" ;;
+  update)   dc exec -T backup python -m server.backup --now || echo "no backup made (stack not running?)" >&2
+            git -C "$ROOT" pull --ff-only
+            # No cache: requirements.txt rarely changes, and yt-dlp must be the newest to keep up with YouTube.
+            dc build --pull --no-cache
+            dc up -d ;;
+  backup)   dc exec -T backup python -m server.backup --now ;;
+  backups)  dc exec -T backup python -m server.backup --list ;;
+  token)    if [ "${2:-}" = --rotate ]; then
+              py 'import json, os, secrets
+p = os.environ["CONFIG_PATH"]
+cfg = json.load(open(p))
+cfg["api_token"] = secrets.token_urlsafe(32)
+with open(p, "w") as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+os.chmod(p, 0o600)'
+              dc restart speaker-service >/dev/null
+              echo "new token (old one and old media links stop working):" >&2
+            fi
+            py 'import json, os; print(json.load(open(os.environ["CONFIG_PATH"])).get("api_token") or "")' ;;
+  config)   tmp=$(umask 077; mktemp) && trap 'rm -f "$tmp"' EXIT
+            dc exec -T speaker-service cat /data/config.json > "$tmp"
+            ${EDITOR:-nano} "$tmp"
+            dc exec -T speaker-service python -m json.tool < "$tmp" > /dev/null || { echo "not valid JSON; nothing changed" >&2; exit 1; }
+            dc exec -T speaker-service sh -c 'cat > /data/config.json' < "$tmp"
+            dc restart speaker-service ;;
+  import)   [ "$STACK" = local ] && [ -n "${2:-}" ] || { echo "usage: scripts/speaker import <old checkout dir>" >&2; exit 1; }
+            src=$(cd "$2" && pwd)
+            [ -f "$src/data.db" ] || [ -f "$src/config.json" ] || { echo "no config.json or data.db in $src" >&2; exit 1; }
+            if launchctl print "gui/$(id -u)/local.speaker-service" > /dev/null 2>&1; then
+              echo "the old LaunchAgent is still running; stop it first:" >&2
+              echo "  launchctl bootout gui/\$(id -u)/local.speaker-service" >&2; exit 1
+            fi
+            dc build speaker-service
+            dc stop speaker-service backup 2> /dev/null || true
+            # As root in a throwaway container. What the volume already has is kept as *.before-import-<time>
+            # (the database with its -wal/-shm: a stale WAL must never be replayed onto the imported file).
+            dc run --rm --no-deps --user root -v "$src:/old:ro" --entrypoint sh speaker-service -c '
+              set -e; t=$(date +%Y%m%d-%H%M%S)
+              keep() { [ ! -e "/data/$1" ] || mv "/data/$1" "/data/$1.before-import-$t"; }
+              [ ! -e /old/data.db ] || { keep data.db; keep data.db-wal; keep data.db-shm; }
+              for f in config.json media; do [ ! -e "/old/$f" ] || keep "$f"; done
+              for f in config.json data.db data.db-wal media; do
+                [ ! -e "/old/$f" ] || { cp -R "/old/$f" /data/; echo "copied $f"; }
+              done
+              chown -R speaker /data; chmod 600 /data/config.json 2> /dev/null || true'
+            # Inside the container the service must listen on 8090 (compose.yaml publishes SPEAKER_PORT to it).
+            dc run --rm --no-deps -T speaker-service python -c 'import json, os
+p = os.environ["CONFIG_PATH"]
+cfg = json.load(open(p)) if os.path.exists(p) else {}
+if cfg.get("port", 8090) != 8090:
+    print("config.json: port", cfg["port"], "-> 8090; the port on this computer is SPEAKER_PORT in .env")
+    cfg["port"] = 8090
+    with open(p, "w") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+        f.write("\n")'
+            dc up -d ;;
+esac

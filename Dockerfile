@@ -1,5 +1,7 @@
-# Speaker service for a remote VM (transport "mqtt": drives the speaker through the ESP32 relay).
-# Build from the repository root: docker compose -f deploy/remote/docker-compose.yml build
+# The speaker service image, used by both setups:
+#   compose.yaml           Mac / home LAN (transport "cast": talks to the speaker directly)
+#   deploy/vm/compose.yaml remote VM (transport "mqtt": through the ESP32 relay, with Mosquitto and cloudflared)
+# Build context is the repository root; .dockerignore lets in only what the service needs.
 FROM python:3.13-slim
 
 # yt-dlp needs a JavaScript runtime for YouTube's challenges (app.py asks for node);
