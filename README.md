@@ -11,68 +11,118 @@ Control a Google Cast speaker such as the **Xiaomi Mi Smart Speaker** from your 
 text-to-speech announcements, YouTube audio, volume and playback control, through an HTTP API and a small web UI.
 The service talks to the speaker over the local network with the Cast protocol, and the speaker fetches audio from the service.
 
-> **Status:** the Python service runs on macOS (LaunchAgent) and in Docker on a Linux VM. The relay firmware
-> (see [firmware/](firmware/README.md)) is tested on an ESP32 (`esp32dev`) over plain MQTT and MQTT over WebSocket;
-> ESP32-S3 and ESP8266 build but are not yet tested on hardware. Full English guide: [README.en.md](README.en.md).
+> **Status:** the Python service runs in Docker, both at home next to the speaker (e.g. on a Mac) and on a Linux VM.
+> The relay firmware (see [firmware/](firmware/README.md)) is tested on an ESP32 (`esp32dev`) over plain MQTT and
+> MQTT over WebSocket; ESP32-S3 and ESP8266 build but are not yet tested on hardware. Full English guide:
+> [README.en.md](README.en.md).
 
 HTTP API และหน้าเว็บสำหรับสั่ง Google Cast speaker (เช่น Xiaomi Mi Smart Speaker) ให้ประกาศข้อความและเล่นเสียงจาก YouTube
 ผ่านโปรโตคอล Cast ในวง LAN โดยไม่ต้องพึ่ง Google Assistant ลำโพงดึงไฟล์เสียงทั้งหมดจาก service นี้
 
-## ติดตั้ง (macOS)
+## ติดตั้ง (Docker)
 
-ต้องมี Python 3.11+ และ Node.js (yt-dlp ใช้แก้ JS challenge ของ YouTube) เช่น `brew install python node`
-ถ้าจะใช้ "พูดสด" (live talk) ต้องมี ffmpeg ด้วย: `brew install ffmpeg` (หรือชี้ path ด้วย env `FFMPEG`) ไม่มีก็ใช้ส่วนอื่นได้ตามปกติ
+service รันด้วย Docker ทั้งสองแบบ ใช้ image เดียวกัน (`Dockerfile`)
+
+| แบบ | ไฟล์ compose | สั่งลำโพงอย่างไร |
+|---|---|---|
+| ที่บ้าน / วง LAN เช่น Mac ที่อยู่วงเดียวกับลำโพง | `compose.yaml` | Cast ตรง ลำโพงดึงเสียงจากเครื่องนี้ |
+| VM ระยะไกล | `deploy/vm/compose.yaml` | ผ่าน ESP32 relay ทาง MQTT พร้อม Mosquitto, `cloudflared` และ backup รายคืน |
+
+`scripts/speaker` ครอบ Docker Compose ให้ทั้งสองแบบ (ใส่ `--vm` เพื่อเลือกชุดของ VM)
+
+```bash
+scripts/speaker up                # build แล้วเปิด (สั่งอีกครั้งหลังแก้ .env หรือ pull)
+scripts/speaker status            # สถานะ container
+scripts/speaker logs [n] [service]   # ดู log แบบ follow (แสดง n บรรทัดล่าสุดก่อน ค่าเริ่มต้น 50)
+scripts/speaker restart [service]
+scripts/speaker down              # ปิด · ฐานข้อมูล ตั้งค่า และ backup ยังอยู่ใน volume
+scripts/speaker update            # backup, git pull, build ใหม่ (ได้ yt-dlp ล่าสุด) แล้วเปิดใหม่
+scripts/speaker backup | backups  # backup ทันที | ดูรายการ backup
+scripts/speaker config            # แก้ config.json แล้วรีสตาร์ท
+scripts/speaker token             # แสดง API token · --rotate เพื่อออก token ใหม่ (ของเดิมและลิงก์สื่อเดิมใช้ไม่ได้ทันที)
+```
+
+container เปิดใหม่เองถ้าตาย (`restart: unless-stopped`) รวมถึงหลังรีบูตเมื่อ Docker เปิดแล้ว ไม่มี access log
+(มีแค่ข้อความตอนเริ่ม คำเตือน และ error) ใน container `config.json`, `data.db`, `media/` และ cache YouTube อยู่ใน volume
+`speaker-data` ที่ `/data`
+
+### ที่บ้าน / วง LAN (Mac)
+
+ต้องมี Docker Desktop (`brew install --cask docker` แล้วเปิดครั้งหนึ่ง และเปิด "Start Docker Desktop when you sign in")
+ffmpeg และ Node.js อยู่ใน image แล้ว
 
 ```bash
 git clone git@github.com:jacksontae/Xiaomi-Smart-Speaker-Web-Controller.git
 cd Xiaomi-Smart-Speaker-Web-Controller
-./speakerctl install     # สร้าง venv, ติดตั้ง dependency, สร้าง config.json, ตั้งให้เปิดเองตอนล็อกอิน
+cp .env.example .env      # ตั้ง PUBLIC_BASE_URL (ดูด้านล่าง) และ TZ
+scripts/speaker up
+scripts/speaker token     # ใช้สร้างบัญชี admin คนแรก
 ```
 
-แล้วตั้ง `speaker_ip` ใน `config.json` หรือกด "ค้นหา" ในหน้าเว็บ ไม่อยากเปิดอัตโนมัติก็รันตรงได้: `./.venv/bin/python app.py`
+หน้าควบคุม: http://<ip เครื่องนี้>:8090/ · เอกสาร API: http://<ip>:8090/docs เปิดครั้งแรกหน้าเว็บจะขอ API token
+เพื่อสร้าง admin คนแรก แล้วตั้ง `speaker_ip` ในหน้า "ตั้งค่า" (หรือ `scripts/speaker config`)
 
-## รัน
+**ทำไมต้องตั้ง `PUBLIC_BASE_URL`:** ลำโพงเล่นจากลิงก์ที่ชี้กลับมาที่ service แต่ Docker Desktop รัน container ใน VM เล็กๆ
+ใน container จึงเห็นแค่ IP ภายใน (172.x) ซึ่งลำโพงเข้าไม่ถึง `PUBLIC_BASE_URL` ใน `.env` บอก service ว่าให้ใช้ IP ของเครื่องนี้ในวง LAN
+กับพอร์ตที่เปิดไว้แทน เช่น `http://192.0.2.20:8090` ควรจอง IP ของ Mac ไว้ใน router (DHCP reservation) ถ้า IP เปลี่ยนให้แก้ `.env`
+แล้ว `scripts/speaker up` พอร์ต 8090 เปิดทุก interface เหมือนเดิม ครั้งแรกถ้า macOS firewall ถามให้อนุญาต Docker
 
-service เปิดเองทุกครั้งที่ล็อกอินเข้า Mac (LaunchAgent `~/Library/LaunchAgents/local.speaker-service.plist`)
-ถ้า process ตายจะถูกเปิดใหม่ให้อัตโนมัติ
+สิ่งที่ต่างไปเมื่อรันใน Docker บน Mac:
 
-```bash
-./speakerctl status      # สถานะ service และลำโพง
-./speakerctl restart
-./speakerctl stop | start
-./speakerctl logs [n]    # ดู log แบบ follow (แสดง n บรรทัดล่าสุดก่อน ค่าเริ่มต้น 50) · log อยู่ที่ service.log (ไม่มี access log มีแค่ข้อความตอนเริ่ม คำเตือน และ error)
-./speakerctl config      # แก้ config.json แล้วรีสตาร์ท
-./speakerctl token       # แสดง API token · --rotate เพื่อออก token ใหม่ (ของเดิมใช้ไม่ได้ทันที)
-./speakerctl uninstall   # เลิกเปิดอัตโนมัติ
-```
+- **ปุ่ม "ค้นหา" ลำโพงจะไม่เจออะไร** เพราะใช้ mDNS multicast ซึ่งไปไม่ถึง container ให้ใส่ IP ลำโพงเอง ส่วนอื่นคุยกับลำโพงด้วย IP
+  การเล่นจึงไม่กระทบ
+- **ทุกเบราว์เซอร์อาจเห็นเป็น IP เดียวกัน** (gateway ของ Docker Desktop) ในบันทึกกิจกรรมและตัวจำกัดการล็อกอิน เพราะ port forwarding
+  ของ Docker Desktop ไม่ส่ง IP จริงของผู้ใช้ต่อ
+- **ตารางเวลา** ใช้ `TZ` จาก `.env` (container ไม่รู้ time zone ของ Mac)
+- **Backup:** service `backup` เขียน backup รายคืนลงโฟลเดอร์ `./backups` (โฟลเดอร์ธรรมดา Time Machine จึงสำรองให้ด้วย)
+  ดู [Backups and restore](#backups-and-restore)
 
-หน้าควบคุม: http://<ip เครื่องนี้>:8090/ · เอกสาร API: http://<ip>:8090/docs
+### VM ระยะไกล
 
-## ติดตั้ง (Docker บน VM)
+`deploy/vm/compose.yaml` รัน service พร้อม Mosquitto, `cloudflared` และ backup รายคืน แล้วสั่งลำโพงผ่าน ESP32 relay ทาง MQTT
+ขั้นตอนอยู่ในหัวข้อ Remote deployment ด้านล่าง ใช้ helper แบบ `--vm` (`scripts/speaker --vm up`) หรือสั่ง Compose ตรงจาก checkout:
+`docker compose -f deploy/vm/compose.yaml up -d --build`
 
-ถ้า service อยู่นอกวง LAN ของลำโพง ใช้ `deploy/remote/` (Docker Compose: service, Mosquitto, `cloudflared`, backup รายคืน)
-แล้วสั่งลำโพงผ่าน ESP32 relay ทาง MQTT ขั้นตอนอยู่ในหัวข้อ Remote deployment ด้านล่าง
-
-- ใน container `config.json`, `data.db`, `media/` และ cache YouTube อยู่ใน volume `speaker-data` ที่ `/data`
-- API token สร้างตอนเปิดครั้งแรก ดูเพื่อใช้กับ `/auth/setup` (สร้าง admin คนแรก):
-
-```bash
-docker compose -f deploy/remote/docker-compose.yml exec speaker-service \
-  python -c "import json; print(json.load(open('/data/config.json'))['api_token'])"
-```
-
-- ใส่ `CLOUDFLARE_TUNNEL_TOKEN` ใน `deploy/remote/.env` (คู่กับ `PUBLIC_BASE_URL`, `MQTT_PASSWORD`) แล้ว `chmod 600`
 - พอร์ต 8090 ผูกกับ loopback ของ VM (`127.0.0.1:8090`) เท่านั้น จะเปิดหน้าเว็บโดยไม่ผ่าน tunnel ใช้ SSH tunnel: `ssh -L 8090:127.0.0.1:8090 <vm>`
 - `cloudflared` ต้องรันจาก compose file (ชื่อ `speaker-service`, `mosquitto` รู้จักเฉพาะใน compose network) ถ้าติดตั้ง `cloudflared` บน host ด้วย tunnel จะตอบ `502`
 - compose network ใช้ subnet คงที่ (`172.30.77.0/24`) และ `cloudflared` มี IP คงที่ในนั้น service เชื่อ `X-Forwarded-For` จาก IP นั้นเท่านั้น (`FORWARDED_ALLOW_IPS`) Activity และตัวจำกัดการล็อกอินจึงเห็น IP จริงของแต่ละคน ถ้า subnet ชนกับของ VM ให้แก้ทั้ง 3 ค่าพร้อมกัน แล้ว `docker compose down` ก่อน `up -d` (Compose ไม่แก้ network ที่มีอยู่แล้ว)
+- ชื่อ Compose project ถูกตรึงไว้ (`name: remote` จากตอนที่ชุดนี้อยู่ใน `deploy/remote/`) volume จึงยังเป็น `remote_speaker-data`,
+  `remote_speaker-backups` และ `remote_mosquitto-data` ห้ามเปลี่ยน ถ้าชื่อเปลี่ยน service จะเริ่มบน volume ใหม่ที่ว่างเปล่า
+
+### ย้ายจาก LaunchAgent (`speakerctl`)
+
+เวอร์ชันก่อนรันบน Mac เป็น LaunchAgent ที่จัดการด้วย `./speakerctl` โดยเก็บ `config.json`, `data.db` และ `media/` ไว้ในโฟลเดอร์ repo
+หลัง pull เวอร์ชันนี้ ทำครั้งเดียว:
+
+```bash
+launchctl bootout gui/$(id -u)/local.speaker-service      # หยุด service เดิม (เหมือน "speakerctl stop")
+rm ~/Library/LaunchAgents/local.speaker-service.plist      # เลิกเปิดอัตโนมัติ (เหมือน "speakerctl uninstall")
+cp .env.example .env                                       # ตั้ง PUBLIC_BASE_URL และ TZ
+scripts/speaker import .                                   # คัดลอก config.json, data.db, media/ เข้า volume แล้วเปิด
+```
+
+`import` จะไม่ทำงานถ้า agent เดิมยังรันอยู่ ของที่มีอยู่แล้วใน volume เก็บไว้เป็น `*.before-import-<เวลา>` และตั้ง `port` ใน
+`config.json` เป็น 8090 (พอร์ตใน container ส่วนพอร์ตบน Mac คือ `SPEAKER_PORT` ใน `.env`) cache YouTube ไม่ได้คัดลอก เดี๋ยวโหลดใหม่เอง
+ตรวจหน้าเว็บให้เรียบร้อยแล้วค่อยลบไฟล์เก่าในโฟลเดอร์ repo (`config.json`, `data.db*`, `media/`, `cache/`, `service.log`, `.venv/`)
+
+ชุดของ VM ย้ายจาก `deploy/remote/` ไป `deploy/vm/` ชื่อ project ตรึงเป็นชื่อเดิม (`name: remote`) container และ volume จึงเป็นชุดเดิม
+แต่ไฟล์ลับที่ git ignore ไม่ย้ายตาม `git pull` ให้ย้ายเองครั้งเดียวแล้วเปิดตามปกติ:
+
+```bash
+mv deploy/remote/.env deploy/vm/.env
+mv deploy/remote/mosquitto/passwd deploy/remote/mosquitto/acl deploy/vm/mosquitto/
+scripts/speaker --vm up        # = docker compose -f deploy/vm/compose.yaml up -d --build
+```
+
+`scripts/speaker --vm` จะไม่ทำงานถ้าไฟล์เหล่านี้ยังอยู่แค่ใน `deploy/remote/` และ Compose จะหยุดพร้อม error ถ้า `deploy/vm/.env` ขาดค่าที่จำเป็น
 
 ## ตั้งค่า
 
-แก้ได้ 3 ทาง: หน้าเว็บ (หัวข้อ "ตั้งค่า"), `POST /settings`, หรือแก้ `config.json` ตรงแล้ว `./speakerctl restart`
+แก้ได้ 3 ทาง: หน้าเว็บ (หัวข้อ "ตั้งค่า"), `POST /settings`, หรือ `scripts/speaker config` (แก้ `config.json` ใน volume แล้วรีสตาร์ท)
 
 | key | ค่าเริ่มต้น | ความหมาย |
 |---|---|---|
-| `speaker_ip` | `192.0.2.10` | IP หรือ hostname ของลำโพง (กด "ค้นหา" ในหน้าเว็บเพื่อเลือกจากลำโพงในวง LAN) |
+| `speaker_ip` | `192.0.2.10` | IP หรือ hostname ของลำโพง (กด "ค้นหา" ในหน้าเว็บเพื่อเลือกจากลำโพงในวง LAN ใช้ไม่ได้ใน Docker บน Mac ให้ใส่เอง) |
 | `speaker_name` | `Air Purifier speaker` | ชื่อที่แสดง (1–64 ตัวอักษร) |
 | `port` | `8090` | พอร์ตของ service 1024–65535 (เปลี่ยนแล้วรีสตาร์ทเอง) |
 | `default_volume` | `null` | ระดับเสียงที่ตั้งก่อนประกาศหรือเล่น 0–1, `null` = ไม่เปลี่ยน |
@@ -83,7 +133,7 @@ docker compose -f deploy/remote/docker-compose.yml exec speaker-service \
 | `talk_max_seconds` | `120` | พูดสดได้นานสุดกี่วินาทีต่อครั้ง (10–600) |
 | `transport` | `cast` | `cast` = สั่งลำโพงตรงในวง LAN · `mqtt` = สั่งผ่าน ESP32 relay (ดู Remote deployment) |
 | `mqtt` | ดู `config.example.json` | broker ของ relay: `host`, `port`, `tls`, `ca_file`, `username`, `password`, `base_topic`, `client_id` · เวลา: `keepalive`, `offline_after`, `status_refresh`, `command_timeout`, `play_timeout`, `reconnect_min`, `reconnect_max` |
-| `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.0.2.20:8090` · host ของ URL นี้คือ RP ID ของ passkey |
+| `public_base_url` | `null` | ใส่เมื่อ IP ของ Mac ที่ตรวจเองผิด เช่น `http://192.0.2.20:8090` (ใน Docker บน Mac ตั้งผ่าน `PUBLIC_BASE_URL` ใน `.env` เสมอ) · host ของ URL นี้คือ RP ID ของ passkey |
 | `google_client_id` | `null` | OAuth client ID สำหรับ "Sign in with Google" เช่น `1234-abc.apps.googleusercontent.com` (ไม่ใช่ความลับ) |
 | `google_signin` | `false` | เจ้าของ (admin) เปิด/ปิดการล็อกอินด้วย Google · เปิดได้เมื่อมี `google_client_id` แล้ว |
 | `passkey_signin` | `true` | เปิดการล็อกอินด้วย passkey (ใช้ได้จริงเมื่อ `public_base_url` เป็น `https://` หรือ `http://localhost`) |
@@ -92,7 +142,7 @@ docker compose -f deploy/remote/docker-compose.yml exec speaker-service \
 | `cookie_secure` | `"auto"` | flag `Secure` ของ cookie `sid` · `"auto"`: ใส่เมื่อคำขอมาทาง https หรือมาที่ host ของ `public_base_url` ที่เป็น `https://` (proxy ที่ถอด TLS แล้วส่งต่อเป็น http เช่น Cloudflare Tunnel) · `true`: ใส่เสมอ (ล็อกอินได้เฉพาะทาง https หรือ `http://localhost`) · `false`: ไม่ใส่ · env `COOKIE_SECURE` |
 
 ```bash
-TOKEN=$(./speakerctl token)
+TOKEN=$(scripts/speaker token)
 curl -X POST localhost:8090/settings -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"default_volume":0.4}'
 curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นหาลำโพง Cast ในวง LAN
 ```
@@ -102,8 +152,8 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # ค้นห
 เรียก API ได้ 2 แบบ ถ้าไม่ได้ยืนยันตัวตนจะได้ `401` ถ้าสิทธิ์ไม่พอจะได้ `403` (body เป็น `{"detail": "..."}` เสมอ)
 
 - **API token** ส่ง header `Authorization: Bearer <token>` ได้สิทธิ์ `admin` ใช้กับ curl, integration และ firmware relay
-  - token สร้างให้อัตโนมัติตอนเปิด service ครั้งแรก เก็บใน `config.json` (สิทธิ์ไฟล์ 600) ดูด้วย `./speakerctl token`
-  - `GET /settings` ไม่ส่ง token กลับไป และเปลี่ยน token ผ่าน API ไม่ได้ ใช้ `./speakerctl token --rotate`
+  - token สร้างให้อัตโนมัติตอนเปิด service ครั้งแรก เก็บใน `config.json` (สิทธิ์ไฟล์ 600) ดูด้วย `scripts/speaker token` (บน VM `scripts/speaker --vm token`)
+  - `GET /settings` ไม่ส่ง token กลับไป และเปลี่ยน token ผ่าน API ไม่ได้ ใช้ `scripts/speaker token --rotate`
 - **บัญชีผู้ใช้ (หน้าเว็บ)** ล็อกอินแล้วได้ cookie `sid` (`HttpOnly`, `SameSite=Strict`, อายุ 30 วันนับจากใช้งานล่าสุด, `Secure` เมื่อใช้ https ดู `cookie_secure`) · session ที่หมดอายุถูกลบตอนเริ่ม service และทุกชั่วโมง
   - คำขอที่เปลี่ยนข้อมูล (POST/PUT/PATCH/DELETE) ด้วย cookie ต้องส่ง header `X-Requested-With: speaker-web` ไม่งั้นได้ `403`
   - ครั้งแรกที่ยังไม่มีผู้ใช้ หน้าเว็บจะให้ใส่ API token เพื่อสร้างบัญชี admin คนแรก (`POST /auth/setup`)
@@ -212,7 +262,7 @@ challenge ใช้ได้ครั้งเดียวและหมดอ�
 - คิวอยู่ในหน่วยความจำ รีสตาร์ท service แล้วหาย และแก้เพลย์ลิสต์ระหว่างเล่นจะไม่กระทบคิวที่เล่นอยู่
 
 ```bash
-TOKEN=$(./speakerctl token)
+TOKEN=$(scripts/speaker token)
 curl -X POST localhost:8090/say -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"text":"ค่าฝุ่นสูง กรุณาปิดหน้าต่าง"}'
 curl -X POST localhost:8090/youtube -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"query":"เพลงบรรเลงเปียโน"}'
 curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"shuffle":true,"repeat":"all"}'
@@ -297,8 +347,6 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 | ← | `{"type": "ended", "reason", "seconds", "detail"?}` | จบแล้ว ปิดด้วย code 1000 · `reason`: `stopped`, `disconnected`, `max_length`, `idle` (ไม่มีเสียงมา 10 วินาที), `interrupted` (มีคนสั่งเล่นอย่างอื่น), `too_large`, `speaker_error`, `transcoder_error` |
 | ← | `{"type": "error", "code", "detail"}` | ไม่ได้เริ่ม ปิดด้วย code `4400` bad_request · `4401` unauthorized · `4403` forbidden · `4409` busy · `4503` unavailable (ไม่มี ffmpeg) |
 
-ทดสอบเองได้ด้วย `python tests/manual/talk_stream.py --url ws://127.0.0.1:8090/talk --token $TOKEN --file clip.webm`
-
 ### ทอล์คกี้ (Talkie)
 
 วิทยุสื่อสารระหว่างสมาชิกของ server นี้ เมื่อเลือกเล่นเพลงที่ "อุปกรณ์นี้" หน้าประกาศจะกลายเป็นทอล์คกี้ (ทุกบทบาท) มีสองแท็บ:
@@ -345,18 +393,18 @@ the VM's own ports; the relay reaches the broker over `wss://` through the tunne
       +--Cast--> [speaker] --HTTPS (signed media URLs)--> [tunnel] --> [speaker-service]
 ```
 
-1. **Broker logins.** `cp deploy/remote/mosquitto/acl.example deploy/remote/mosquitto/acl`, then
-   `sh deploy/remote/mosquitto/add-user.sh speaker-service` and `sh deploy/remote/mosquitto/add-user.sh relay-1`
+1. **Broker logins.** `cp deploy/vm/mosquitto/acl.example deploy/vm/mosquitto/acl`, then
+   `sh deploy/vm/mosquitto/add-user.sh speaker-service` and `sh deploy/vm/mosquitto/add-user.sh relay-1`
    (one login per relay; the ACL limits each relay to its own base topic). Anonymous clients are refused.
 2. **Tunnel.** Create a Cloudflare Tunnel with two public hostnames:
    `speaker.example.com` → `http://speaker-service:8090` (web UI and the signed media paths) and
    `mqtt.example.com` → `http://mosquitto:9001` (Cloudflare carries WebSockets; it terminates TLS).
    These names only resolve inside the compose network, so run `cloudflared` from the compose file; a `cloudflared`
    installed on the host answers 502.
-3. **Service.** `cp deploy/remote/.env.example deploy/remote/.env` (then `chmod 600`), fill it in
+3. **Service.** `cp deploy/vm/.env.example deploy/vm/.env` (then `chmod 600`), fill it in
    (`PUBLIC_BASE_URL` = `https://speaker.example.com`, `MQTT_PASSWORD` = the `speaker-service` password,
-   `CLOUDFLARE_TUNNEL_TOKEN`), then `docker compose -f deploy/remote/docker-compose.yml up -d --build`.
-   For the first admin, read the API token as shown in "ติดตั้ง (Docker บน VM)".
+   `CLOUDFLARE_TUNNEL_TOKEN`), then `scripts/speaker --vm up` (= `docker compose -f deploy/vm/compose.yaml up -d
+   --build`). For the first admin, print the API token with `scripts/speaker --vm token`.
 4. **Relay.** Flash `firmware/` to an ESP32 next to the speaker (see `firmware/README.md`) and set the
    broker to `wss://mqtt.example.com` with the `relay-1` login. The firmware trusts the public root CAs
    Cloudflare uses; no CA upload is needed. ESP8266 can't do MQTT over WebSocket.
@@ -388,13 +436,13 @@ How it behaves:
 
 ### Backups and restore
 
-The `backup` service in the same compose file saves the database and settings every night at
+The `backup` service (in both compose files) saves the database and settings every night at
 `BACKUP_TIME` (default `03:30`, UTC) and keeps the newest `BACKUP_KEEP` (default 14). It also takes one at
 start-up when the newest is more than a day old (a VM that was off at night). Each backup is one file,
 `speaker-YYYYMMDD-HHMMSS.tar.gz`, with `data.db` and `config.json`. The database is copied with SQLite's
 online backup API while the service runs (it includes changes still in the WAL file; a plain file copy
-can miss them or come out torn), and the copy must pass `PRAGMA integrity_check`. Backups live in the
-`speaker-backups` volume, owner-only (files `0600`, folder `0700`): they hold password hashes, sessions
+can miss them or come out torn), and the copy must pass `PRAGMA integrity_check`. On the VM backups live in the
+`speaker-backups` volume (at home: the `backups/` folder in the repository), owner-only (files `0600`, folder `0700`): they hold password hashes, sessions
 and the API token. The YouTube cache isn't backed up; it fills again by itself.
 
 Why a compose service rather than a host cron job or systemd timer: it ships with the deployment, needs
@@ -403,10 +451,17 @@ database and its WAL without root), and uses Python's `sqlite3` backup API from 
 sleeps between runs.
 
 ```bash
-C="docker compose -f deploy/remote/docker-compose.yml"
+scripts/speaker --vm backups     # list (without --vm: the home setup)
+scripts/speaker --vm backup      # one now, e.g. before an upgrade (update does this too)
+```
+
+The same with Compose directly, plus copying off and restoring (at home use `C="docker compose"`):
+
+```bash
+C="docker compose -f deploy/vm/compose.yaml"
 $C logs backup                                      # "[backup] wrote speaker-....tar.gz" each night
-$C exec backup python backup.py --list
-$C exec backup python backup.py --now               # e.g. before an upgrade (counts toward BACKUP_KEEP)
+$C exec backup python -m server.backup --list
+$C exec backup python -m server.backup --now               # e.g. before an upgrade (counts toward BACKUP_KEEP)
 
 # Copy them off the VM as well (a backup on the same disk doesn't survive losing the VM)
 $C cp backup:/backups ./speaker-backups && chmod -R go-rwx ./speaker-backups
@@ -416,8 +471,8 @@ $C cp backup:/backups ./speaker-backups && chmod -R go-rwx ./speaker-backups
 
 ```bash
 $C stop speaker-service backup
-$C run --rm --no-deps backup python backup.py --list
-$C run --rm --no-deps backup python backup.py --restore speaker-20261030-033000.tar.gz
+$C run --rm --no-deps backup python -m server.backup --list
+$C run --rm --no-deps backup python -m server.backup --restore speaker-20261030-033000.tar.gz
 $C up -d speaker-service backup
 ```
 
@@ -432,7 +487,7 @@ $C run --rm --no-deps -T backup sh -c 'umask 077; cat > /backups/speaker-2026103
   < speaker-20261030-033000.tar.gz
 ```
 
-`deploy/remote/.env` and the broker's `mosquitto/passwd` and `acl` are files on the VM, not in a volume;
+`deploy/vm/.env` and the broker's `mosquitto/passwd` and `acl` are files on the VM, not in a volume;
 keep your own copy of them (they hold secrets, so not in git).
 
 ## หมายเหตุ
@@ -452,23 +507,30 @@ keep your own copy of them (they hold secrets, so not in git).
   (stream copy, encode ใหม่เฉพาะเมื่อจำเป็น) เป็น `<id>.sb-<hash>.m4a` ครั้งต่อไปเล่นไฟล์ที่ตัดแล้ว ไม่มีช่วงให้ตัด = ทำ hard link
   ชื่อใหม่ไว้จะได้ไม่ถามซ้ำ ล้มเหลวจะลองใหม่ตอนเล่นครั้งหน้า ไฟล์เดิมไม่ถูกลบทันที (ลำโพงอาจยังเล่นอยู่) แต่จะหลุดไปตาม `cache_keep`
   เปลี่ยน API ได้ด้วย env `SPONSORBLOCK_API`
-- yt-dlp ต้องใช้ Node.js แก้ JS challenge ของ YouTube ถ้าวันไหนเล่นไม่ได้ให้อัปเดต: `./.venv/bin/pip install -U "yt-dlp[default]"`
+- yt-dlp ต้องใช้ Node.js แก้ JS challenge ของ YouTube (ทั้งคู่อยู่ใน image) ถ้าวันไหนเล่นไม่ได้ให้ `scripts/speaker update` ซึ่ง build image ใหม่แบบไม่ใช้ cache จึงได้ yt-dlp ล่าสุด
 - TTS ใช้ endpoint ของ Google Translate ซึ่งไม่มีเอกสารทางการ อาจเปลี่ยนหรือถูกจำกัดได้
 
 ## โครงสร้างโปรเจกต์
 
 ```
-app.py                 FastAPI service: TTS, YouTube cache, คิว, ตารางเวลา, settings, API ทั้งหมด
-talk.py                พูดสด: ffmpeg แปลงเสียงไมค์เป็น MP3 สตรีม เสียง chime
-transport.py           ช่องทางสั่งลำโพง: Cast ตรง (pychromecast) หรือผ่าน ESP32 relay ทาง MQTT
-auth.py                รหัสผ่าน (scrypt), session token, จำกัดการล็อกอินผิด
-google_signin.py       ตรวจ ID token ของ "Sign in with Google" (ลายเซ็น, aud, iss, exp)
-passkeys.py            passkey (WebAuthn): RP จาก public_base_url, challenge ใช้ครั้งเดียว, ตรวจ response
-store.py               SQLite: ผู้ใช้ session เพลย์ลิสต์ ข้อความด่วน ตารางเวลา สถานีโปรด ไฟล์อัปโหลด บันทึกกิจกรรม
-player.py              คิวเพลง (ลำดับเล่น shuffle repeat)
+server/                ตัว service ภาษา Python (FastAPI) เปิดด้วย `python -m server`
+  app.py               จุดเริ่ม: สร้างแอป รวม router และเสิร์ฟ static/
+  config.py            การตั้งค่า (config.json + environment) path และขีดจำกัด
+  core.py              ของที่ใช้ร่วมกัน: ตัวสั่งลำโพง ฐานข้อมูล ตัวจำกัดการล็อกอิน
+  access.py            ตรวจว่าใครเรียก (role) ลิงก์สื่อแบบเซ็น และ router
+  routes/              endpoint HTTP และ WebSocket แยกไฟล์ตามหมวด
+  media.py, playback.py, speaker.py   cache YouTube และ SponsorBlock คิวและการประกาศ การเช็กว่าลำโพงออนไลน์
+  accounts.py, sources.py, schedules.py, livetalk.py, talkie.py, webui.py   logic ของแต่ละหมวด
+  store.py             SQLite: ผู้ใช้ session เพลย์ลิสต์ ตารางเวลา ไฟล์ที่อัปโหลด บันทึกกิจกรรม
+  transport.py         สั่งลำโพง: Cast ตรง (pychromecast) หรือผ่าน ESP32 relay ทาง MQTT
+  auth.py, passkeys.py, google_signin.py   รหัสผ่านและ session, passkey, ล็อกอินด้วย Google
+  talk.py, player.py, backup.py, version.py   แปลงเสียงพูดสด ลำดับการเล่น backup รายคืน และเวอร์ชัน
 static/                หน้าเว็บควบคุม
-speakerctl             จัดการ LaunchAgent บน macOS
-deploy/                template ของ LaunchAgent · deploy/remote/ = Docker Compose สำหรับ VM (service + Mosquitto + cloudflared + backup รายคืน)
+Dockerfile             image เดียวสำหรับทั้งสองแบบ (.dockerignore ใส่เฉพาะ server/, static/ และ requirements)
+compose.yaml           Docker Compose สำหรับที่บ้าน / วง LAN (เช่น Mac ข้างลำโพง) ตั้งค่าใน .env (.env.example)
+deploy/vm/             Docker Compose สำหรับ VM (service + Mosquitto + cloudflared + backup รายคืน) และ config ของ mosquitto/
+scripts/speaker        จัดการได้ทั้งสองแบบ: up, down, restart, logs, update, backup, token, config
+scripts/gen_licenses.py  สร้างหน้า Licenses ใหม่
 tests/                 pytest + ลำโพงจำลอง (ไม่ต้องมีลำโพงจริง)
 firmware/              firmware ESP32 / ESP8266 (PlatformIO) ตัวกลางสั่งลำโพงในวง LAN
 config.example.json    ตัวอย่างไฟล์ตั้งค่า (คัดลอกเป็น config.json)

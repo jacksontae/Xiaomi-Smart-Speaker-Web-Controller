@@ -18,8 +18,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - run: pip install "ruff>=0.17"
@@ -32,8 +32,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: true
@@ -45,14 +45,32 @@ jobs:
   scripts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh libxml2-utils
-      - name: speakerctl syntax
-        run: zsh -n speakerctl
-      - name: LaunchAgent template is valid XML
-        run: xmllint --noout deploy/*.plist
+      - uses: actions/checkout@v7
+      - name: helper script syntax
+        run: sh -n scripts/speaker
       - name: config example is valid JSON
         run: python3 -m json.tool config.example.json > /dev/null
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The .env files are git-ignored; the examples hold placeholders only.
+      - name: compose files are valid (home and VM)
+        run: |
+          docker compose -f compose.yaml --env-file .env.example config -q
+          docker compose -f deploy/vm/compose.yaml --env-file deploy/vm/.env.example config -q
+      - name: VM stack keeps its project name (its volumes hold the production data)
+        run: |
+          test "$(docker compose -f deploy/vm/compose.yaml --env-file deploy/vm/.env.example config --format json \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["name"])')" = remote
+      - name: image builds and serves
+        run: |
+          docker build -t speaker-service:ci .
+          docker run -d --name speaker-ci -p 18950:8090 -e PUBLIC_BASE_URL=http://192.0.2.20:18950 speaker-service:ci
+          for i in $(seq 30); do curl -fsS -o /dev/null localhost:18950/about && break; sleep 1; done
+          curl -fsS -o /dev/null localhost:18950/ && curl -fsS -o /dev/null localhost:18950/about \
+            || { docker logs speaker-ci; exit 1; }
 
   firmware:
     runs-on: ubuntu-latest
@@ -64,11 +82,11 @@ jobs:
       run:
         working-directory: firmware
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: ~/.platformio
           # One cache per board: matrix jobs sharing a key race to save it, and the winner's

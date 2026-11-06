@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-06
+
+### Changed
+- Docker is now the way to run the service, at home and on the VM, from one image (`Dockerfile` at the root).
+  At home (e.g. a Mac next to the speaker) it is `compose.yaml` with settings in `.env`: `PUBLIC_BASE_URL` gives the
+  Mac's LAN address for the media links, because inside Docker Desktop the service only sees its own private
+  address. That setup also gets the nightly backup, into `backups/`. "Find" (mDNS discovery) doesn't work from the
+  container; enter the speaker's IP. `scripts/speaker` manages both setups (`up`, `down`, `restart`, `status`,
+  `logs`, `update`, `backup`, `backups`, `token`, `config`; `--vm` for the VM) and replaces `speakerctl`; the
+  LaunchAgent (`deploy/local.speaker-service.plist`) is gone. Moving over: stop the agent
+  (`launchctl bootout gui/$(id -u)/local.speaker-service`), then `scripts/speaker import .` copies `config.json`,
+  `data.db` and `media/` into the volume.
+- The VM stack moved from `deploy/remote/` to `deploy/vm/compose.yaml`. Its Compose project stays `remote`
+  (`name: remote`), so it keeps the same containers and volumes; move `deploy/remote/.env` and
+  `mosquitto/passwd`/`acl` to `deploy/vm/` once, then run `docker compose -f deploy/vm/compose.yaml up -d --build`.
+- The Python code is a package, `server/`, started with `python -m server`. The 4,400-line `app.py` is split by
+  area: settings in `config.py`, endpoints in `server/routes/`, and the logic in modules such as `media.py`,
+  `playback.py` and `talkie.py`. Routes and API are unchanged.
+- Dependencies: httpx 0.28.1, httpcore 1.0.9, pydantic 2.14.2, PyChromecast 14.1.0 and websockets 17.4 as
+  minimums; CI actions checkout v7, setup-python v7 and cache v6.
+
+### Fixed
+- iPhone: sheets (speaker picker, display name and others) no longer appear mid-screen and then drop to the bottom
+  while they slide up. Safari scrolled the sheet's dialog to show the focused button or field; the dialog now can't
+  scroll.
+
 ## [0.6.2] - 2026-11-06
 
 ### Added

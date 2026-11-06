@@ -5,7 +5,8 @@ import pytest
 from conftest import BASE, REAL_SCHEDULE_PREFETCH, path_of
 from fastapi import HTTPException
 
-from player import Queue
+from server import config, core, media, outbound, playback
+from server.player import Queue
 
 A, B, C = "aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"
 
@@ -18,7 +19,7 @@ def yt(vid):
 @pytest.fixture
 def downloads(app, monkeypatch):
     """Fake yt_download writing a file into the cache; ids in `downloads.fail` raise like a real failure."""
-    for f in app.CACHE_DIR.glob("*"):
+    for f in config.CACHE_DIR.glob("*"):
         f.unlink()
     calls = []
 
@@ -27,20 +28,20 @@ def downloads(app, monkeypatch):
         calls.append(vid)
         if vid in download.fail:
             raise HTTPException(502, "YouTube download failed: Video unavailable")
-        path = app.CACHE_DIR / f"{vid}.m4a"
+        path = config.CACHE_DIR / f"{vid}.m4a"
         path.write_bytes(b"audio")
         return {"id": vid, "title": vid, "duration": 100, "path": path}
 
     download.fail = set()
     download.calls = calls
-    monkeypatch.setattr(app, "yt_download", download)
+    monkeypatch.setattr(media, "yt_download", download)
     return download
 
 
 def playlist(app, *items, name="Mix"):
-    pl = app.db.create_playlist(name)
+    pl = core.db.create_playlist(name)
     for item in items:
-        app.db.add_item(pl["id"], item, 100)
+        core.db.add_item(pl["id"], item, 100)
     return pl["id"]
 
 
@@ -49,7 +50,7 @@ def loaded(cast):
 
 
 def tick(app):
-    asyncio.run(app.queue_tick())
+    asyncio.run(playback.queue_tick())
 
 
 def start(client, pid, **body):
@@ -207,9 +208,9 @@ def test_announcement_ending_does_not_advance_and_queue_continues_after_resume(
     tick(app)
     assert loaded(fake_speaker)["url"].startswith(f"{BASE}/tts.mp3?")  # no advance on the announcement's end
 
-    asyncio.run(app.resume_after_announcement(app._say_gen, f"{BASE}/tts.mp3"))
+    asyncio.run(playback.resume_after_announcement(playback._say_gen, f"{BASE}/tts.mp3"))
     resumed = loaded(fake_speaker)
-    assert resumed["url"] == track_url and resumed["current_time"] == 42.0 - app.RESUME_REWIND
+    assert resumed["url"] == track_url and resumed["current_time"] == 42.0 - config.RESUME_REWIND
     assert client.get("/queue").json()["index"] == 0
 
     fake_speaker.media_controller.finish()  # the resumed track ends
@@ -231,7 +232,7 @@ def test_announcement_after_track_finished_continues_queue(client, app, fake_spe
 
 
 def test_announcement_without_resume_setting_moves_on(client, app, fake_speaker, downloads):
-    app.settings.resume_after_say = False
+    config.settings.resume_after_say = False
     pid = playlist(app, yt(A), yt(B))
     start(client, pid)
     client.post("/say", json={"text": "hello"})
@@ -353,10 +354,10 @@ def test_queue_clear_stops(client, app, fake_speaker, downloads):
 
 
 def test_stale_load_is_dropped(app, fake_speaker):
-    app.clear_queue()
-    gen = app._queue_gen
-    app.clear_queue()  # something else happened meanwhile
-    assert app.load_if_current(gen, "http://x/a.mp3", "audio/mpeg", "x", True) is False
+    playback.clear_queue()
+    gen = playback._queue_gen
+    playback.clear_queue()  # something else happened meanwhile
+    assert playback.load_if_current(gen, "http://x/a.mp3", "audio/mpeg", "x", True) is False
     assert fake_speaker.media_controller.loads == []
 
 
@@ -376,7 +377,7 @@ def test_tts_and_url_items(client, app, fake_speaker, anon, monkeypatch):
         assert params["q"] == "สวัสดี"
         return Resp()
 
-    monkeypatch.setattr(app.http, "get", fake_get)
+    monkeypatch.setattr(outbound.http, "get", fake_get)
     assert anon.get(path_of(load["url"])).content == b"MP3"  # signed like any announcement
     assert client.get("/status").json()["media"]["thumbnail"] is None
 
@@ -387,7 +388,7 @@ def test_tts_and_url_items(client, app, fake_speaker, anon, monkeypatch):
 
 
 def test_default_volume_on_start_but_not_between_tracks(client, app, fake_speaker, downloads):
-    app.settings.default_volume = 0.6
+    config.settings.default_volume = 0.6
     pid = playlist(app, yt(A), yt(B))
     start(client, pid)
     assert fake_speaker.volume == 0.6
@@ -398,33 +399,33 @@ def test_default_volume_on_start_but_not_between_tracks(client, app, fake_speake
 
 
 def test_prefetch_downloads_next_once(app, downloads, monkeypatch):
-    monkeypatch.setattr(app, "schedule_prefetch", REAL_SCHEDULE_PREFETCH)
+    monkeypatch.setattr(playback, "schedule_prefetch", REAL_SCHEDULE_PREFETCH)
 
     async def scenario():
         q = Queue([yt(A), yt(B)])
-        app.schedule_prefetch(q)
-        await asyncio.gather(*app._background)
+        playback.schedule_prefetch(q)
+        await asyncio.gather(*core._background)
         assert downloads.calls == [B]
-        path = await app.ensure_track(B)  # now cached: no second download
+        path = await playback.ensure_track(B)  # now cached: no second download
         assert path.name == f"{B}.m4a" and downloads.calls == [B]
         q.advance(auto=True)
-        app.schedule_prefetch(q)  # nothing after the last item
-        assert not app._background
+        playback.schedule_prefetch(q)  # nothing after the last item
+        assert not core._background
 
     asyncio.run(scenario())
 
 
 def test_concurrent_requests_share_one_download(app, downloads):
     async def scenario():
-        return await asyncio.gather(app.ensure_track(C), app.ensure_track(C))
+        return await asyncio.gather(playback.ensure_track(C), playback.ensure_track(C))
 
     first, second = asyncio.run(scenario())
     assert first == second and downloads.calls == [C]
 
 
 def test_prune_keeps_queue_tracks(app, downloads, client, fake_speaker):
-    app.settings.cache_keep = 1
+    config.settings.cache_keep = 1
     pid = playlist(app, yt(A), yt(B))
-    (app.CACHE_DIR / f"{B}.m4a").write_bytes(b"prefetched")
+    (config.CACHE_DIR / f"{B}.m4a").write_bytes(b"prefetched")
     start(client, pid)
-    assert (app.CACHE_DIR / f"{A}.m4a").exists() and (app.CACHE_DIR / f"{B}.m4a").exists()
+    assert (config.CACHE_DIR / f"{A}.m4a").exists() and (config.CACHE_DIR / f"{B}.m4a").exists()

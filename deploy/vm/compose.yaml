@@ -1,11 +1,11 @@
 # Remote deployment: speaker service + self-hosted MQTT broker + Cloudflare Tunnel on a VM; the speaker is
 # reached through the ESP32 relay, which connects to the broker over wss:// through the tunnel.
 #
-#   cp deploy/remote/.env.example deploy/remote/.env                 # fill in, chmod 600
-#   cp deploy/remote/mosquitto/acl.example deploy/remote/mosquitto/acl
-#   sh deploy/remote/mosquitto/add-user.sh speaker-service           # same password as MQTT_PASSWORD in .env
-#   sh deploy/remote/mosquitto/add-user.sh relay-1                   # the relay's own login
-#   docker compose -f deploy/remote/docker-compose.yml up -d --build
+#   cp deploy/vm/.env.example deploy/vm/.env                         # fill in, chmod 600
+#   cp deploy/vm/mosquitto/acl.example deploy/vm/mosquitto/acl
+#   sh deploy/vm/mosquitto/add-user.sh speaker-service               # same password as MQTT_PASSWORD in .env
+#   sh deploy/vm/mosquitto/add-user.sh relay-1                       # the relay's own login
+#   scripts/speaker --vm up        # = docker compose -f deploy/vm/compose.yaml up -d --build
 #
 # The backup service saves data.db (online SQLite backup) and config.json every night; see README
 # "Backups and restore" for listing, copying off the VM and restoring.
@@ -15,10 +15,16 @@
 # file; a cloudflared installed on the host answers 502 (stop it: systemctl disable --now cloudflared).
 #
 # Every value below is a placeholder. Real hostnames, broker credentials and tunnel tokens go in .env
-# (git-ignored), never in this file.
+# (git-ignored), never in this file. The required ones stop Compose with an error when .env is missing.
+
+# The project name is pinned: this stack used to live in deploy/remote/, so Compose named it "remote" and its
+# volumes remote_speaker-data, remote_speaker-backups and remote_mosquitto-data hold the production data.
+# Without this line the project would be called "vm" and start on new, empty volumes. Never change it.
+name: remote
+
 x-speaker-build: &speaker-build
   context: ../..
-  dockerfile: deploy/remote/Dockerfile
+  dockerfile: Dockerfile
 
 services:
   speaker-service:
@@ -26,12 +32,12 @@ services:
     restart: unless-stopped
     environment:
       SPEAKER_TRANSPORT: mqtt
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}        # e.g. https://speaker-media.example.com (the tunnel hostname)
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL in deploy/vm/.env}  # e.g. https://speaker-media.example.com (the tunnel hostname)
       MQTT_HOST: mosquitto                       # the broker below, over the compose network
       MQTT_PORT: "1883"
       MQTT_TLS: "false"
-      MQTT_USERNAME: ${MQTT_USERNAME}
-      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_USERNAME: ${MQTT_USERNAME:?set MQTT_USERNAME in deploy/vm/.env}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?set MQTT_PASSWORD in deploy/vm/.env}
       MQTT_BASE_TOPIC: ${MQTT_BASE_TOPIC:-speaker-relay/speaker-relay}
       MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-speaker-service}
       # Trust X-Forwarded-For/-Proto from cloudflared only (its fixed address below), so the activity log and
@@ -51,7 +57,7 @@ services:
   backup:
     build: *speaker-build
     restart: unless-stopped
-    command: ["python", "backup.py", "--daemon"]
+    command: ["python", "-m", "server.backup", "--daemon"]
     environment:
       BACKUP_TIME: ${BACKUP_TIME:-03:30}         # HH:MM, UTC
       BACKUP_KEEP: ${BACKUP_KEEP:-14}            # newest backups kept
@@ -73,7 +79,7 @@ services:
     restart: unless-stopped
     command: tunnel --no-autoupdate run
     environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in deploy/vm/.env}
     networks:
       default:
         ipv4_address: 172.30.77.10   # the one proxy speaker-service trusts (FORWARDED_ALLOW_IPS)

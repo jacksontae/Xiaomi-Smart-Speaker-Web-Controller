@@ -1,4 +1,4 @@
-// Talkie client (WebSocket /talkie, see app.py): the walkie-talkie between the members of this server.
+// Talkie client (WebSocket /talkie, see server/talkie.py): the walkie-talkie between the members of this server.
 // The socket stays open on every page while signed in (app.js calls start/stop): it says who has the app open, who
 // is in the Walkie and who talks there (the shell's "join the Walkie" chip), and brings the voice messages. Walkie
 // talks are heard only while this tab's Walkie is open (setRoom), through one <audio>. The page (views/talkie.js)

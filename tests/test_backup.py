@@ -1,4 +1,4 @@
-"""deploy/remote/backup.py: consistent SQLite snapshots, retention, owner-only files, restore."""
+"""server/backup.py: consistent SQLite snapshots, retention, owner-only files, restore."""
 import importlib.util
 import sqlite3
 import stat
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 _SPEC = importlib.util.spec_from_file_location(
-    "remote_backup", Path(__file__).resolve().parents[1] / "deploy" / "remote" / "backup.py"
+    "remote_backup", Path(__file__).resolve().parents[1] / "server" / "backup.py"
 )
 backup = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(backup)

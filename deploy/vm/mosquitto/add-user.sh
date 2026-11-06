@@ -1,8 +1,8 @@
 #!/bin/sh
-# Add or change a broker login: sh deploy/remote/mosquitto/add-user.sh <username>
-# Prompts for the password (nothing ends up in shell history) and writes deploy/remote/mosquitto/passwd,
+# Add or change a broker login: sh deploy/vm/mosquitto/add-user.sh <username>
+# Prompts for the password (nothing ends up in shell history) and writes deploy/vm/mosquitto/passwd,
 # owned by the container's mosquitto user. Restart the broker afterwards:
-#   docker compose -f deploy/remote/docker-compose.yml restart mosquitto
+#   scripts/speaker --vm restart mosquitto
 set -e
 [ -n "$1" ] || { echo "usage: $0 <username>"; exit 1; }
 DIR=$(cd "$(dirname "$0")" && pwd)

@@ -1,7 +1,7 @@
 """End-to-end browser tests (Playwright). Off by default: set E2E=1 and have playwright installed.
 
-The suite starts its own server (app.py) in a throwaway folder with an unreachable speaker (192.0.2.10, TEST-NET),
-so nothing ever plays on a real device. See tests/e2e/README.md.
+The suite starts its own server (`python -m server`) in a throwaway folder with an unreachable speaker
+(192.0.2.10, TEST-NET), so nothing ever plays on a real device. See tests/e2e/README.md.
 """
 import json
 import os
@@ -72,7 +72,7 @@ def server(workdir):
         env.pop(k, None)
     python = os.environ.get("E2E_SERVER_PYTHON", sys.executable)
     log = open(workdir / "server.log", "w")  # noqa: SIM115 - closed at teardown
-    proc = subprocess.Popen(["nice", "-n", "10", python, "app.py"], cwd=ROOT, env=env,
+    proc = subprocess.Popen(["nice", "-n", "10", python, "-m", "server"], cwd=ROOT, env=env,
                             stdout=log, stderr=subprocess.STDOUT)
     deadline = time.time() + 30
     while time.time() < deadline:

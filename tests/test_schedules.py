@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import BASE, make_user, session_client
 
-import store
+from server import config, core, playback, schedules, store
 
 BKK = ZoneInfo("Asia/Bangkok")
 EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]
@@ -15,7 +15,7 @@ EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]
 
 @pytest.fixture(autouse=True)
 def bangkok(app, monkeypatch):
-    monkeypatch.setattr(app, "ZONE", BKK)
+    monkeypatch.setattr(config, "ZONE", BKK)
 
 
 def bkk(*args):
@@ -33,11 +33,11 @@ def create(client, **over):
 
 
 def set_due(app, schedule_id, when):
-    app.db.update_schedule(schedule_id, {"next_run": app.utc_iso(when)})
+    core.db.update_schedule(schedule_id, {"next_run": config.utc_iso(when)})
 
 
 def run_due(app, now):
-    asyncio.run(app.run_due_schedules(now))
+    asyncio.run(schedules.run_due_schedules(now))
 
 
 def actions(client):
@@ -45,9 +45,9 @@ def actions(client):
 
 
 def tts_playlist(app, *texts, name="Morning"):
-    pl = app.db.create_playlist(name)
+    pl = core.db.create_playlist(name)
     for text in texts:
-        app.db.add_item(pl["id"], {"kind": "tts", "source": text, "title": text, "lang": "en"}, 10)
+        core.db.add_item(pl["id"], {"kind": "tts", "source": text, "title": text, "lang": "en"}, 10)
     return pl["id"]
 
 
@@ -129,7 +129,7 @@ def test_patch_revalidates_whole_schedule(client, app):
 
 def test_reenabling_a_finished_one_off_needs_a_new_date(client, app):
     s = create(client, days=[], date="2099-01-01")
-    app.db.update_schedule(s["id"], {"date": "2020-01-01", "enabled": False, "next_run": None})
+    core.db.update_schedule(s["id"], {"date": "2020-01-01", "enabled": False, "next_run": None})
     assert client.patch(f"/schedules/{s['id']}", json={"name": "Renamed"}).status_code == 200
     assert client.patch(f"/schedules/{s['id']}", json={"enabled": True}).status_code == 400
     r = client.patch(f"/schedules/{s['id']}", json={"enabled": True, "date": "2099-02-01"})
@@ -182,45 +182,47 @@ def test_activity_for_create_update_delete(client):
 
 def test_next_run_daily(app):
     s = {"time": "07:00", "days": EVERY_DAY, "date": None}
-    assert app.next_run_after(s, bkk(2026, 11, 2, 6, 59)) == bkk(2026, 11, 2, 7, 0)
-    assert app.next_run_after(s, bkk(2026, 11, 2, 7, 0)) == bkk(2026, 11, 3, 7, 0)  # strictly after
+    assert schedules.next_run_after(s, bkk(2026, 11, 2, 6, 59)) == bkk(2026, 11, 2, 7, 0)
+    assert schedules.next_run_after(s, bkk(2026, 11, 2, 7, 0)) == bkk(2026, 11, 3, 7, 0)  # strictly after
     # Zone-aware: 07:00 in Bangkok is midnight UTC, whatever zone `after` is in.
-    assert app.utc_iso(app.next_run_after(s, datetime(2026, 11, 2, 1, 0, tzinfo=UTC))) == "2026-11-03T00:00:00+00:00"
+    following = schedules.next_run_after(s, datetime(2026, 11, 2, 1, 0, tzinfo=UTC))
+    assert config.utc_iso(following) == "2026-11-03T00:00:00+00:00"
 
 
 def test_next_run_weekdays_and_weekend(app):
     weekdays = {"time": "08:00", "days": [0, 1, 2, 3, 4], "date": None}
     friday_after = bkk(2026, 10, 30, 9, 0)
-    assert app.next_run_after(weekdays, friday_after) == bkk(2026, 11, 2, 8, 0)  # Monday
+    assert schedules.next_run_after(weekdays, friday_after) == bkk(2026, 11, 2, 8, 0)  # Monday
     weekend = {"time": "08:00", "days": [5, 6], "date": None}
-    assert app.next_run_after(weekend, friday_after) == bkk(2026, 10, 31, 8, 0)
-    assert app.next_run_after(weekend, bkk(2026, 11, 1, 8, 0)) == bkk(2026, 11, 7, 8, 0)  # Sunday done -> Saturday
+    assert schedules.next_run_after(weekend, friday_after) == bkk(2026, 10, 31, 8, 0)
+    # Sunday done -> Saturday
+    assert schedules.next_run_after(weekend, bkk(2026, 11, 1, 8, 0)) == bkk(2026, 11, 7, 8, 0)
     only_monday = {"time": "08:00", "days": [0], "date": None}
-    assert app.next_run_after(only_monday, bkk(2026, 11, 2, 8, 1)) == bkk(2026, 11, 9, 8, 0)
+    assert schedules.next_run_after(only_monday, bkk(2026, 11, 2, 8, 1)) == bkk(2026, 11, 9, 8, 0)
 
 
 def test_next_run_one_off(app):
     s = {"time": "08:30", "days": [], "date": "2026-11-05"}
-    assert app.next_run_after(s, bkk(2026, 11, 5, 8, 29)) == bkk(2026, 11, 5, 8, 30)
-    assert app.next_run_after(s, bkk(2026, 11, 5, 8, 30)) is None
+    assert schedules.next_run_after(s, bkk(2026, 11, 5, 8, 29)) == bkk(2026, 11, 5, 8, 30)
+    assert schedules.next_run_after(s, bkk(2026, 11, 5, 8, 30)) is None
 
 
 def test_next_run_keeps_wall_time_across_dst(app, monkeypatch):
     ny = ZoneInfo("America/New_York")
-    monkeypatch.setattr(app, "ZONE", ny)
+    monkeypatch.setattr(config, "ZONE", ny)
     s = {"time": "07:00", "days": EVERY_DAY, "date": None}
-    before = app.next_run_after(s, datetime(2026, 3, 6, 13, 0, tzinfo=UTC))
-    after = app.next_run_after(s, datetime(2026, 3, 7, 13, 0, tzinfo=UTC))
-    assert app.utc_iso(before) == "2026-03-07T12:00:00+00:00"  # EST
-    assert app.utc_iso(after) == "2026-03-08T11:00:00+00:00"  # EDT, still 07:00 local
+    before = schedules.next_run_after(s, datetime(2026, 3, 6, 13, 0, tzinfo=UTC))
+    after = schedules.next_run_after(s, datetime(2026, 3, 7, 13, 0, tzinfo=UTC))
+    assert config.utc_iso(before) == "2026-03-07T12:00:00+00:00"  # EST
+    assert config.utc_iso(after) == "2026-03-08T11:00:00+00:00"  # EDT, still 07:00 local
     assert after.astimezone(ny).hour == 7
 
 
 def test_local_zone_from_tz_env(app, monkeypatch):
     monkeypatch.setenv("TZ", "Europe/Berlin")
-    assert app.local_zone().key == "Europe/Berlin"
+    assert config.local_zone().key == "Europe/Berlin"
     monkeypatch.setenv("TZ", "Not/AZone")
-    assert app.local_zone().key == "UTC"
+    assert config.local_zone().key == "UTC"
 
 
 # --- Runner ---
@@ -233,9 +235,9 @@ def test_due_say_fires_through_say_path(client, app, fake_speaker):
     load = fake_speaker.media_controller.loads[-1]
     assert load["url"].startswith(f"{BASE}/tts.mp3?") and "lang=th" in load["url"]
     assert load["title"] == "Announcement" and fake_speaker.volume == 0.7
-    done = app.db.get_schedule(s["id"])
-    assert done["last_result"] == "ok" and done["last_run"] == app.utc_iso(now) and done["enabled"] is True
-    assert done["next_run"] == app.utc_iso(bkk(2026, 11, 3, 12, 0))
+    done = core.db.get_schedule(s["id"])
+    assert done["last_result"] == "ok" and done["last_run"] == config.utc_iso(now) and done["enabled"] is True
+    assert done["next_run"] == config.utc_iso(bkk(2026, 11, 3, 12, 0))
     log = actions(client)
     assert log[0] == ("system", "schedule run", "Lunch: ok")
     assert log[1] == ("system", "say", "ประชุม")
@@ -248,25 +250,25 @@ def test_say_schedule_resumes_interrupted_track(client, app, fake_speaker):
     s = create(client)
     set_due(app, s["id"], bkk(2026, 11, 2, 12, 0))
     run_due(app, bkk(2026, 11, 2, 12, 0))
-    assert app._resume["title"] == "Song"
+    assert playback._resume["title"] == "Song"
 
 
 def test_not_due_or_disabled_does_not_fire(client, app, fake_speaker):
     s = create(client)
     off = create(client, name="Off", enabled=False)
     set_due(app, s["id"], bkk(2026, 11, 2, 12, 0))
-    app.db.update_schedule(off["id"], {"next_run": app.utc_iso(bkk(2026, 11, 2, 11, 0))})  # stale, but disabled
+    core.db.update_schedule(off["id"], {"next_run": config.utc_iso(bkk(2026, 11, 2, 11, 0))})  # stale, but disabled
     run_due(app, bkk(2026, 11, 2, 11, 59, 59))
     assert fake_speaker.media_controller.loads == []
-    assert app.db.get_schedule(s["id"])["last_result"] is None
-    assert app.db.get_schedule(off["id"])["last_result"] is None
+    assert core.db.get_schedule(s["id"])["last_result"] is None
+    assert core.db.get_schedule(off["id"])["last_result"] is None
 
 
 def test_one_off_disables_after_firing(client, app, fake_speaker):
     s = create(client, days=[], date="2099-01-01")
     set_due(app, s["id"], bkk(2026, 11, 2, 12, 0))
     run_due(app, bkk(2026, 11, 2, 12, 0, 5))
-    done = app.db.get_schedule(s["id"])
+    done = core.db.get_schedule(s["id"])
     assert done["enabled"] is False and done["next_run"] is None and done["last_result"] == "ok"
     assert len(fake_speaker.media_controller.loads) == 1
     run_due(app, bkk(2026, 11, 2, 12, 1))
@@ -277,7 +279,7 @@ def test_overdue_within_grace_still_fires(client, app, fake_speaker):
     s = create(client)
     set_due(app, s["id"], bkk(2026, 11, 2, 12, 0))
     run_due(app, bkk(2026, 11, 2, 12, 5))
-    assert app.db.get_schedule(s["id"])["last_result"] == "ok"
+    assert core.db.get_schedule(s["id"])["last_result"] == "ok"
     assert len(fake_speaker.media_controller.loads) == 1
 
 
@@ -289,10 +291,10 @@ def test_missed_beyond_grace_is_skipped(client, app, fake_speaker):
     now = bkk(2026, 11, 2, 12, 5, 1)
     run_due(app, now)
     assert fake_speaker.media_controller.loads == []
-    missed = app.db.get_schedule(s["id"])
+    missed = core.db.get_schedule(s["id"])
     assert missed["last_result"] == "missed" and missed["last_run"] is None and missed["enabled"] is True
-    assert missed["next_run"] == app.utc_iso(bkk(2026, 11, 3, 12, 0))
-    gone = app.db.get_schedule(one_off["id"])
+    assert missed["next_run"] == config.utc_iso(bkk(2026, 11, 3, 12, 0))
+    gone = core.db.get_schedule(one_off["id"])
     assert gone["last_result"] == "missed" and gone["enabled"] is False and gone["next_run"] is None
     log = actions(client)
     assert ("system", "schedule missed", "Lunch (due 2026-11-02 12:00)") in log
@@ -308,12 +310,12 @@ def test_speaker_error_recorded_and_runner_continues(client, app, monkeypatch):
     def unreachable():
         raise OSError("no route to host")
 
-    monkeypatch.setattr(app.transport, "get_cast", unreachable)
+    monkeypatch.setattr(core.transport, "get_cast", unreachable)
     run_due(app, bkk(2026, 11, 2, 12, 0))
     for s in (first, second):
-        done = app.db.get_schedule(s["id"])
+        done = core.db.get_schedule(s["id"])
         assert "not responding" in done["last_result"]
-        assert done["next_run"] == app.utc_iso(bkk(2026, 11, 3, 12, 0))
+        assert done["next_run"] == config.utc_iso(bkk(2026, 11, 3, 12, 0))
     assert any(a == "schedule run" and d.startswith("Second: Speaker") for _, a, d in actions(client))
 
 
@@ -324,8 +326,8 @@ def test_failure_does_not_stop_later_schedules(client, app, fake_speaker):
     set_due(app, broken["id"], bkk(2026, 11, 2, 11, 59))
     set_due(app, fine["id"], bkk(2026, 11, 2, 12, 0))
     run_due(app, bkk(2026, 11, 2, 12, 0))
-    assert app.db.get_schedule(broken["id"])["last_result"] == "The playlist is empty"
-    assert app.db.get_schedule(fine["id"])["last_result"] == "ok"
+    assert core.db.get_schedule(broken["id"])["last_result"] == "The playlist is empty"
+    assert core.db.get_schedule(fine["id"])["last_result"] == "ok"
 
 
 def test_unexpected_error_is_recorded(client, app, monkeypatch):
@@ -335,9 +337,9 @@ def test_unexpected_error_is_recorded(client, app, monkeypatch):
     async def boom(text, lang, volume, who):
         raise RuntimeError("bug")
 
-    monkeypatch.setattr(app, "announce", boom)
+    monkeypatch.setattr(playback, "announce", boom)
     run_due(app, bkk(2026, 11, 2, 12, 0))
-    assert app.db.get_schedule(s["id"])["last_result"] == "RuntimeError: bug"
+    assert core.db.get_schedule(s["id"])["last_result"] == "RuntimeError: bug"
 
 
 def test_playlist_schedule_starts_queue(client, app, fake_speaker, fresh_state):
@@ -345,21 +347,21 @@ def test_playlist_schedule_starts_queue(client, app, fake_speaker, fresh_state):
     s = create(client, name="Music", action="playlist", playlist_id=pid, volume=0.6)
     set_due(app, s["id"], bkk(2026, 11, 2, 12, 0))
     run_due(app, bkk(2026, 11, 2, 12, 0))
-    q = app._queue
+    q = playback._queue
     assert q is not None and q.playlist_id == pid and q.repeat == "off" and q.current["source"] == "one"
     assert "text=one" in fake_speaker.media_controller.loads[-1]["url"]
     assert fake_speaker.volume == 0.6 and fresh_state.watchers == 1
-    assert app.db.get_schedule(s["id"])["last_result"] == "ok"
+    assert core.db.get_schedule(s["id"])["last_result"] == "ok"
     assert actions(client)[:2] == [("system", "schedule run", "Music: ok"), ("system", "playlist play", "Morning")]
 
 
 def test_playlist_schedule_without_volume_uses_default(client, app, fake_speaker):
-    app.settings.default_volume = 0.3
+    config.settings.default_volume = 0.3
     pid = tts_playlist(app, "one")
     s = create(client, action="playlist", playlist_id=pid, shuffle=True)
     set_due(app, s["id"], bkk(2026, 11, 2, 12, 0))
     run_due(app, bkk(2026, 11, 2, 12, 0))
-    assert fake_speaker.volume == 0.3 and app._queue.shuffle is True
+    assert fake_speaker.volume == 0.3 and playback._queue.shuffle is True
 
 
 def test_deleting_playlist_disables_its_schedules(client, app):
@@ -367,9 +369,9 @@ def test_deleting_playlist_disables_its_schedules(client, app):
     s = create(client, action="playlist", playlist_id=pid)
     other = create(client, name="Other")
     assert client.delete(f"/playlists/{pid}").status_code == 204
-    gone = app.db.get_schedule(s["id"])
+    gone = core.db.get_schedule(s["id"])
     assert gone["enabled"] is False and gone["playlist_id"] is None and gone["next_run"] is None
-    assert app.db.get_schedule(other["id"])["enabled"] is True
+    assert core.db.get_schedule(other["id"])["enabled"] is True
     assert client.patch(f"/schedules/{s['id']}", json={"enabled": True}).status_code == 400
     r = client.post(f"/schedules/{s['id']}/run")
     assert r.status_code == 400 and "no longer exists" in r.json()["detail"]
@@ -383,7 +385,7 @@ def test_run_now_ignores_time_and_enabled(client, app, fake_speaker):
     r = alice.post(f"/schedules/{s['id']}/run")
     assert r.status_code == 200 and r.json() == {"ok": True}
     assert len(fake_speaker.media_controller.loads) == 1
-    done = app.db.get_schedule(s["id"])
+    done = core.db.get_schedule(s["id"])
     assert done["next_run"] is None and done["enabled"] is False and done["last_result"] == "ok"
     assert done["last_run"] is not None
     assert actions(client)[0] == ("Alice", "schedule run", "Lunch: ok")
@@ -393,7 +395,7 @@ def test_run_now_ignores_time_and_enabled(client, app, fake_speaker):
 def test_run_now_keeps_next_run(client, app):
     s = create(client)
     client.post(f"/schedules/{s['id']}/run")
-    assert app.db.get_schedule(s["id"])["next_run"] == s["next_run"]
+    assert core.db.get_schedule(s["id"])["next_run"] == s["next_run"]
     assert client.post("/schedules/999/run").status_code == 404
 
 
@@ -403,10 +405,10 @@ def test_run_now_speaker_error_is_503(client, app, monkeypatch):
     def unreachable():
         raise OSError("down")
 
-    monkeypatch.setattr(app.transport, "get_cast", unreachable)
+    monkeypatch.setattr(core.transport, "get_cast", unreachable)
     r = client.post(f"/schedules/{s['id']}/run")
     assert r.status_code == 503 and "not responding" in r.json()["detail"]
-    assert "not responding" in app.db.get_schedule(s["id"])["last_result"]
+    assert "not responding" in core.db.get_schedule(s["id"])["last_result"]
 
 
 # --- Storage ---
@@ -451,7 +453,7 @@ def test_runner_starts_and_stops_with_the_app(app, monkeypatch):
             events.append("stopped")
             raise
 
-    monkeypatch.setattr(app, "schedule_loop", fake_loop)
+    monkeypatch.setattr(schedules, "schedule_loop", fake_loop)
     with TestClient(app.app):
         pass
     assert events == ["started", "stopped"]
