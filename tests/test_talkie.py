@@ -12,17 +12,18 @@ import pytest
 from conftest import make_user, session_client
 from test_talk import WEBM, FakeTranscoder, refused
 
-from server import store
+from server import config, core, livetalk, schedules, store
+from server import talkie as talkie_module
 
 
 @pytest.fixture
 def talkie(app, monkeypatch):
     """Fake transcoder, short timers; talks of any length keep a clip unless a test says otherwise."""
     made = []
-    monkeypatch.setattr(app, "talk_transcoder", lambda fmt: FakeTranscoder(fmt, made))
-    monkeypatch.setattr(app, "talk_available", lambda: True)
-    monkeypatch.setattr(app, "TALK_TICK", 0.02)
-    monkeypatch.setattr(app, "TALKIE_MIN_SECONDS", 0)
+    monkeypatch.setattr(livetalk, "talk_transcoder", lambda fmt: FakeTranscoder(fmt, made))
+    monkeypatch.setattr(livetalk, "talk_available", lambda: True)
+    monkeypatch.setattr(config, "TALK_TICK", 0.02)
+    monkeypatch.setattr(config, "TALKIE_MIN_SECONDS", 0)
     return SimpleNamespace(made=made)
 
 
@@ -123,9 +124,9 @@ def test_walkie_goes_live_to_the_room(room, app, talkie):
         ended = until(a, "ended")
         assert until(b, "ended") == ended
         assert ended["id"] == ready["id"] and ended["reason"] == "stopped" and ended["clip"] is None
-        assert app._talkie is None and talkie.made[0].fmt == "webm" and talkie.made[0].finished
+        assert talkie_module._talkie is None and talkie.made[0].fmt == "webm" and talkie.made[0].finished
         assert bob.get(live["url"]).content == b"MP3:oneMP3:two"  # the live stream, for a slow listener
-    assert not any(e["action"] == "talk" for e in app.db.activity())  # chat isn't logged
+    assert not any(e["action"] == "talk" for e in core.db.activity())  # chat isn't logged
 
 
 def test_message_is_kept_for_everyone(room, app, talkie):
@@ -141,7 +142,7 @@ def test_message_is_kept_for_everyone(room, app, talkie):
     assert bob.get("/talkie/clips").json() == [clip]
     played = bob.get(clip["url"])
     assert played.content == b"MP3:hello" and played.headers["content-type"] == "audio/mpeg"
-    assert (app.TALKIE_DIR / f"{clip['id']}.mp3").read_bytes() == b"MP3:hello"
+    assert (config.TALKIE_DIR / f"{clip['id']}.mp3").read_bytes() == b"MP3:hello"
 
 
 def test_start_must_say_its_mode(room, talkie):
@@ -164,7 +165,7 @@ def test_live_stream_follows_the_talk(room, app, talkie):
         talk_id = a.receive_json()["id"]
         a.send_bytes(b"x")
         pong(a)
-        assert app._talkie.id == talk_id and talkie.made[0].fmt == "mp4"
+        assert talkie_module._talkie.id == talk_id and talkie.made[0].fmt == "mp4"
         a.send_json({"type": "stop"})
         until(a, "ended")
         assert alice.get(f"/talkie/live/{talk_id}").content == b"MP3:x"
@@ -200,7 +201,7 @@ def test_walkie_is_live_and_keeps_no_clip(room, app, talkie):
         assert drain(b) == ["live", "ended"]  # no "clip"
         assert bob.get(f"/talkie/live/{ended['id']}").content == b"MP3:hi"
         assert "clip" not in drain(a)
-    assert alice.get("/talkie/clips").json() == [] and not any(app.TALKIE_DIR.glob("*"))
+    assert alice.get("/talkie/clips").json() == [] and not any(config.TALKIE_DIR.glob("*"))
 
 
 def test_messages_are_never_live_and_take_no_lock(room, app, talkie):
@@ -212,7 +213,7 @@ def test_messages_are_never_live_and_take_no_lock(room, app, talkie):
         a.send_json({"type": "start", "mime": WEBM, "mode": "message"})
         b.send_json({"type": "start", "mime": WEBM, "mode": "message"})
         assert a.receive_json()["type"] == b.receive_json()["type"] == "ready"  # both at once
-        assert app._talkie is None
+        assert talkie_module._talkie is None
         with carol.websocket_connect("/talkie") as c2:  # nor does a walkie talk wait for them
             hello(c2)
             assert record(c2, "walkie")["clip"] is None
@@ -232,7 +233,7 @@ def test_messages_are_never_live_and_take_no_lock(room, app, talkie):
 
 
 def test_message_shorter_than_the_minimum_is_dropped(room, app, talkie, monkeypatch):
-    monkeypatch.setattr(app, "TALKIE_MIN_SECONDS", 0.5)
+    monkeypatch.setattr(config, "TALKIE_MIN_SECONDS", 0.5)
     alice = room("alice")
     with alice.websocket_connect("/talkie") as a:
         hello(a)
@@ -296,7 +297,7 @@ def test_walkie_only_from_the_room(room, app, talkie):
         until(b, "live")
         a.send_json({"type": "room", "in": False})  # leaving the Walkie ends the talk
         assert until(b, "ended")["reason"] == "left_room"
-        assert app._talkie is None
+        assert talkie_module._talkie is None
     assert len(talkie.made) == 2
 
 
@@ -316,7 +317,7 @@ def test_speaker_talk_is_separate(room, app, talkie, fake_speaker):
 
 
 def test_short_talk_keeps_no_clip(room, app, talkie, monkeypatch):
-    monkeypatch.setattr(app, "TALKIE_MIN_SECONDS", 0.5)
+    monkeypatch.setattr(config, "TALKIE_MIN_SECONDS", 0.5)
     alice = room("alice")
     with alice.websocket_connect("/talkie") as a:
         hello(a)
@@ -325,7 +326,7 @@ def test_short_talk_keeps_no_clip(room, app, talkie, monkeypatch):
         a.send_bytes(b"blip")
         a.send_json({"type": "stop"})
         assert until(a, "ended")["clip"] is None
-    assert alice.get("/talkie/clips").json() == [] and not any(app.TALKIE_DIR.glob("*"))
+    assert alice.get("/talkie/clips").json() == [] and not any(config.TALKIE_DIR.glob("*"))
 
 
 @pytest.mark.parametrize("mode", ["walkie", "message"])
@@ -346,12 +347,12 @@ def test_hanging_up_ends_the_talk(mode, room, app, talkie):
             else:  # what was said is kept
                 assert until(b, "clip")["clip"]["name"] == "Alice"
             assert names(until(b, "online")["online"]) == ["Bob"]
-    assert app._talkie is None and talkie.made[0].finished
+    assert talkie_module._talkie is None and talkie.made[0].finished
 
 
 @pytest.mark.parametrize(("limit", "reason"), [("TALKIE_MAX_SECONDS", "max_length"), ("TALK_IDLE_TIMEOUT", "idle")])
 def test_timers_end_the_talk(limit, reason, room, app, talkie, monkeypatch):
-    monkeypatch.setattr(app, limit, 0.2)
+    monkeypatch.setattr(config, limit, 0.2)
     alice = room("alice")
     with alice.websocket_connect("/talkie") as a:
         hello(a)
@@ -362,7 +363,7 @@ def test_timers_end_the_talk(limit, reason, room, app, talkie, monkeypatch):
 
 
 def test_too_much_audio(room, app, talkie, monkeypatch):
-    monkeypatch.setattr(app, "TALK_MAX_RATE", 1)  # 60 bytes for a 60 s talk
+    monkeypatch.setattr(config, "TALK_MAX_RATE", 1)  # 60 bytes for a 60 s talk
     alice = room("alice")
     with alice.websocket_connect("/talkie") as a:
         hello(a)
@@ -399,7 +400,7 @@ def test_bad_start(app, as_role, talkie, monkeypatch):
         start(ws, mime="audio/wav")
         error = ws.receive_json()
         assert error["code"] == "bad_request" and "Unsupported recording format" in error["detail"]
-        monkeypatch.setattr(app, "talk_available", lambda: False)
+        monkeypatch.setattr(livetalk, "talk_available", lambda: False)
         start(ws)
         error = ws.receive_json()
         assert error["code"] == "unavailable" and "ffmpeg" in error["detail"]
@@ -413,7 +414,7 @@ def test_signed_out_member_is_dropped(app, talkie):
     c = session_client(user)
     with c.websocket_connect("/talkie") as ws:
         hello(ws)
-        app.db.delete_sessions(user["id"])
+        core.db.delete_sessions(user["id"])
         ws.send_json({"type": "ping"})
         error, closed = refused(ws)
     assert error["code"] == "unauthorized" and closed == 4401
@@ -428,18 +429,18 @@ def saved_clip(app, client):
 def test_clips_expire_after_a_day(app, as_role, anon, talkie):
     viewer = as_role("viewer")
     clip = saved_clip(app, viewer)
-    path = app.TALKIE_DIR / f"{clip['id']}.mp3"
+    path = config.TALKIE_DIR / f"{clip['id']}.mp3"
     assert anon.get(clip["url"]).status_code == 401 and viewer.get(clip["url"]).status_code == 200
     old = (datetime.now(UTC) - timedelta(hours=25)).isoformat(timespec="seconds")
-    with app.db.tx() as db:
+    with core.db.tx() as db:
         db.execute("UPDATE talkie_clips SET created_at = ?", (old,))
     assert viewer.get(clip["url"]).status_code == 404  # out of the list and unplayable right away
     assert viewer.get("/talkie/clips").json() == []
-    orphan = app.TALKIE_DIR / "gone.mp3"
+    orphan = config.TALKIE_DIR / "gone.mp3"
     orphan.write_bytes(b"x")
     os.utime(orphan, (time.time() - 90000,) * 2)
-    app.talkie_sweep(force=True)
-    assert not path.exists() and not orphan.exists() and app.db.get_clip(clip["id"]) is None
+    talkie_module.talkie_sweep(force=True)
+    assert not path.exists() and not orphan.exists() and core.db.get_clip(clip["id"]) is None
 
 
 def test_only_the_author_deletes_a_message(room, app, client, talkie):
@@ -447,18 +448,18 @@ def test_only_the_author_deletes_a_message(room, app, client, talkie):
     with alice.websocket_connect("/talkie") as a, bob.websocket_connect("/talkie") as b:
         hello(a), hello(b)
         clip = record(a, "message")["clip"]
-        path = app.TALKIE_DIR / f"{clip['id']}.mp3"
+        path = config.TALKIE_DIR / f"{clip['id']}.mp3"
         assert bob.delete(f"/talkie/clips/{clip['id']}").status_code == 403
         assert owner.delete(f"/talkie/clips/{clip['id']}").status_code == 403  # not even the owner
         assert client.delete(f"/talkie/clips/{clip['id']}").status_code == 400  # the API token is no member
         assert path.exists()
         assert alice.delete(f"/talkie/clips/{clip['id']}").status_code == 204
         assert until(a, "clip_deleted") == until(b, "clip_deleted") == {"type": "clip_deleted", "id": clip["id"]}
-        assert not path.exists() and app.db.get_clip(clip["id"]) is None
+        assert not path.exists() and core.db.get_clip(clip["id"]) is None
         assert alice.get("/talkie/clips").json() == [] and alice.get(clip["url"]).status_code == 404
         assert alice.delete(f"/talkie/clips/{clip['id']}").status_code == 404
         assert alice.delete("/talkie/clips/nothing").status_code == 404
-    logged = [e for e in app.db.activity() if e["action"] == "message delete"]
+    logged = [e for e in core.db.activity() if e["action"] == "message delete"]
     assert len(logged) == 1 and logged[0]["actor"] == "Alice"
 
 
@@ -466,23 +467,23 @@ def test_expired_message_cannot_be_deleted(app, as_role, talkie):
     viewer = as_role("viewer")
     clip = saved_clip(app, viewer)
     old = (datetime.now(UTC) - timedelta(hours=25)).isoformat(timespec="seconds")
-    with app.db.tx() as db:
+    with core.db.tx() as db:
         db.execute("UPDATE talkie_clips SET created_at = ?", (old,))
     assert viewer.delete(f"/talkie/clips/{clip['id']}").status_code == 404
 
 
 def test_sweep_runs_at_most_hourly(app, talkie, monkeypatch):
     calls = []
-    monkeypatch.setattr(app.db, "expire_clips", lambda before: calls.append(before) or [])
-    app.talkie_sweep()
-    app.talkie_sweep()
+    monkeypatch.setattr(core.db, "expire_clips", lambda before: calls.append(before) or [])
+    talkie_module.talkie_sweep()
+    talkie_module.talkie_sweep()
     assert len(calls) == 1
 
 
 def test_deleting_a_member_deletes_their_clips(app, client, talkie):
     user = make_user("ann", "viewer")
     clip = saved_clip(app, session_client(user))
-    path = app.TALKIE_DIR / f"{clip['id']}.mp3"
+    path = config.TALKIE_DIR / f"{clip['id']}.mp3"
     assert path.exists()
     assert client.delete(f"/users/{user['id']}").status_code == 204
     assert not path.exists() and client.get("/talkie/clips").json() == []
@@ -492,8 +493,9 @@ def test_shutdown_kills_a_running_talkie(app, monkeypatch):
     from fastapi.testclient import TestClient
 
     killed = []
-    monkeypatch.setattr(app, "_talkie", SimpleNamespace(transcoder=SimpleNamespace(kill=lambda: killed.append(1))))
-    monkeypatch.setattr(app, "schedule_loop", asyncio.Event().wait)
+    running = SimpleNamespace(transcoder=SimpleNamespace(kill=lambda: killed.append(1)))
+    monkeypatch.setattr(talkie_module, "_talkie", running)
+    monkeypatch.setattr(schedules, "schedule_loop", asyncio.Event().wait)
     with TestClient(app.app):
         pass
     assert killed == [1]

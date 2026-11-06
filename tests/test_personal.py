@@ -7,7 +7,7 @@ from conftest import make_user, session_client
 from test_queue import downloads  # noqa: F401 - fixture
 from test_sources import MP3, upload
 
-from server import store
+from server import config, core, media, store
 
 A, B = "aaaaaaaaaaa", "bbbbbbbbbbb"
 EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]
@@ -193,8 +193,8 @@ def test_personal_file_visibility(people, app):
     assert ops.post(f"/files/{fid}/play", json={}).status_code == 404
     assert ann.patch(f"/files/{fid}", json={"title": "Ann's song"}).json()["title"] == "Ann's song"
     assert root.patch(f"/files/{fid}", json={"title": "Fixed"}).status_code == 200
-    stored = app.db.get_file(fid)["stored_name"]
-    assert ann.delete(f"/files/{fid}").status_code == 204 and not (app.MEDIA_DIR / stored).exists()
+    stored = core.db.get_file(fid)["stored_name"]
+    assert ann.delete(f"/files/{fid}").status_code == 204 and not (config.MEDIA_DIR / stored).exists()
 
 
 def test_viewer_cannot_edit_shared_file(people):
@@ -224,21 +224,21 @@ def test_deleting_member_removes_personal_items(people, app, client):
     ann.post(f"/playlists/{pid}/items", json={"kind": "file", "source": str(mine["id"])})
     shop = new_playlist(ops, "Shop")["id"]
     tts(ops, shop)
-    stored = app.db.get_file(mine["id"])["stored_name"]
+    stored = core.db.get_file(mine["id"])["stored_name"]
     sched = root.post("/schedules", json={"name": "Shop", "action": "playlist", "playlist_id": shop,
                                           "time": "12:00", "days": EVERY_DAY})
     assert sched.status_code == 200, sched.text
-    with app.db.tx() as db:  # schedules only take shared playlists now; one from before points at Ann's
+    with core.db.tx() as db:  # schedules only take shared playlists now; one from before points at Ann's
         db.execute("UPDATE schedules SET playlist_id = ? WHERE id = ?", (pid, sched.json()["id"]))
 
     assert root.delete(f"/users/{ann.user['id']}").status_code == 204
-    assert app.db.get_playlist(pid) is None and app.db.get_file(mine["id"]) is None
-    assert not (app.MEDIA_DIR / stored).exists()
+    assert core.db.get_playlist(pid) is None and core.db.get_file(mine["id"]) is None
+    assert not (config.MEDIA_DIR / stored).exists()
     assert [p["name"] for p in root.get("/playlists").json()] == ["Shop"]
     assert [f["id"] for f in root.get("/files").json()["items"]] == [shared_file["id"]]
-    s = app.db.get_schedule(sched.json()["id"])
+    s = core.db.get_schedule(sched.json()["id"])
     assert s["enabled"] is False and s["playlist_id"] is None and s["next_run"] is None
-    with app.db.tx() as db:
+    with core.db.tx() as db:
         assert db.execute("SELECT COUNT(*) FROM playlist_items WHERE playlist_id = ?", (pid,)).fetchone()[0] == 0
 
 
@@ -248,16 +248,16 @@ def test_deleting_member_keeps_their_shared_uploads(people, app):
     assert root.delete(f"/users/{ops.user['id']}").status_code == 204
     left = root.get("/files").json()["items"]
     assert [x["id"] for x in left] == [f["id"]] and left[0]["uploader"] is None and left[0]["owner_id"] is None
-    assert (app.MEDIA_DIR / app.db.get_file(f["id"])["stored_name"]).exists()
+    assert (config.MEDIA_DIR / core.db.get_file(f["id"])["stored_name"]).exists()
 
 
 def test_store_delete_user_returns_files(app):
     user = make_user("gone", "viewer")
-    app.db.add_file("x.mp3", "X", "x.mp3", "audio/mpeg", 3, None, user["id"], user["id"])
-    app.db.add_file("y.mp3", "Y", "y.mp3", "audio/mpeg", 3, None, user["id"])  # shared: stays
-    assert app.db.delete_user(user["id"]) == ["x.mp3"]
-    assert app.db.delete_user(user["id"]) is None
-    assert [f["title"] for f in app.db.list_files()] == ["Y"]
+    core.db.add_file("x.mp3", "X", "x.mp3", "audio/mpeg", 3, None, user["id"], user["id"])
+    core.db.add_file("y.mp3", "Y", "y.mp3", "audio/mpeg", 3, None, user["id"])  # shared: stays
+    assert core.db.delete_user(user["id"]) == ["x.mp3"]
+    assert core.db.delete_user(user["id"]) is None
+    assert [f["title"] for f in core.db.list_files()] == ["Y"]
 
 
 # --- Schedules can't reach someone else's personal playlist ---
@@ -284,7 +284,7 @@ def test_viewer_skips_through_the_speaker_queue(people, app, fake_speaker, downl
     ann, ops, root = people["ann"], people["ops"], people["root"]
     pid = new_playlist(ops, "Shop")["id"]
     for vid in (A, B):
-        app.db.add_item(pid, {"kind": "youtube", "source": vid, "title": f"Song {vid[0]}"}, 100)
+        core.db.add_item(pid, {"kind": "youtube", "source": vid, "title": f"Song {vid[0]}"}, 100)
     assert ops.post(f"/playlists/{pid}/play", json={}).status_code == 200
     assert ann.post("/queue/next").json()["index"] == 1
     assert f"/yt/{B}.m4a?" in fake_speaker.media_controller.loads[-1]["url"]
@@ -299,7 +299,7 @@ def test_viewer_skips_through_the_speaker_queue(people, app, fake_speaker, downl
 
 
 def test_viewer_searches_music_sources(people, app, monkeypatch):
-    monkeypatch.setattr(app, "yt_search", lambda q, limit: [{"video_id": A, "title": q}])
+    monkeypatch.setattr(media, "yt_search", lambda q, limit: [{"video_id": A, "title": q}])
     r = people["ann"].get("/youtube/search", params={"q": "piano"})
     assert r.status_code == 200 and r.json() == [{"video_id": A, "title": "piano"}]
 

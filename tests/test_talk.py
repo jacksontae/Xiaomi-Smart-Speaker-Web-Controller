@@ -10,7 +10,7 @@ import pytest
 from conftest import BASE, path_of
 from starlette.websockets import WebSocketDisconnect
 
-from server import talk
+from server import access, config, core, livetalk, playback, schedules, talk
 
 WEBM = "audio/webm;codecs=opus"
 
@@ -51,20 +51,20 @@ def talking(app, monkeypatch):
     """Fake transcoder, short timers, and the end-of-talk speaker work recorded instead of run."""
     made, finished = [], []
     opts = SimpleNamespace(made=made, finished=finished, fail_start=False, fail_write=False)
-    monkeypatch.setattr(app, "talk_transcoder",
+    monkeypatch.setattr(livetalk, "talk_transcoder",
                         lambda fmt: FakeTranscoder(fmt, made, opts.fail_start, opts.fail_write))
-    monkeypatch.setattr(app, "talk_available", lambda: True)
+    monkeypatch.setattr(livetalk, "talk_available", lambda: True)
     for name, value in {"TALK_TICK": 0.02, "TALK_POLL": 0.01, "TALK_CHIME_WAIT": 0.1, "TALK_END_WAIT": 0.5,
                         "TALK_SPEAKER_WAIT": 2.0, "RESUME_REWIND": 1.0}.items():
-        monkeypatch.setattr(app, name, value)
+        monkeypatch.setattr(config, name, value)
 
     async def finish(session):
         finished.append(session)
 
-    monkeypatch.setattr(app, "talk_finish_on_speaker", finish)
-    monkeypatch.setattr(app, "_talk", None)
-    monkeypatch.setattr(app, "_talk_last", None)
-    monkeypatch.setattr(app, "_talk_on_speaker", None)
+    monkeypatch.setattr(livetalk, "talk_finish_on_speaker", finish)
+    monkeypatch.setattr(livetalk, "_talk", None)
+    monkeypatch.setattr(livetalk, "_talk_last", None)
+    monkeypatch.setattr(livetalk, "_talk_on_speaker", None)
     return opts
 
 
@@ -241,11 +241,11 @@ def test_talk_happy_path(as_role, client, anon, app, fake_speaker, talking):
 
     t = talking.made[0]
     assert t.fmt == "webm" and t.written == [b"one", b"two"] and t.finished
-    assert app._talk is None and [s.id for s in talking.finished] == [ready["id"]]
+    assert livetalk._talk is None and [s.id for s in talking.finished] == [ready["id"]]
     live = anon.get(path_of(load["url"]))
     assert live.content == b"MP3:oneMP3:two" and live.headers["content-type"] == "audio/mpeg"
     assert anon.get(f"/talk/{ready['id']}/live").status_code == 403
-    assert anon.get(path_of(app.media_url("/talk/other/live"))).status_code == 404
+    assert anon.get(path_of(access.media_url("/talk/other/live"))).status_code == 404
     assert actions(client)[0] == ("Operator-User", "talk", "Talked live for 0:00")
     assert op.get("/talk/status").json() == {"available": True, "max_seconds": 120, "active": None}
 
@@ -265,7 +265,7 @@ def test_ended_stream_expires(client, anon, app, fake_speaker, talking, monkeypa
         ws.send_json({"type": "stop"})
         until(ws, "ended")
     url = fake_speaker.media_controller.loads[-1]["url"]
-    monkeypatch.setattr(app, "TALK_GRACE", 0)
+    monkeypatch.setattr(config, "TALK_GRACE", 0)
     assert anon.get(path_of(url)).status_code == 404
 
 
@@ -311,14 +311,14 @@ def test_bad_start(first, detail, client, talking):
 
 
 def test_start_timeout(client, app, talking, monkeypatch):
-    monkeypatch.setattr(app, "TALK_START_TIMEOUT", 0.05)
+    monkeypatch.setattr(config, "TALK_START_TIMEOUT", 0.05)
     with client.websocket_connect("/talk") as ws:
         error, closed = refused(ws)
     assert error["code"] == "bad_request" and closed == 4400
 
 
 def test_without_ffmpeg(client, app, talking, monkeypatch):
-    monkeypatch.setattr(app, "talk_available", lambda: False)
+    monkeypatch.setattr(livetalk, "talk_available", lambda: False)
     with client.websocket_connect("/talk") as ws:
         ws.send_json({"type": "start", "mime": WEBM})
         error, closed = refused(ws)
@@ -341,7 +341,7 @@ def test_one_talker_at_a_time(as_role, talking):
 
 
 def test_max_length(client, app, talking):
-    app.settings.talk_max_seconds = 0.2  # below the setting's minimum, to keep the test fast
+    config.settings.talk_max_seconds = 0.2  # below the setting's minimum, to keep the test fast
     with client.websocket_connect("/talk") as ws:
         start(ws)
         ws.send_bytes(b"x")
@@ -351,14 +351,14 @@ def test_max_length(client, app, talking):
 
 
 def test_idle_timeout(client, app, talking, monkeypatch):
-    monkeypatch.setattr(app, "TALK_IDLE_TIMEOUT", 0.1)
+    monkeypatch.setattr(config, "TALK_IDLE_TIMEOUT", 0.1)
     with client.websocket_connect("/talk") as ws:
         start(ws)
         assert until(ws, "ended")[-1]["reason"] == "idle"
 
 
 def test_too_much_data(client, app, talking, monkeypatch):
-    monkeypatch.setattr(app, "TALK_MAX_RATE", 1)  # 120 bytes for a 120 s talk
+    monkeypatch.setattr(config, "TALK_MAX_RATE", 1)  # 120 bytes for a 120 s talk
     with client.websocket_connect("/talk") as ws:
         start(ws)
         ws.send_bytes(b"x" * 200)
@@ -375,7 +375,7 @@ def test_disconnect_cleans_up(client, app, talking):
             if talking.finished:
                 break
             time.sleep(0.01)
-    assert app._talk is None and talking.made[0].finished and len(talking.finished) == 1
+    assert livetalk._talk is None and talking.made[0].finished and len(talking.finished) == 1
     assert actions(client)[0][2] == "Talked live for 0:00"
 
 
@@ -383,12 +383,12 @@ def test_speaker_error_ends_the_talk(client, app, talking, monkeypatch):
     def unreachable():
         raise OSError("down")
 
-    monkeypatch.setattr(app.transport, "get_cast", unreachable)
+    monkeypatch.setattr(core.transport, "get_cast", unreachable)
     with client.websocket_connect("/talk") as ws:
         start(ws)
         ended = until(ws, "ended")[-1]
     assert ended["reason"] == "speaker_error" and "not responding" in ended["detail"]
-    assert talking.made[0].finished and talking.finished == [] and app._talk_on_speaker is None
+    assert talking.made[0].finished and talking.finished == [] and livetalk._talk_on_speaker is None
 
 
 def test_transcoder_failures(client, app, talking):
@@ -397,7 +397,7 @@ def test_transcoder_failures(client, app, talking):
         ws.send_json({"type": "start", "mime": WEBM})
         ended = until(ws, "ended")[-1]
     assert ended["reason"] == "transcoder_error" and "Can't start ffmpeg" in ended["detail"]
-    assert app._talk is None and not any(a[1] == "talk" for a in actions(client))
+    assert livetalk._talk is None and not any(a[1] == "talk" for a in actions(client))
 
     talking.fail_start, talking.fail_write = False, True
     with client.websocket_connect("/talk") as ws:
@@ -438,7 +438,7 @@ def test_stub_ffmpeg_end_to_end(client, anon, app, fake_speaker, talking, tmp_pa
         made.append(talk.FfmpegTranscoder(fmt))
         return made[-1]
 
-    monkeypatch.setattr(app, "talk_transcoder", real)
+    monkeypatch.setattr(livetalk, "talk_transcoder", real)
     with client.websocket_connect("/talk") as ws:
         start(ws)
         until(ws, "live")
@@ -454,8 +454,8 @@ def test_shutdown_kills_a_running_talk(app, monkeypatch):
     from fastapi.testclient import TestClient
 
     killed = []
-    monkeypatch.setattr(app, "_talk", SimpleNamespace(transcoder=SimpleNamespace(kill=lambda: killed.append(1))))
-    monkeypatch.setattr(app, "schedule_loop", asyncio.Event().wait)
+    monkeypatch.setattr(livetalk, "_talk", SimpleNamespace(transcoder=SimpleNamespace(kill=lambda: killed.append(1))))
+    monkeypatch.setattr(schedules, "schedule_loop", asyncio.Event().wait)
     with TestClient(app.app):
         pass
     assert killed == [1]
@@ -465,12 +465,12 @@ def test_shutdown_kills_a_running_talk(app, monkeypatch):
 
 def test_music_resumes_after_the_talk(app, fake_speaker, monkeypatch):
     for name, value in {"TALK_POLL": 0.01, "TALK_CHIME_WAIT": 0.05, "TALK_END_WAIT": 1.0}.items():
-        monkeypatch.setattr(app, name, value)
+        monkeypatch.setattr(config, name, value)
     mc = fake_speaker.media_controller
     mc.play_media(f"{BASE}/yt/aaaaaaaaaaa.m4a", "audio/mp4", title="Song")
     mc.status.adjusted_current_time = 40.0
-    session = app.TalkSession("t1", app.Principal("operator", "Op"), True, None, None,
-                              app.media_url("/talk/t1/live"))
+    session = livetalk.TalkSession("t1", access.Principal("operator", "Op"), True, None, None,
+                              access.media_url("/talk/t1/live"))
 
     async def flow():
         sent = []
@@ -478,12 +478,12 @@ def test_music_resumes_after_the_talk(app, fake_speaker, monkeypatch):
         async def send(message):
             sent.append(message)
 
-        app._talk_on_speaker = session
-        await app.talk_start_speaker(session, send)
-        assert sent == [{"type": "live"}] and app._resume["title"] == "Song"
+        livetalk._talk_on_speaker = session
+        await livetalk.talk_start_speaker(session, send)
+        assert sent == [{"type": "live"}] and playback._resume["title"] == "Song"
         assert [lo["url"].split("?")[0] for lo in mc.loads[-2:]] == [f"{BASE}/talk/chime.wav", f"{BASE}/talk/t1/live"]
         mc.finish()  # the speaker has played out the live stream
-        finishing = asyncio.create_task(app.talk_finish_on_speaker(session))
+        finishing = asyncio.create_task(livetalk.talk_finish_on_speaker(session))
         while "tone=end" not in mc.loads[-1]["url"]:
             await asyncio.sleep(0.01)
         mc.finish()  # closing chime done
@@ -492,21 +492,21 @@ def test_music_resumes_after_the_talk(app, fake_speaker, monkeypatch):
     asyncio.run(flow())
     resumed = mc.loads[-1]
     assert resumed["url"] == f"{BASE}/yt/aaaaaaaaaaa.m4a" and resumed["current_time"] == 39.0
-    assert app._resume is None and app._talk_on_speaker is None
+    assert playback._resume is None and livetalk._talk_on_speaker is None
 
 
 def test_queue_waits_for_the_talk_then_moves_on(client, app, fake_speaker):
-    pl = app.db.create_playlist("Mix")
+    pl = core.db.create_playlist("Mix")
     for name in ("a", "b"):
-        app.db.add_item(pl["id"], {"kind": "url", "title": name, "source": f"https://x.example.com/{name}.mp3"}, 10)
+        core.db.add_item(pl["id"], {"kind": "url", "title": name, "source": f"https://x.example.com/{name}.mp3"}, 10)
     client.post(f"/playlists/{pl['id']}/play", json={})
-    app._queue.after_say = True
-    talk_url = app.media_url("/talk/t1/live")
+    playback._queue.after_say = True
+    talk_url = access.media_url("/talk/t1/live")
     fake_speaker.media_controller.play_media(talk_url, "audio/mpeg")
     fake_speaker.media_controller.finish()
-    app._talk_on_speaker = object()
-    asyncio.run(app.queue_tick())
+    livetalk._talk_on_speaker = object()
+    asyncio.run(playback.queue_tick())
     assert fake_speaker.media_controller.loads[-1]["url"] == talk_url  # still the talk's
-    app._talk_on_speaker = None
-    asyncio.run(app.queue_tick())
+    livetalk._talk_on_speaker = None
+    asyncio.run(playback.queue_tick())
     assert fake_speaker.media_controller.loads[-1]["url"] == "https://x.example.com/b.mp3"

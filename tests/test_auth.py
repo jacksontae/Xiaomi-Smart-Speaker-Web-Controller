@@ -4,6 +4,8 @@ import pytest
 from conftest import PASSWORD, TOKEN, make_user, session_client
 from fastapi.testclient import TestClient
 
+from server import config, core
+
 
 def web(app):
     """A browser before sign-in: no token, sends the web UI's header."""
@@ -25,7 +27,7 @@ def test_setup_checks_api_token(app):
     c = web(app)
     r = c.post("/auth/setup", json=setup_body(api_token="wrong"))
     assert r.status_code == 401 and isinstance(r.json()["detail"], str)
-    assert app.db.user_count() == 0
+    assert core.db.user_count() == 0
 
 
 def test_setup_creates_admin_and_signs_in(app):
@@ -48,7 +50,7 @@ def test_setup_only_once(app):
     make_user()
     r = web(app).post("/auth/setup", json=setup_body(username="intruder"))
     assert r.status_code == 409
-    assert [u["username"] for u in app.db.list_users()] == ["alice"]
+    assert [u["username"] for u in core.db.list_users()] == ["alice"]
 
 
 def test_setup_validates_username_and_password(app):
@@ -56,7 +58,7 @@ def test_setup_validates_username_and_password(app):
     assert c.post("/auth/setup", json=setup_body(username="no spaces")).status_code == 400
     assert c.post("/auth/setup", json=setup_body(username="ab")).status_code == 400
     assert c.post("/auth/setup", json=setup_body(password="short")).status_code == 400
-    assert app.db.user_count() == 0
+    assert core.db.user_count() == 0
 
 
 def test_setup_token_guessing_is_throttled(app):
@@ -104,7 +106,7 @@ def login_cookie(app, base_url):
 def test_cookie_is_secure_behind_tls_proxy(app, monkeypatch):
     """Cloudflare Tunnel terminates TLS and forwards plain http: the public https:// host still gets Secure."""
     make_user("bob")
-    monkeypatch.setattr(app, "settings", app.settings.model_copy(update={"public_base_url": "https://speaker.example.com"}))
+    monkeypatch.setattr(config, "settings", config.settings.model_copy(update={"public_base_url": "https://speaker.example.com"}))
     login, logout = login_cookie(app, "http://speaker.example.com")
     assert "secure" in login and "secure" in logout
     login, logout = login_cookie(app, "http://192.0.2.20:8090")  # LAN address: plain http keeps working
@@ -119,16 +121,16 @@ def test_cookie_is_secure_behind_tls_proxy(app, monkeypatch):
 ])
 def test_cookie_secure_setting(app, monkeypatch, setting, base_url, secure):
     make_user("bob")
-    monkeypatch.setattr(app, "settings", app.settings.model_copy(update={"cookie_secure": setting}))
+    monkeypatch.setattr(config, "settings", config.settings.model_copy(update={"cookie_secure": setting}))
     login, logout = login_cookie(app, base_url)
     assert ("secure" in login, "secure" in logout) == (secure, secure)
 
 
 def test_cookie_secure_from_env(app):
-    assert app.load_settings({"COOKIE_SECURE": "true"}).cookie_secure is True
-    assert app.load_settings({"COOKIE_SECURE": "auto"}).cookie_secure == "auto"
+    assert config.load_settings({"COOKIE_SECURE": "true"}).cookie_secure is True
+    assert config.load_settings({"COOKIE_SECURE": "auto"}).cookie_secure == "auto"
     with pytest.raises(ValueError):
-        app.Settings(cookie_secure="sometimes")
+        config.Settings(cookie_secure="sometimes")
 
 
 def test_main_runs_uvicorn_without_access_log(monkeypatch):
@@ -148,7 +150,7 @@ def test_session_stored_only_as_hash(app):
     c = web(app)
     c.post("/auth/login", json={"username": "bob", "password": PASSWORD})
     sid = c.cookies["sid"]
-    with app.db.tx() as db:
+    with core.db.tx() as db:
         stored = [r[0] for r in db.execute("SELECT token_hash FROM sessions")]
     assert sid not in stored and len(stored) == 1 and len(stored[0]) == 64
 
@@ -270,7 +272,7 @@ def test_change_password_not_for_api_token(client):
 def test_disabled_user_loses_access_immediately(app):
     user = make_user("bob", "operator")
     c = session_client(user)
-    app.db.update_user(user["id"], {"disabled": True})
+    core.db.update_user(user["id"], {"disabled": True})
     assert c.get("/status").status_code == 401
 
 
