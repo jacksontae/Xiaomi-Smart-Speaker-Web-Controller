@@ -5,6 +5,37 @@
 [![CI](https://github.com/jacksontae/Xiaomi-Smart-Speaker-Web-Controller/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jacksontae/Xiaomi-Smart-Speaker-Web-Controller/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+## ลำโพงบ้านคุณ เป็นระบบประกาศได้ในมือถือเครื่องเดียว
+
+เปลี่ยน Xiaomi Mi Smart Speaker (หรือลำโพง Google Cast ตัวไหนก็ได้) ให้เป็นทั้งเครื่องเล่นเพลง ระบบเสียงตามสาย และวิทยุสื่อสาร
+ของบ้านหรือร้าน สั่งจากเว็บแอปที่เปิดได้ทุกเครื่อง ไม่ต้องพูดกับ Google Assistant และไม่ต้องลงแอปเพิ่ม
+บน iPhone กด "เพิ่มไปยังหน้าจอโฮม" ใน Safari ก็ได้แอปเต็มจอเหมือนแอปจริง
+
+<table>
+<tr><td align="center" width="33%"><img src="docs/screenshots/iphone-now-playing-th.png" width="220" alt="กำลังเล่น"><br><sub>กำลังเล่น</sub></td><td align="center" width="33%"><img src="docs/screenshots/iphone-announce-main-th.png" width="220" alt="ประกาศ"><br><sub>ประกาศ</sub></td><td align="center" width="33%"><img src="docs/screenshots/iphone-music-radio-th.png" width="220" alt="วิทยุ"><br><sub>วิทยุ</sub></td></tr>
+<tr><td align="center" width="33%"><img src="docs/screenshots/iphone-talkie-live-th.png" width="220" alt="ทอล์คกี้"><br><sub>ทอล์คกี้</sub></td><td align="center" width="33%"><img src="docs/screenshots/iphone-schedule-list-th.png" width="220" alt="ตั้งเวลา"><br><sub>ตั้งเวลา</sub></td><td align="center" width="33%"><img src="docs/screenshots/iphone-playlists-detail-th.png" width="220" alt="เพลย์ลิสต์"><br><sub>เพลย์ลิสต์</sub></td></tr>
+</table>
+
+- **ประกาศได้ทันที** พิมพ์ข้อความแล้วลำโพงอ่านให้ ทั้งไทย อังกฤษ และญี่ปุ่น เก็บประโยคที่ใช้บ่อยไว้กดครั้งเดียว
+  ประกาศแทรกเพลงที่เล่นอยู่แล้วกลับมาเล่นต่อให้เอง
+- **ฟังได้ทุกอย่าง** YouTube แบบเสียงล้วนไม่มีโฆษณาแทรก (ตัดช่วงสปอนเซอร์ได้ด้วย SponsorBlock) วิทยุออนไลน์ พอดแคสต์ที่ติดตาม
+  แล้วรู้ทันทีเมื่อมีตอนใหม่ และไฟล์เสียงของคุณเอง
+- **เพลย์ลิสต์และคิว** รวมเพลง สถานีวิทยุ ตอนพอดแคสต์ และข้อความประกาศไว้ในลิสต์เดียว สุ่มเล่น เล่นวน จัดลำดับได้
+- **ตั้งเวลาล่วงหน้า** เปิดร้านตอนเช้า เพลงช่วงพักเที่ยง ประกาศปิดร้าน เลือกวันในสัปดาห์หรือครั้งเดียวก็ได้
+- **พูดผ่านลำโพงสดๆ** กดไมค์ในมือถือแล้วเสียงออกลำโพงทันที
+- **ทอล์คกี้** วิทยุสื่อสารในทีม ทุกคนที่เปิดแอปได้ยินสด คนที่พลาดกดฟังย้อนหลังได้ภายใน 24 ชั่วโมง
+- **ใช้ร่วมกันหลายคนอย่างปลอดภัย** แบ่งสิทธิ์เจ้าของ ผู้ควบคุม และผู้ชม ล็อกอินด้วยรหัสผ่าน passkey หรือบัญชี Google
+  ดูได้ว่าใครสั่งอะไรเมื่อไหร่
+- **สั่งจากที่ไหนก็ได้** วาง service บน VM แล้วให้บอร์ด ESP32 ราคาไม่กี่ร้อยบาทในบ้านเป็นตัวกลางคุยกับลำโพง
+  ผ่าน MQTT และ Cloudflare Tunnel โดยไม่ต้องเปิดพอร์ตบ้าน
+- **ของคุณเองทั้งหมด** โอเพนซอร์ส (MIT) รันด้วย Docker ข้อมูลอยู่ในเครื่องคุณ ใช้ได้ทั้งโหมดสว่างและมืด ภาษาไทยและอังกฤษ
+  บน Android หน้าตาปรับเป็นแบบ Material ให้เข้ากับเครื่องเอง
+
+ภาพหน้าจอทุกหน้า ทุกอุปกรณ์ (iPhone, iPad, เดสก์ท็อป, Android) อยู่ใน [docs/design](docs/design/README.md)
+ข้อมูลในภาพเป็นข้อมูลตัวอย่างทั้งหมด
+
+## ทำงานอย่างไร
+
 Custom web controller with support for ESP32, ESP8266, macOS, and Linux.
 
 Control a Google Cast speaker such as the **Xiaomi Mi Smart Speaker** from your own code, with no Google Assistant:

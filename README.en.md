@@ -5,6 +5,40 @@ English | [ภาษาไทย](README.md)
 [![CI](https://github.com/jacksontae/Xiaomi-Smart-Speaker-Web-Controller/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jacksontae/Xiaomi-Smart-Speaker-Web-Controller/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+## Your speaker, now a PA system in your pocket
+
+Turn a Xiaomi Mi Smart Speaker (or any Google Cast speaker) into the music player, PA system and walkie-talkie of
+your home or shop. Control it from a web app on any device: no Google Assistant, nothing to install. On an iPhone,
+"Add to Home Screen" in Safari gives you a full-screen app.
+
+<table>
+<tr><td align="center" width="33%"><img src="docs/screenshots/iphone-now-playing-en.png" width="220" alt="Now playing"><br><sub>Now playing</sub></td><td align="center" width="33%"><img src="docs/screenshots/iphone-announce-main-en.png" width="220" alt="Announce"><br><sub>Announce</sub></td><td align="center" width="33%"><img src="docs/screenshots/iphone-music-radio-en.png" width="220" alt="Radio"><br><sub>Radio</sub></td></tr>
+<tr><td align="center" width="33%"><img src="docs/screenshots/iphone-talkie-live-en.png" width="220" alt="Talkie"><br><sub>Talkie</sub></td><td align="center" width="33%"><img src="docs/screenshots/iphone-schedule-list-en.png" width="220" alt="Schedules"><br><sub>Schedules</sub></td><td align="center" width="33%"><img src="docs/screenshots/iphone-playlists-detail-en.png" width="220" alt="Playlists"><br><sub>Playlists</sub></td></tr>
+</table>
+
+- **Announce in seconds.** Type a message and the speaker reads it out, in Thai, English or Japanese. Keep the
+  phrases you use every day one tap away. An announcement interrupts the music and then picks it up again.
+- **Play anything.** YouTube as audio only, with no ads in between (and sponsor segments cut with SponsorBlock),
+  internet radio, podcasts you follow with new episodes flagged, and your own audio files.
+- **Playlists and a queue.** Mix songs, radio stations, podcast episodes and announcements in one list; shuffle,
+  repeat and reorder.
+- **Schedules.** Opening music in the morning, a lunch playlist, a closing-time announcement: on chosen weekdays or
+  just once.
+- **Talk live.** Press the mic on your phone and your voice comes out of the speaker.
+- **Talkie.** A team walkie-talkie: everyone with the app open hears you live, and anyone who missed it can play it
+  back for 24 hours.
+- **Share it safely.** Owner, operator and viewer roles; sign in with a password, a passkey or Google; Activity shows
+  who did what and when.
+- **Control it from anywhere.** Run the service on a VM and let a cheap ESP32 board at home talk to the speaker, over
+  MQTT and a Cloudflare Tunnel, with no ports opened at home.
+- **Yours.** Open source (MIT), runs in Docker, your data stays with you. Light and dark, English and Thai, and a
+  Material look on Android phones and tablets.
+
+Every screen on every device (iPhone, iPad, desktop, Android) is in [docs/design](docs/design/README.md).
+All data in the screenshots is made up.
+
+## How it works
+
 An HTTP API and web UI for a Google Cast speaker such as the **Xiaomi Mi Smart Speaker**, without Google Assistant:
 text-to-speech announcements, YouTube audio, internet radio, podcasts, uploaded files, playlists, schedules and live
 talk from a browser microphone. The service talks to the speaker over the local network with the Cast protocol, and
