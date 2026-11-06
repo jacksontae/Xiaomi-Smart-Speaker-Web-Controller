@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-06
+
+### Added
+- "Your data" in Account (phone and Android: under My account; iPad/desktop: Account & app settings), for every
+  member. "Download my data" saves the `GET /me/export` JSON file. "Delete my account" says what goes and what stays
+  and asks for your username before the red button works (`DELETE /me`); then you're signed out on every device.
+  The only owner gets "Can't delete this account yet" with a way to Members instead. Activity names "data export"
+  ("Downloaded their data") and marks a member who deleted their own account. Privacy describes both buttons.
+
+### Security
+- Remote deployment (Docker): the service now trusts `X-Forwarded-For` from cloudflared only, which gets a fixed
+  address on a pinned compose subnet. Before, every visitor showed up as cloudflared's container, so the activity
+  log had one IP for everyone and one person's failed sign-ins throttled all. Upgrading needs
+  `docker compose down` once, because Compose won't change an existing network's subnet.
+
 ## [0.6.1] - 2026-11-05
 
 ### Added

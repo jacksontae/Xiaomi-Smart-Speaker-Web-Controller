@@ -125,7 +125,7 @@ def test_tablet_single_column_and_help_search(android_app, seeded):
 def test_tile_tones_and_danger_links(android_app, seeded):
     app = android_app("owner", route="account", playing=False)
     p = app.page
-    out = p.locator(".c-row.danger .c-tile")
+    out = p.get_by_role("button", name="Sign out", exact=True).locator(".c-tile")  # Delete my account is danger too
     expect(out).to_be_visible()
     plain = p.locator(".c-tile").first.evaluate("e => getComputedStyle(e).backgroundColor")
     assert out.evaluate("e => getComputedStyle(e).backgroundColor") != plain, "the sign-out tile keeps its error tone"

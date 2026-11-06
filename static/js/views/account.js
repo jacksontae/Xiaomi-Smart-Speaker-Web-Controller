@@ -1,11 +1,12 @@
 // Account (board Account; phone: the avatar in the tab bar). Who you are, the owner pages that have no tab on
-// phones, app settings + help, passkeys, and your account actions (password, Google, sign out everywhere / here).
+// phones, app settings + help, passkeys, your account actions (password, Google, sign out everywhere / here) and your
+// data (download it, delete the account).
 // On iPad/desktop the same content is "Account & app settings" (views/prefs.js), so this renders that layout.
 import { h, icon, busy } from '../ui.js';
 import { register, t, roleLabel, lang } from '../i18n.js';
 import { isPhone } from '../sheet.js';
 import { caption, card, linkRow, tile, toneStyle, initialOf } from '../kit.js';
-import { freshAuth, googleRow, passkeySection, nameLine } from '../account-kit.js';
+import { freshAuth, googleRow, passkeySection, nameLine, dataSection } from '../account-kit.js';
 import { large } from './prefs.js';
 import { glyph } from '../icons.js';
 
@@ -56,7 +57,8 @@ export async function render(ctx) {
     ctx.header({ title: t('nav.account') }),
     head, manage, general,
     pk ? [caption(t('ca.passkeys')), pk.card, pk.note] : null,
-    caption(t('acct.my')), mine);
+    caption(t('acct.my')), mine,
+    dataSection(ctx, user, { phone: true }));
 }
 
 /** "v0.6.0" for the About row, filled in when GET /about answers. */

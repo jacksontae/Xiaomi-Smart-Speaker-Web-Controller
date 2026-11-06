@@ -64,6 +64,7 @@ docker compose -f deploy/remote/docker-compose.yml exec speaker-service \
 - ใส่ `CLOUDFLARE_TUNNEL_TOKEN` ใน `deploy/remote/.env` (คู่กับ `PUBLIC_BASE_URL`, `MQTT_PASSWORD`) แล้ว `chmod 600`
 - พอร์ต 8090 ผูกกับ loopback ของ VM (`127.0.0.1:8090`) เท่านั้น จะเปิดหน้าเว็บโดยไม่ผ่าน tunnel ใช้ SSH tunnel: `ssh -L 8090:127.0.0.1:8090 <vm>`
 - `cloudflared` ต้องรันจาก compose file (ชื่อ `speaker-service`, `mosquitto` รู้จักเฉพาะใน compose network) ถ้าติดตั้ง `cloudflared` บน host ด้วย tunnel จะตอบ `502`
+- compose network ใช้ subnet คงที่ (`172.30.77.0/24`) และ `cloudflared` มี IP คงที่ในนั้น service เชื่อ `X-Forwarded-For` จาก IP นั้นเท่านั้น (`FORWARDED_ALLOW_IPS`) Activity และตัวจำกัดการล็อกอินจึงเห็น IP จริงของแต่ละคน ถ้า subnet ชนกับของ VM ให้แก้ทั้ง 3 ค่าพร้อมกัน แล้ว `docker compose down` ก่อน `up -d` (Compose ไม่แก้ network ที่มีอยู่แล้ว)
 
 ## ตั้งค่า
 
