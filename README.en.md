@@ -379,8 +379,6 @@ them to MP3 with ffmpeg and has the speaker play the link `/talk/<id>/live` as a
 | ← | `{"type": "ended", "reason", "seconds", "detail"?}` | Finished, closed with code 1000. `reason`: `stopped`, `disconnected`, `max_length`, `idle` (no audio for 10 seconds), `interrupted` (something else was played), `too_large`, `speaker_error`, `transcoder_error` |
 | ← | `{"type": "error", "code", "detail"}` | Not started, closed with `4400` bad_request · `4401` unauthorized · `4403` forbidden · `4409` busy · `4503` unavailable (no ffmpeg) |
 
-To test by hand: `python tests/manual/talk_stream.py --url ws://127.0.0.1:8090/talk --token $TOKEN --file clip.webm`
-
 ### Talkie
 
 A walkie-talkie between the members of this server. While "This device" is the music output, the Announce page is

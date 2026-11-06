@@ -297,8 +297,6 @@ curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -
 | ← | `{"type": "ended", "reason", "seconds", "detail"?}` | จบแล้ว ปิดด้วย code 1000 · `reason`: `stopped`, `disconnected`, `max_length`, `idle` (ไม่มีเสียงมา 10 วินาที), `interrupted` (มีคนสั่งเล่นอย่างอื่น), `too_large`, `speaker_error`, `transcoder_error` |
 | ← | `{"type": "error", "code", "detail"}` | ไม่ได้เริ่ม ปิดด้วย code `4400` bad_request · `4401` unauthorized · `4403` forbidden · `4409` busy · `4503` unavailable (ไม่มี ffmpeg) |
 
-ทดสอบเองได้ด้วย `python tests/manual/talk_stream.py --url ws://127.0.0.1:8090/talk --token $TOKEN --file clip.webm`
-
 ### ทอล์คกี้ (Talkie)
 
 วิทยุสื่อสารระหว่างสมาชิกของ server นี้ เมื่อเลือกเล่นเพลงที่ "อุปกรณ์นี้" หน้าประกาศจะกลายเป็นทอล์คกี้ (ทุกบทบาท) มีสองแท็บ:
