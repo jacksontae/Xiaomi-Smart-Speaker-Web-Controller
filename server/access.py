@@ -17,7 +17,7 @@ from server.auth import ROLE_RANK, token_hash
 from server.config import MEDIA_URL_TTL, SESSION_COOKIE, SESSION_REFRESH
 from server.store import SESSION_TTL
 
-bearer = HTTPBearer(auto_error=False, description="The api_token from config.json (`./speakerctl token`)")
+bearer = HTTPBearer(auto_error=False, description="The api_token from config.json (`scripts/speaker token`)")
 
 
 # --- Who is calling ---

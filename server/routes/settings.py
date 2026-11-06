@@ -32,7 +32,7 @@ async def close_transport(old):
 async def update_settings(changes: dict, background: BackgroundTasks, who: Who):
     """Partial update. Changing the port restarts the process; launchd brings it back up."""
     if "api_token" in changes:
-        raise HTTPException(400, "api_token can't be changed over the API; rotate it with ./speakerctl token --rotate")
+        raise HTTPException(400, "api_token can't be changed over the API; rotate it with scripts/speaker token --rotate")
     try:
         new = merge_settings(config.settings, changes)
     except ValidationError as e:

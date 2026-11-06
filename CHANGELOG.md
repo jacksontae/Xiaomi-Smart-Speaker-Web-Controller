@@ -19,6 +19,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The VM stack moved from `deploy/remote/` to `deploy/vm/compose.yaml`. Its Compose project stays `remote`
   (`name: remote`), so it keeps the same containers and volumes; move `deploy/remote/.env` and
   `mosquitto/passwd`/`acl` to `deploy/vm/` once, then run `docker compose -f deploy/vm/compose.yaml up -d --build`.
+- The Python code is a package, `server/`, started with `python -m server`. The 4,400-line `app.py` is split by
+  area: settings in `config.py`, endpoints in `server/routes/`, and the logic in modules such as `media.py`,
+  `playback.py` and `talkie.py`. Routes and API are unchanged.
+- Dependencies: httpx 0.28.1, httpcore 1.0.9, pydantic 2.14.2, PyChromecast 14.1.0 and websockets 17.4 as
+  minimums; CI actions checkout v7, setup-python v7 and cache v6.
 
 ### Fixed
 - iPhone: sheets (speaker picker, display name and others) no longer appear mid-screen and then drop to the bottom

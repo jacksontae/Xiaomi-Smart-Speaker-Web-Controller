@@ -4,7 +4,7 @@
 # Build context is the repository root; .dockerignore lets in only what the service needs.
 FROM python:3.13-slim
 
-# yt-dlp needs a JavaScript runtime for YouTube's challenges (app.py asks for node);
+# yt-dlp needs a JavaScript runtime for YouTube's challenges (server/media.py asks for node);
 # live talk transcodes the browser's microphone with ffmpeg.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends nodejs ffmpeg ca-certificates \

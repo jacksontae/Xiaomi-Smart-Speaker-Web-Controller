@@ -513,7 +513,18 @@ keep your own copy of them (they hold secrets, so not in git).
 ## โครงสร้างโปรเจกต์
 
 ```
-server/                ตัว service ภาษา Python (FastAPI)
+server/                ตัว service ภาษา Python (FastAPI) เปิดด้วย `python -m server`
+  app.py               จุดเริ่ม: สร้างแอป รวม router และเสิร์ฟ static/
+  config.py            การตั้งค่า (config.json + environment) path และขีดจำกัด
+  core.py              ของที่ใช้ร่วมกัน: ตัวสั่งลำโพง ฐานข้อมูล ตัวจำกัดการล็อกอิน
+  access.py            ตรวจว่าใครเรียก (role) ลิงก์สื่อแบบเซ็น และ router
+  routes/              endpoint HTTP และ WebSocket แยกไฟล์ตามหมวด
+  media.py, playback.py, speaker.py   cache YouTube และ SponsorBlock คิวและการประกาศ การเช็กว่าลำโพงออนไลน์
+  accounts.py, sources.py, schedules.py, livetalk.py, talkie.py, webui.py   logic ของแต่ละหมวด
+  store.py             SQLite: ผู้ใช้ session เพลย์ลิสต์ ตารางเวลา ไฟล์ที่อัปโหลด บันทึกกิจกรรม
+  transport.py         สั่งลำโพง: Cast ตรง (pychromecast) หรือผ่าน ESP32 relay ทาง MQTT
+  auth.py, passkeys.py, google_signin.py   รหัสผ่านและ session, passkey, ล็อกอินด้วย Google
+  talk.py, player.py, backup.py, version.py   แปลงเสียงพูดสด ลำดับการเล่น backup รายคืน และเวอร์ชัน
 static/                หน้าเว็บควบคุม
 Dockerfile             image เดียวสำหรับทั้งสองแบบ (.dockerignore ใส่เฉพาะ server/, static/ และ requirements)
 compose.yaml           Docker Compose สำหรับที่บ้าน / วง LAN (เช่น Mac ข้างลำโพง) ตั้งค่าใน .env (.env.example)

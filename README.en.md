@@ -654,7 +654,18 @@ the Cast speaker. The board never handles audio; it tells the speaker which URL 
 ## Project layout
 
 ```
-server/                The Python service (FastAPI)
+server/                The Python service (FastAPI); start with `python -m server`
+  app.py               Entry point: builds the app, includes the routers, serves static/
+  config.py            Settings (config.json + environment), paths and limits
+  core.py              Shared objects: the speaker transport, database, sign-in throttle
+  access.py            Who is calling (roles), signed media links, the routers
+  routes/              The HTTP and WebSocket endpoints, one file per area
+  media.py, playback.py, speaker.py   YouTube cache and SponsorBlock, queue and announcements, speaker reachability
+  accounts.py, sources.py, schedules.py, livetalk.py, talkie.py, webui.py   the logic behind each area
+  store.py             SQLite: users, sessions, playlists, schedules, uploads, activity log
+  transport.py         Drives the speaker: Cast directly (pychromecast) or the ESP32 relay over MQTT
+  auth.py, passkeys.py, google_signin.py   passwords and sessions, passkeys, Google sign-in
+  talk.py, player.py, backup.py, version.py   live-talk transcoding, play order, nightly backups, the version
 static/                Web UI
 Dockerfile             The one image for both setups (.dockerignore keeps it to server/, static/ and requirements)
 compose.yaml           Docker Compose for home / LAN (e.g. a Mac next to the speaker); settings in .env (.env.example)

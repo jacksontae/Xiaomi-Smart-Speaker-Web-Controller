@@ -102,7 +102,7 @@ const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]
 const HOST = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
 /** IPv4 or a DNS hostname; an all-digits-and-dots value must be a real IPv4 address. */
 const validAddress = (v) => (/^[\d.]+$/.test(v) ? IPV4.test(v) : HOST.test(v));
-// SponsorBlock categories the server accepts (app.py YT_SEGMENT_CATEGORIES); the first three are the default.
+// SponsorBlock categories the server accepts (server/config.py YT_SEGMENT_CATEGORIES); the first three are the default.
 const SEGMENTS = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'preview', 'filler', 'music_offtopic', 'hook'];
 const SEG_DEFAULT = ['interaction', 'selfpromo', 'sponsor'];
 

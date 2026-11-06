@@ -45,7 +45,7 @@ local.onChange(() => {
 });
 
 /* ---------- css loader for view-specific stylesheets ---------- */
-// Relative to this module, so stylesheets come from the same versioned /static/<build>/ folder (see app.py).
+// Relative to this module, so stylesheets come from the same versioned /static/<build>/ folder (see server/webui.py).
 const cssUrl = (path) => new URL(`../css/${path}`, import.meta.url).href;
 const cssLoaded = new Map();
 export function loadCss(path) {
