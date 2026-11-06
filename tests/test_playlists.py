@@ -2,6 +2,8 @@ import pytest
 import yt_dlp
 from conftest import REAL_YT_EXTRACT
 
+from server import config, media
+
 VIDEOS = {
     "dQw4w9WgXcQ": {"title": "Never Gonna", "duration": 213, "channel": "Rick"},
     "abcdefghijk": {"title": "Piano Calm", "duration": 600.5, "uploader": "Studio"},
@@ -24,7 +26,7 @@ def fake_yt(app, monkeypatch):
             raise yt_dlp.utils.DownloadError("Video unavailable")
         return {"id": vid, **VIDEOS[vid]}
 
-    monkeypatch.setattr(app, "yt_extract", extract)
+    monkeypatch.setattr(media, "yt_extract", extract)
     return calls
 
 
@@ -73,7 +75,7 @@ def test_youtube_id_lookalike_falls_back_to_search(client, fake_yt):
 
 
 def test_youtube_rejects_non_youtube_results(client, app, monkeypatch):
-    monkeypatch.setattr(app, "yt_extract", lambda target: {"id": "soundcloud-123456", "title": "x"})
+    monkeypatch.setattr(media, "yt_extract", lambda target: {"id": "soundcloud-123456", "title": "x"})
     pid = new_playlist(client)["id"]
     assert add(client, pid, kind="youtube", source="https://soundcloud.com/a/b").status_code == 400
 
@@ -82,7 +84,7 @@ def test_youtube_lookup_failure_is_502(client, app, monkeypatch):
     def broken(target):
         raise yt_dlp.utils.DownloadError("network down")
 
-    monkeypatch.setattr(app, "yt_extract", broken)
+    monkeypatch.setattr(media, "yt_extract", broken)
     pid = new_playlist(client)["id"]
     assert add(client, pid, kind="youtube", source="https://youtu.be/zzzzzzzzzzz").status_code == 502
 
@@ -95,7 +97,7 @@ def test_add_url_and_tts_items(client, app):
     assert add(client, pid, kind="url", source="file:///etc/passwd", title="x").status_code == 400
     text = "ประกาศ " * 20
     tts = add(client, pid, kind="tts", source=text).json()
-    assert tts["title"] == text.strip()[:60] and tts["lang"] == app.settings.tts_lang
+    assert tts["title"] == text.strip()[:60] and tts["lang"] == config.settings.tts_lang
     assert add(client, pid, kind="tts", source="hello", lang="en").json()["lang"] == "en"
     assert add(client, pid, kind="tts", source="x" * 1001).status_code == 400
     assert add(client, pid, kind="tts", source="   ").status_code == 400
@@ -153,7 +155,7 @@ def test_item_of_another_playlist_cannot_be_deleted(client):
 
 
 def test_playlist_item_limit(client, app, monkeypatch):
-    monkeypatch.setattr(app, "MAX_PLAYLIST_ITEMS", 2)
+    monkeypatch.setattr(config, "MAX_PLAYLIST_ITEMS", 2)
     pid = new_playlist(client)["id"]
     add(client, pid, kind="tts", source="1")
     add(client, pid, kind="tts", source="2")
@@ -201,8 +203,8 @@ def test_yt_extract_never_downloads(app, monkeypatch):
             seen["download"] = download
             return {"entries": []}
 
-    monkeypatch.setattr(app, "yt_extract", REAL_YT_EXTRACT)
-    monkeypatch.setattr(app.yt_dlp, "YoutubeDL", FakeYDL)
-    assert app.yt_search("x", 3) == []
+    monkeypatch.setattr(media, "yt_extract", REAL_YT_EXTRACT)
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    assert media.yt_search("x", 3) == []
     assert seen["download"] is False and seen["opts"]["skip_download"] and seen["opts"]["extract_flat"]
 

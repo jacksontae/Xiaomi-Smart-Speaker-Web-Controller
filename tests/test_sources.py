@@ -9,7 +9,7 @@ import httpx
 import pytest
 from conftest import BASE, make_user, path_of, session_client
 
-from server import store
+from server import access, config, core, outbound, playback, store
 from server import transport as transport_module
 
 UUID_A = "11111111-2222-3333-4444-555555555555"
@@ -68,9 +68,10 @@ def net(app, monkeypatch):
         return route(request) if callable(route) else route
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
-    monkeypatch.setattr(app, "http", client)
-    monkeypatch.setattr(app, "feed_http", client)
-    monkeypatch.setattr(app, "resolve_host", lambda host: {"192.0.2.1" if host == "lan.example.com" else "8.8.8.8"})
+    monkeypatch.setattr(outbound, "http", client)
+    monkeypatch.setattr(outbound, "feed_http", client)
+    monkeypatch.setattr(outbound, "resolve_host",
+                        lambda host: {"192.0.2.1" if host == "lan.example.com" else "8.8.8.8"})
     routes[("all.api.radio-browser.info", "/json/stations/search")] = httpx.Response(200, json=STATIONS)
     routes[("all.api.radio-browser.info", "/json/stations/byuuid")] = lambda r: httpx.Response(
         200, json=[s for s in STATIONS if s["stationuuid"] == r.url.params["uuids"]])
@@ -124,7 +125,7 @@ def test_migrates_version_2_playlist_items(tmp_path):
 # --- Transport ---
 
 def test_cast_live_has_no_position(app, fake_speaker):
-    app.transport.play("https://r.example.com/s", "audio/aac", "R", None, 30, live=True)
+    core.transport.play("https://r.example.com/s", "audio/aac", "R", None, 30, live=True)
     load = loads(fake_speaker)[-1]
     assert load["stream_type"] == "LIVE" and "current_time" not in load
 
@@ -198,17 +199,17 @@ def test_favorites_crud_and_roles(client, net, as_role):
 
 def test_radio_play_is_live_and_clears_queue(client, net, app, fake_speaker):
     fav = client.post("/radio/favorites", json={"uuid": UUID_A}).json()
-    pl = app.db.create_playlist("Q")
-    app.db.add_item(pl["id"], {"kind": "url", "title": "U", "source": "https://x.example.com/a.mp3"}, 10)
+    pl = core.db.create_playlist("Q")
+    core.db.add_item(pl["id"], {"kind": "url", "title": "U", "source": "https://x.example.com/a.mp3"}, 10)
     client.post(f"/playlists/{pl['id']}/play", json={})
-    assert app._queue is not None
+    assert playback._queue is not None
 
     r = client.post("/radio/play", json={"favorite_id": fav["id"], "volume": 0.3})
     assert r.status_code == 200 and r.json()["title"] == "Jazz FM"
     load = loads(fake_speaker)[-1]
     assert load["url"] == "https://radio.example.com/jazz" and load["stream_type"] == "LIVE"
     assert load["content_type"] == "audio/aac" and fake_speaker.volume == 0.3
-    assert app._queue is None
+    assert playback._queue is None
     assert client.get("/status").json()["media"]["thumbnail"] == "https://radio.example.com/jazz.png"
     assert actions(client)[0] == ("api-token", "radio", "Jazz FM")
     assert client.post("/radio/play", json={"uuid": UUID_B}).status_code == 200
@@ -223,10 +224,10 @@ def test_announcement_resumes_radio_live(client, net, app, fake_speaker):
     fake_speaker.media_controller.status.adjusted_current_time = 500.0
     r = client.post("/say", json={"text": "hello"})
     assert r.json()["will_resume"] == "Jazz FM"
-    assert app._resume["live"] is True and app._resume["position"] is None
+    assert playback._resume["live"] is True and playback._resume["position"] is None
     status = fake_speaker.media_controller.status
     status.player_state = "IDLE"
-    asyncio.run(app.resume_after_announcement(app._say_gen, f"{BASE}/tts.mp3"))
+    asyncio.run(playback.resume_after_announcement(playback._say_gen, f"{BASE}/tts.mp3"))
     load = loads(fake_speaker)[-1]
     assert load["url"] == "https://radio.example.com/jazz" and load["stream_type"] == "LIVE"
 
@@ -287,7 +288,7 @@ def test_bad_feeds_are_502(client, net, app, monkeypatch):
         net.routes[("feeds.example.com", path)] = httpx.Response(200, content=body)
         r = client.get("/podcasts/episodes", params={"feed": f"https://feeds.example.com{path}"})
         assert r.status_code == 502, path
-    monkeypatch.setattr(app, "FEED_MAX", 100)
+    monkeypatch.setattr(config, "FEED_MAX", 100)
     r = client.get("/podcasts/episodes", params={"feed": "https://feeds.example.com/show.xml"})
     assert r.status_code == 502 and "too large" in r.json()["detail"]
 
@@ -300,7 +301,7 @@ def test_podcast_play(client, app, fake_speaker):
     assert load["url"] == "https://cdn.example.com/ep2.mp3" and load["stream_type"] == "BUFFERED"
     assert load["content_type"] == "audio/mpeg" and load["title"] == "Episode 2"
     fake_speaker.media_controller.status.adjusted_current_time = 90.0
-    assert app.capture_youtube()["position"] == 90 - app.RESUME_REWIND  # resumable after an announcement
+    assert playback.capture_youtube()["position"] == 90 - config.RESUME_REWIND  # resumable after an announcement
     assert actions(client)[0] == ("api-token", "podcast", "Episode 2")
     assert client.post("/podcasts/play", json={"url": "nope", "title": "x"}).status_code == 400
     assert client.post("/podcasts/play", json={"url": "https://x.example.com/a", "title": " "}).status_code == 400
@@ -319,17 +320,17 @@ def test_upload_list_and_serve(as_role, app, anon):
     assert "stored_name" not in f
     listing = as_role("viewer").get("/files").json()
     assert [i["id"] for i in listing["items"]] == [f["id"]] and listing["used"] == len(MP3)
-    assert listing["max_size"] == app.UPLOAD_MAX and ".mp3" in listing["types"]
-    stored = app.db.get_file(f["id"])["stored_name"]
-    assert (app.MEDIA_DIR / stored).read_bytes() == MP3 and stored.endswith(".mp3")
-    assert [p.name for p in app.MEDIA_DIR.iterdir()] == [stored]  # no .part left behind
-    served = anon.get(path_of(app.media_url(f"/media/{stored}")))
+    assert listing["max_size"] == config.UPLOAD_MAX and ".mp3" in listing["types"]
+    stored = core.db.get_file(f["id"])["stored_name"]
+    assert (config.MEDIA_DIR / stored).read_bytes() == MP3 and stored.endswith(".mp3")
+    assert [p.name for p in config.MEDIA_DIR.iterdir()] == [stored]  # no .part left behind
+    served = anon.get(path_of(access.media_url(f"/media/{stored}")))
     assert served.content == MP3 and served.headers["content-type"] == "audio/mpeg"
-    ranged = anon.get(path_of(app.media_url(f"/media/{stored}")), headers={"Range": "bytes=0-2"})
+    ranged = anon.get(path_of(access.media_url(f"/media/{stored}")), headers={"Range": "bytes=0-2"})
     assert ranged.status_code == 206 and ranged.content == b"ID3"
     assert anon.get(f"/media/{stored}").status_code == 403
-    assert anon.get(path_of(app.media_url("/media/..%2Fdata.db"))).status_code in (403, 404)
-    assert anon.get(path_of(app.media_url("/media/missing.mp3"))).status_code == 404
+    assert anon.get(path_of(access.media_url("/media/..%2Fdata.db"))).status_code in (403, 404)
+    assert anon.get(path_of(access.media_url("/media/missing.mp3"))).status_code == 404
 
 
 @pytest.mark.parametrize(("head", "ext", "ctype"), [
@@ -343,7 +344,7 @@ def test_upload_list_and_serve(as_role, app, anon):
 ])
 def test_upload_formats_are_sniffed(client, app, head, ext, ctype):
     f = upload(client, head + b"\x00" * 100, name="clip.bin").json()  # the name's extension doesn't matter
-    assert f["content_type"] == ctype and app.db.get_file(f["id"])["stored_name"].endswith(ext)
+    assert f["content_type"] == ctype and core.db.get_file(f["id"])["stored_name"].endswith(ext)
 
 
 def test_upload_rejections(client, app, monkeypatch):
@@ -351,14 +352,14 @@ def test_upload_rejections(client, app, monkeypatch):
     assert r.status_code == 415
     assert upload(client, b"").status_code == 400
     assert client.post("/files", content=MP3).status_code == 422  # name is required
-    monkeypatch.setattr(app, "UPLOAD_MAX", 100)
+    monkeypatch.setattr(config, "UPLOAD_MAX", 100)
     assert upload(client).status_code == 413
-    monkeypatch.setattr(app, "UPLOAD_MAX", 10_000)
-    monkeypatch.setattr(app, "UPLOAD_QUOTA", len(MP3) + 50)
+    monkeypatch.setattr(config, "UPLOAD_MAX", 10_000)
+    monkeypatch.setattr(config, "UPLOAD_QUOTA", len(MP3) + 50)
     assert upload(client).status_code == 200
     r = upload(client)
     assert r.status_code == 507
-    assert len(app.db.list_files()) == 1 and len(list(app.MEDIA_DIR.iterdir())) == 1
+    assert len(core.db.list_files()) == 1 and len(list(config.MEDIA_DIR.iterdir())) == 1
 
 
 def test_rename_and_delete_permissions(app, client):
@@ -373,9 +374,9 @@ def test_rename_and_delete_permissions(app, client):
     assert alice.patch(f"/files/{f['id']}", json={"title": " "}).status_code == 400
     assert bob.delete(f"/files/{f['id']}").status_code == 403
     assert admin.patch(f"/files/{f['id']}", json={"title": "Admin's"}).status_code == 200
-    stored = app.db.get_file(f["id"])["stored_name"]
+    stored = core.db.get_file(f["id"])["stored_name"]
     assert admin.delete(f"/files/{f['id']}").status_code == 204
-    assert not (app.MEDIA_DIR / stored).exists() and admin.delete(f"/files/{f['id']}").status_code == 404
+    assert not (config.MEDIA_DIR / stored).exists() and admin.delete(f"/files/{f['id']}").status_code == 404
     own = upload(bob).json()
     assert bob.delete(f"/files/{own['id']}").status_code == 204
     log = actions(client)
@@ -387,11 +388,11 @@ def test_file_play(client, app, fake_speaker):
     r = client.post(f"/files/{f['id']}/play", json={})
     assert r.status_code == 200
     load = loads(fake_speaker)[-1]
-    stored = app.db.get_file(f["id"])["stored_name"]
+    stored = core.db.get_file(f["id"])["stored_name"]
     assert load["url"].startswith(f"{BASE}/media/{stored}?") and load["content_type"] == "audio/mpeg"
     assert load["title"] == "My Song" and load["stream_type"] == "BUFFERED"
     assert client.post("/files/999/play", json={}).status_code == 404
-    (app.MEDIA_DIR / stored).unlink()
+    (config.MEDIA_DIR / stored).unlink()
     assert client.post(f"/files/{f['id']}/play", json={}).status_code == 410
 
 
@@ -427,11 +428,11 @@ def test_playlist_items_of_new_kinds(client, net, app):
 
 def test_queue_plays_new_kinds(client, app, fake_speaker):
     f = upload(client).json()
-    pl = app.db.create_playlist("Mix")
-    app.db.add_item(pl["id"], {"kind": "file", "title": "My Song", "source": str(f["id"]),
+    pl = core.db.create_playlist("Mix")
+    core.db.add_item(pl["id"], {"kind": "file", "title": "My Song", "source": str(f["id"]),
                                "content_type": "audio/mpeg"}, 10)
-    app.db.add_item(pl["id"], {"kind": "podcast", "title": "Ep", "source": "https://cdn.example.com/ep.m4a"}, 10)
-    app.db.add_item(pl["id"], {"kind": "radio", "title": "Jazz", "source": "https://radio.example.com/jazz",
+    core.db.add_item(pl["id"], {"kind": "podcast", "title": "Ep", "source": "https://cdn.example.com/ep.m4a"}, 10)
+    core.db.add_item(pl["id"], {"kind": "radio", "title": "Jazz", "source": "https://radio.example.com/jazz",
                                "content_type": "audio/aac"}, 10)
     assert client.post(f"/playlists/{pl['id']}/play", json={}).status_code == 200
     first = loads(fake_speaker)[-1]
@@ -442,23 +443,23 @@ def test_queue_plays_new_kinds(client, app, fake_speaker):
     client.post("/queue/next")
     third = loads(fake_speaker)[-1]
     assert third["url"] == "https://radio.example.com/jazz" and third["stream_type"] == "LIVE"
-    assert app.capture_youtube()["live"] is True
+    assert playback.capture_youtube()["live"] is True
 
 
 def test_queue_skips_a_file_deleted_from_disk(client, app, fake_speaker):
     f = upload(client).json()
-    (app.MEDIA_DIR / app.db.get_file(f["id"])["stored_name"]).unlink()
-    pl = app.db.create_playlist("Mix")
-    app.db.add_item(pl["id"], {"kind": "file", "title": "Gone", "source": str(f["id"])}, 10)
-    app.db.add_item(pl["id"], {"kind": "url", "title": "U", "source": "https://x.example.com/a.mp3"}, 10)
+    (config.MEDIA_DIR / core.db.get_file(f["id"])["stored_name"]).unlink()
+    pl = core.db.create_playlist("Mix")
+    core.db.add_item(pl["id"], {"kind": "file", "title": "Gone", "source": str(f["id"])}, 10)
+    core.db.add_item(pl["id"], {"kind": "url", "title": "U", "source": "https://x.example.com/a.mp3"}, 10)
     assert client.post(f"/playlists/{pl['id']}/play", json={}).status_code == 200
     assert loads(fake_speaker)[-1]["url"] == "https://x.example.com/a.mp3"
     assert ("system", "queue skip", "Gone: The uploaded file is gone") in actions(client)
 
 
 def test_schedule_plays_playlist_with_radio(client, app, fake_speaker):
-    pl = app.db.create_playlist("Morning radio")
-    app.db.add_item(pl["id"], {"kind": "radio", "title": "Jazz", "source": "https://radio.example.com/jazz",
+    pl = core.db.create_playlist("Morning radio")
+    core.db.add_item(pl["id"], {"kind": "radio", "title": "Jazz", "source": "https://radio.example.com/jazz",
                                "content_type": "audio/aac"}, 10)
     s = client.post("/schedules", json={"name": "Wake", "action": "playlist", "playlist_id": pl["id"],
                                          "time": "07:00", "days": [0, 1, 2, 3, 4, 5, 6]}).json()

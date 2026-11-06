@@ -10,6 +10,9 @@ import pytest
 from test_local import no_speaker, proxy_of, resolve, upstream  # noqa: F401 - fixtures
 from test_sources import net  # noqa: F401 - fixture
 
+from server import config, outbound
+from server.routes import device as device_routes
+
 # --- IcyStream: the status line rewrite on its own ---
 
 
@@ -23,7 +26,7 @@ class FakeStream:
 
 def read_all(app, *chunks):
     async def go():
-        stream, out = app.IcyStream(FakeStream(*chunks)), b""
+        stream, out = outbound.IcyStream(FakeStream(*chunks)), b""
         while chunk := await stream.read(65536):
             out += chunk
         return out
@@ -39,11 +42,11 @@ def test_icy_status_line_reads_as_http(app):
 
 
 def test_stream_type_of_hls_parts(app):
-    assert app.stream_type("video/MP2T", "", part=True) == "video/mp2t"
-    assert app.stream_type("", "", part=True) == "application/octet-stream"  # an AES key, often untyped
-    assert app.stream_type("audio/aacp", "", part=True) == "audio/aac"
-    assert app.stream_type("text/html", "", part=True) is None
-    assert app.stream_type("video/mp2t", "audio/mpeg") is None  # only signed HLS part links take these
+    assert device_routes.stream_type("video/MP2T", "", part=True) == "video/mp2t"
+    assert device_routes.stream_type("", "", part=True) == "application/octet-stream"  # an AES key, often untyped
+    assert device_routes.stream_type("audio/aacp", "", part=True) == "audio/aac"
+    assert device_routes.stream_type("text/html", "", part=True) is None
+    assert device_routes.stream_type("video/mp2t", "audio/mpeg") is None  # only signed HLS part links take these
 
 
 # --- Real sockets: a fake radio server on this machine, reached through the relay's own transport ---
@@ -82,11 +85,11 @@ class FakeServer:
 @pytest.fixture
 def local_net(app, monkeypatch):
     """radio.example.com is public to check_public_url, and the relay's connections go to 127.0.0.1."""
-    real = app.public_addresses
-    monkeypatch.setattr(app, "resolve_host", lambda host: {"8.8.8.8"})
-    monkeypatch.setattr(app, "public_addresses", lambda host: ["127.0.0.1"])
+    real = outbound.public_addresses
+    monkeypatch.setattr(outbound, "resolve_host", lambda host: {"8.8.8.8"})
+    monkeypatch.setattr(outbound, "public_addresses", lambda host: ["127.0.0.1"])
     # a fresh client: the module's pool belongs to whichever event loop used it first
-    monkeypatch.setattr(app, "stream_http", httpx.AsyncClient(transport=app.relay_transport(),
+    monkeypatch.setattr(outbound, "stream_http", httpx.AsyncClient(transport=outbound.relay_transport(),
                                                               timeout=httpx.Timeout(5), follow_redirects=False))
     servers = []
 
@@ -137,10 +140,10 @@ def test_plain_http_and_redirects_still_work(client, anon, local_net, no_speaker
 
 def test_size_limit_applies_to_icy_streams(client, anon, app, local_net, monkeypatch, no_speaker):  # noqa: F811
     server = local_net(ICY)
-    monkeypatch.setattr(app, "STREAM_MAX_BYTES", 1000)
+    monkeypatch.setattr(config, "STREAM_MAX_BYTES", 1000)
     r = anon.get(proxy_of(client, f"http://radio.example.com:{server.port}/"))
     assert r.status_code == 200 and len(r.content) <= 1000
-    assert app._streams_open == 0
+    assert device_routes._streams_open == 0
 
 
 def test_connections_go_only_to_the_address_checked_public(client, anon, app, local_net, monkeypatch,
@@ -149,8 +152,8 @@ def test_connections_go_only_to_the_address_checked_public(client, anon, app, lo
     (public_addresses) and never reaches the inside address."""
     server = local_net(ICY)
     answers = iter([{"8.8.8.8"}, {"127.0.0.1"}])
-    monkeypatch.setattr(app, "resolve_host", lambda host: next(answers))
-    monkeypatch.setattr(app, "public_addresses", local_net.public_addresses)  # app.py's own, not the stand-in
+    monkeypatch.setattr(outbound, "resolve_host", lambda host: next(answers))
+    monkeypatch.setattr(outbound, "public_addresses", local_net.public_addresses)  # outbound.py's own, not the stand-in
     # "localhost": a connect by name (not pinned) would reach the fake server
     r = anon.get(proxy_of(client, f"http://localhost:{server.port}/"))
     assert r.status_code == 502 and "ConnectError" in r.json()["detail"]
@@ -158,12 +161,12 @@ def test_connections_go_only_to_the_address_checked_public(client, anon, app, lo
 
 
 def test_public_addresses(app, monkeypatch):
-    monkeypatch.setattr(app, "resolve_host", lambda host: {"8.8.8.8", "2001:4860:4860::8888"})
-    assert app.public_addresses("x") == ["8.8.8.8", "2001:4860:4860::8888"]  # IPv4 first
+    monkeypatch.setattr(outbound, "resolve_host", lambda host: {"8.8.8.8", "2001:4860:4860::8888"})
+    assert outbound.public_addresses("x") == ["8.8.8.8", "2001:4860:4860::8888"]  # IPv4 first
     for inside in ({"8.8.8.8", "10.0.0.1"}, {"::1"}, {"169.254.169.254"}, {"fe80::1%en0"}, set()):
-        monkeypatch.setattr(app, "resolve_host", lambda host, inside=inside: inside)
+        monkeypatch.setattr(outbound, "resolve_host", lambda host, inside=inside: inside)
         with pytest.raises(ValueError):
-            app.public_addresses("x")
+            outbound.public_addresses("x")
 
 
 # --- HLS: playlists rewritten to signed relay links ---
@@ -277,7 +280,7 @@ def test_hls_refuses_what_isnt_a_playlist(client, anon, app, upstream, monkeypat
 
 
 def test_hls_blocks_private_targets(client, anon, app, upstream, monkeypatch, no_speaker):  # noqa: F811
-    monkeypatch.setattr(app, "resolve_host", lambda host: {"10.0.0.2" if host == "lan.example.com" else "8.8.8.8"})
+    monkeypatch.setattr(outbound, "resolve_host", lambda host: {"10.0.0.2" if host == "lan.example.com" else "8.8.8.8"})
     assert anon.get(hls_of(client, "http://lan.example.com/live.m3u8")).status_code == 400
     upstream.routes[("radio.example.com", "/hop.m3u8")] = httpx.Response(
         302, headers={"location": "http://lan.example.com/live.m3u8"})
@@ -291,7 +294,8 @@ def test_hls_blocks_private_targets(client, anon, app, upstream, monkeypatch, no
 
 
 def test_radio_station_with_hls_gets_the_playlist_relay(client, app, net, no_speaker):  # noqa: F811
-    assert app.local_proxy_path({}, "https://x.example.com/a.m3u8?x=1", "")
-    assert app.local_proxy_path({}, "https://x.example.com/a.m3u8", "audio/mpeg").startswith("/local/hls?")
-    assert app.local_proxy_path({}, "http://x.example.com/a.mp3", "application/x-mpegurl").startswith("/local/hls?")
-    assert app.local_proxy_path({}, "/yt/a.m4a?sig=1", "audio/mp4") is None
+    assert device_routes.local_proxy_path({}, "https://x.example.com/a.m3u8?x=1", "")
+    assert device_routes.local_proxy_path({}, "https://x.example.com/a.m3u8", "audio/mpeg").startswith("/local/hls?")
+    path = device_routes.local_proxy_path({}, "http://x.example.com/a.mp3", "application/x-mpegurl")
+    assert path.startswith("/local/hls?")
+    assert device_routes.local_proxy_path({}, "/yt/a.m4a?sig=1", "audio/mp4") is None

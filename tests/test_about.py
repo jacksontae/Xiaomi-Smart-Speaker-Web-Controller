@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from conftest import make_user, session_client
 
-from server import version
+from server import config, version, webui
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,46 +20,46 @@ def test_version_matches_pyproject_and_newest_changelog_release():
 
 
 def test_user_agent_and_openapi_carry_the_version(app):
-    assert app.USER_AGENT == f"speaker-service/{version.__version__}"
+    assert config.USER_AGENT == f"speaker-service/{version.__version__}"
     assert app.app.version == version.__version__
 
 
 def test_about_signed_out_has_only_app_info(anon, app):
-    app.settings.owner_contact = "it@example.com"
+    config.settings.owner_contact = "it@example.com"
     r = anon.get("/about")
     assert r.status_code == 200
-    assert r.json() == {"version": version.__version__, "build": app.static_build.id}
+    assert r.json() == {"version": version.__version__, "build": webui.static_build.id}
     assert re.fullmatch(r"[0-9a-f]{12}", r.json()["build"])
 
 
 @pytest.mark.parametrize("role", ["viewer", "operator", "admin"])
 def test_about_signed_in_shows_this_server(app, role):
-    app.settings.owner_contact = "LINE: @example"
+    config.settings.owner_contact = "LINE: @example"
     c = session_client(make_user(f"{role}-user", role))
     server = c.get("/about").json()["server"]
-    assert server == {"speaker": app.settings.speaker_name, "transport": "cast", "owner_contact": "LINE: @example"}
+    assert server == {"speaker": config.settings.speaker_name, "transport": "cast", "owner_contact": "LINE: @example"}
 
 
 def test_about_never_shows_addresses_or_secrets(client, app):
-    app.settings.public_base_url = "https://speaker.example.com"
+    config.settings.public_base_url = "https://speaker.example.com"
     text = client.get("/about").text
-    for secret in (app.settings.api_token, app.settings.speaker_ip, "speaker.example.com"):
+    for secret in (config.settings.api_token, config.settings.speaker_ip, "speaker.example.com"):
         assert secret not in text
 
 
 def test_owner_contact_is_cleaned(app):
-    assert app.Settings().owner_contact is None
-    assert app.Settings(owner_contact="  it@example.com \n").owner_contact == "it@example.com"
-    assert app.Settings(owner_contact="   ").owner_contact is None
-    assert len(app.Settings(owner_contact="x" * 120).owner_contact) == 120
+    assert config.Settings().owner_contact is None
+    assert config.Settings(owner_contact="  it@example.com \n").owner_contact == "it@example.com"
+    assert config.Settings(owner_contact="   ").owner_contact is None
+    assert len(config.Settings(owner_contact="x" * 120).owner_contact) == 120
     with pytest.raises(ValueError, match="owner_contact must be at most 120 characters"):
-        app.Settings(owner_contact="x" * 121)
+        config.Settings(owner_contact="x" * 121)
 
 
 def test_owner_contact_saved_through_settings(client, app):
     r = client.post("/settings", json={"owner_contact": " Ask Dana, it@example.com "})
     assert r.status_code == 200 and r.json()["settings"]["owner_contact"] == "Ask Dana, it@example.com"
-    assert json.loads(app.CONFIG_PATH.read_text())["owner_contact"] == "Ask Dana, it@example.com"
+    assert json.loads(config.CONFIG_PATH.read_text())["owner_contact"] == "Ask Dana, it@example.com"
     assert client.get("/about").json()["server"]["owner_contact"] == "Ask Dana, it@example.com"
     r = client.post("/settings", json={"owner_contact": ""})
     assert r.status_code == 200 and r.json()["settings"]["owner_contact"] is None
@@ -71,7 +71,7 @@ def test_owner_contact_saved_through_settings(client, app):
 def test_only_owners_change_the_owner_contact(app, role):
     c = session_client(make_user(f"{role}-user", role))
     assert c.post("/settings", json={"owner_contact": "me@example.com"}).status_code == 403
-    assert app.settings.owner_contact is None
+    assert config.settings.owner_contact is None
 
 
 def test_licenses_data_is_complete():

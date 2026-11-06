@@ -8,7 +8,7 @@ import pytest
 from conftest import make_user, session_client
 from test_sources import net  # noqa: F401 - fixture
 
-from server import store
+from server import config, core, sources, store
 
 SHOW = "https://feeds.example.com/daily.xml"
 
@@ -42,7 +42,7 @@ def follow(c, feed_url=SHOW, **body):
 
 def backdate(app, sub_id, days):
     """Pretend the member last opened the show `days` days ago."""
-    with app.db.tx() as db:
+    with core.db.tx() as db:
         db.execute("UPDATE podcast_subs SET seen_at = ? WHERE id = ?",
                    ((datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds"), sub_id))
 
@@ -57,7 +57,7 @@ def test_follow_counts_new_episodes_and_opening_clears_them(people, app, net):  
     assert listed["latest_at"][:10] == (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
 
     backdate(app, sub["id"], 5)
-    app._feed_cache.clear()
+    sources._feed_cache.clear()
     assert ann.get("/podcasts/subs").json()[0]["new_count"] == 2
     show = ann.get("/podcasts/episodes", params={"feed": SHOW}).json()
     assert show["subscription"]["id"] == sub["id"] and len(show["episodes"]) == 3
@@ -85,8 +85,8 @@ def test_subscriptions_are_personal(people, app, net):  # noqa: F811
     theirs = follow(ben)
     assert theirs["id"] != sub["id"] and len(ann.get("/podcasts/subs").json()) == 1
 
-    app.db.delete_user(app.db.credentials("ann")[0]["id"])  # a member's subscriptions go with them
-    with app.db.tx() as db:
+    core.db.delete_user(core.db.credentials("ann")[0]["id"])  # a member's subscriptions go with them
+    with core.db.tx() as db:
         assert db.execute("SELECT COUNT(*) FROM podcast_subs").fetchone()[0] == 1
 
 
@@ -135,7 +135,7 @@ def test_feeds_are_cached_and_a_failing_one_shows_no_count(people, app, net):  #
     fetched = len(net.seen)
     ann.get("/podcasts/subs")
     assert len(net.seen) == fetched  # both answers (the failure too) are cached
-    app._feed_cache[SHOW] = (app._feed_cache[SHOW][0] - app.FEED_CACHE_TTL - 1, app._feed_cache[SHOW][1])
+    sources._feed_cache[SHOW] = (sources._feed_cache[SHOW][0] - config.FEED_CACHE_TTL - 1, sources._feed_cache[SHOW][1])
     ann.get("/podcasts/subs")
     assert len(net.seen) == fetched + 1  # only the stale one is read again
 

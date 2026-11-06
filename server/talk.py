@@ -3,7 +3,7 @@
 The browser's MediaRecorder sends chunks of WebM/Opus (Chrome, Firefox), Ogg/Opus (Firefox) or fragmented
 MP4/AAC (Safari) over the /talk WebSocket. One ffmpeg process per talk decodes them from stdin and writes
 MP3 to stdout; `LiveStream` keeps those bytes and hands them to whoever fetches the live URL (the speaker).
-No Cast or FastAPI here; app.py runs the session and drives the speaker.
+No Cast or FastAPI here; livetalk.py runs the session and drives the speaker.
 """
 import asyncio
 import io

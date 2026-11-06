@@ -11,6 +11,9 @@ import pytest
 from conftest import REAL_ENSURE_PROBE, TOKEN
 from test_relay import FakeMqttClient, FakeRelay, mqtt_cfg
 
+from server import core
+from server import speaker as speaker_module
+from server.routes import settings as settings_routes
 from server.transport import MqttRelayTransport
 
 ATTEMPT = 0.4  # how long one (fake) connect attempt takes here; the real one is ~10 s
@@ -37,7 +40,7 @@ class SlowSpeaker:
 @pytest.fixture
 def slow(app, monkeypatch, fake_speaker):
     speaker = SlowSpeaker(fake_speaker)
-    monkeypatch.setattr(app.transport, "get_cast", speaker)
+    monkeypatch.setattr(core.transport, "get_cast", speaker)
     return speaker
 
 
@@ -90,27 +93,27 @@ def test_known_offline_speaker_fails_at_once(client, app, slow):
 
 
 def test_hold_expiry_tries_the_speaker_again(client, app, slow, monkeypatch):
-    monkeypatch.setattr(app, "OFFLINE_HOLD", 0)
+    monkeypatch.setattr(speaker_module, "OFFLINE_HOLD", 0)
     assert client.post("/pause").status_code == 503
     slow.up = True
     assert client.post("/pause").status_code == 200
-    assert slow.attempts == 2 and app._offline is None
+    assert slow.attempts == 2 and speaker_module._offline is None
 
 
 def test_background_probe_notices_recovery(app, slow, monkeypatch):
-    monkeypatch.setattr(app, "ensure_probe", REAL_ENSURE_PROBE)
-    monkeypatch.setattr(app, "PROBE_INTERVAL", 0.05)
+    monkeypatch.setattr(speaker_module, "ensure_probe", REAL_ENSURE_PROBE)
+    monkeypatch.setattr(speaker_module, "PROBE_INTERVAL", 0.05)
 
     async def scenario():
         async with api(app) as c:
             assert (await c.post("/pause")).status_code == 503
             slow.up = True  # the speaker is switched back on
             deadline = time.monotonic() + 5 * ATTEMPT
-            while app._offline is not None and time.monotonic() < deadline:
+            while speaker_module._offline is not None and time.monotonic() < deadline:
                 await asyncio.sleep(0.05)
-            recovered = app._offline is None
+            recovered = speaker_module._offline is None
             r = await c.post("/volume", json={"level": 0.6})
-            app.reset_reachability()  # don't leave the probe running past the loop
+            speaker_module.reset_reachability()  # don't leave the probe running past the loop
             return recovered, r
 
     recovered, r = asyncio.run(scenario())
@@ -119,9 +122,9 @@ def test_background_probe_notices_recovery(app, slow, monkeypatch):
 
 
 def test_probe_keeps_failing_fast_while_down(app, slow, monkeypatch):
-    monkeypatch.setattr(app, "ensure_probe", REAL_ENSURE_PROBE)
-    monkeypatch.setattr(app, "PROBE_INTERVAL", 0.05)
-    monkeypatch.setattr(app, "OFFLINE_HOLD", ATTEMPT)  # shorter than probe + attempt: renewal has to work
+    monkeypatch.setattr(speaker_module, "ensure_probe", REAL_ENSURE_PROBE)
+    monkeypatch.setattr(speaker_module, "PROBE_INTERVAL", 0.05)
+    monkeypatch.setattr(speaker_module, "OFFLINE_HOLD", ATTEMPT)  # shorter than probe + attempt: renewal has to work
 
     async def scenario():
         async with api(app) as c:
@@ -132,7 +135,7 @@ def test_probe_keeps_failing_fast_while_down(app, slow, monkeypatch):
                 started = time.monotonic()
                 assert (await c.post("/pause")).status_code == 503
                 took.append(time.monotonic() - started)
-            app.reset_reachability()
+            speaker_module.reset_reachability()
             return took
 
     took = asyncio.run(scenario())
@@ -147,7 +150,7 @@ def test_refused_command_does_not_mark_speaker_offline(client, app, fake_speaker
 
     monkeypatch.setattr(fake_speaker.media_controller, "pause", refuse)
     assert client.post("/pause").status_code == 503
-    assert app._offline is None
+    assert speaker_module._offline is None
     assert client.get("/status").status_code == 200
 
 
@@ -160,7 +163,7 @@ def test_status_is_shared_briefly_but_commands_refresh_it(client, app, fake_spea
 
 
 def test_status_cache_expires(client, app, fake_speaker, monkeypatch):
-    monkeypatch.setattr(app, "STATUS_TTL", 0)
+    monkeypatch.setattr(speaker_module, "STATUS_TTL", 0)
     client.get("/status")
     fake_speaker.volume = 0.9
     assert client.get("/status").json()["volume"] == 0.9
@@ -168,15 +171,16 @@ def test_status_cache_expires(client, app, fake_speaker, monkeypatch):
 
 def test_changing_the_speaker_clears_offline_state(client, app, slow):
     assert client.post("/pause").status_code == 503
-    assert app._offline is not None
+    assert speaker_module._offline is not None
     r = client.post("/settings", json={"speaker_ip": "192.0.2.11"})
-    assert r.status_code == 200 and app._offline is None
+    assert r.status_code == 200 and speaker_module._offline is None
 
 
 def test_saving_a_new_speaker_does_not_wait_for_the_old_one(app, slow, monkeypatch):
     """A /status read still connecting to the offline old speaker neither delays the save nor marks the new
     speaker offline when it fails."""
-    monkeypatch.setattr(app, "make_transport", lambda s: SimpleNamespace(start=lambda: None, close=lambda: None))
+    monkeypatch.setattr(settings_routes, "make_transport",
+                        lambda s: SimpleNamespace(start=lambda: None, close=lambda: None))
 
     async def run():
         async with api(app) as c:
@@ -190,7 +194,7 @@ def test_saving_a_new_speaker_does_not_wait_for_the_old_one(app, slow, monkeypat
     r, took, poll = asyncio.run(run())
     assert r.status_code == 200 and took < ATTEMPT / 2
     assert poll.status_code == 503  # the old speaker's answer
-    assert app._offline is None  # ...which says nothing about the new one
+    assert speaker_module._offline is None  # ...which says nothing about the new one
 
 
 # --- MQTT relay ---
@@ -210,7 +214,7 @@ def hung_relay(app, monkeypatch):
     holder["client"].on_connect(holder["client"], None, {}, 0, None)
     holder["client"].deliver("online", "true", retain=True)
     t.relay = relay
-    monkeypatch.setattr(app, "transport", t)
+    monkeypatch.setattr(core, "transport", t)
     return t
 
 
@@ -224,23 +228,23 @@ def test_hung_relay_command_behind_many_polls_takes_one_timeout(app, hung_relay)
 def test_relay_error_does_not_mark_speaker_offline(client, app, hung_relay):
     hung_relay.relay.answer, hung_relay.relay.fail = True, "busy"
     assert client.post("/pause").status_code == 503
-    assert app._offline is None
+    assert speaker_module._offline is None
 
 
 def test_relay_recovers_through_the_probe(app, hung_relay, monkeypatch):
-    monkeypatch.setattr(app, "ensure_probe", REAL_ENSURE_PROBE)
-    monkeypatch.setattr(app, "PROBE_INTERVAL", 0.05)
+    monkeypatch.setattr(speaker_module, "ensure_probe", REAL_ENSURE_PROBE)
+    monkeypatch.setattr(speaker_module, "PROBE_INTERVAL", 0.05)
 
     async def scenario():
         async with api(app) as c:
             assert (await c.post("/pause")).status_code == 503
             hung_relay.relay.answer = True
             deadline = time.monotonic() + 5 * ATTEMPT
-            while app._offline is not None and time.monotonic() < deadline:
+            while speaker_module._offline is not None and time.monotonic() < deadline:
                 await asyncio.sleep(0.05)
-            recovered = app._offline is None
+            recovered = speaker_module._offline is None
             r = await c.post("/pause")
-            app.reset_reachability()
+            speaker_module.reset_reachability()
             return recovered, r
 
     recovered, r = asyncio.run(scenario())

@@ -3,6 +3,8 @@ import pytest
 from conftest import make_user, session_client
 from test_sources import upload
 
+from server import config, core
+
 FEED = "https://feeds.example.com/show.xml"
 
 
@@ -23,10 +25,10 @@ def give_things(app, c, tag):
     pl = c.post("/playlists", json={"name": f"{tag} list"}).json()
     c.post(f"/playlists/{pl['id']}/items", json={"kind": "tts", "source": f"{tag} says hi"})
     f = upload(c, name=f"{tag}.mp3").json()
-    app.db.add_sub(uid, f"{FEED}?{tag}", f"{tag} show")
-    app.TALKIE_DIR.mkdir(parents=True, exist_ok=True)
-    (app.TALKIE_DIR / f"{tag}.mp3").write_bytes(b"clip")
-    app.db.add_clip(f"clip-{tag}", uid, 3.5, f"{tag}.mp3")
+    core.db.add_sub(uid, f"{FEED}?{tag}", f"{tag} show")
+    config.TALKIE_DIR.mkdir(parents=True, exist_ok=True)
+    (config.TALKIE_DIR / f"{tag}.mp3").write_bytes(b"clip")
+    core.db.add_clip(f"clip-{tag}", uid, 3.5, f"{tag}.mp3")
     return pl, f
 
 
@@ -42,8 +44,8 @@ def test_export_has_my_data_and_nothing_of_others(people, app):
     give_things(app, ben, "ben")
     ann.patch("/me", json={"display_name": "Annie"})
     ben.patch("/me", json={"display_name": "Benny"})
-    app.db.log("Annie", "say", "hello from Annie")
-    app.db.log("Benny", "say", "hello from Benny")
+    core.db.log("Annie", "say", "hello from Annie")
+    core.db.log("Benny", "say", "hello from Benny")
 
     r = ann.get("/me/export")
     assert r.status_code == 200
@@ -69,7 +71,7 @@ def test_export_has_my_data_and_nothing_of_others(people, app):
         assert secret not in text
     assert "ben" not in text.lower()  # Ben's playlist, file, show, clip and activity stay out
     # the download itself is logged, as the member
-    last = app.db.activity(1)[0]
+    last = core.db.activity(1)[0]
     assert (last["actor"], last["action"], last["detail"]) == ("Annie", "data export", None)
 
 
@@ -77,7 +79,7 @@ def test_export_lists_passkeys_without_key_material(people, app):
     ann = people["ann"]
     cred = {"credential_id": "cred-1", "public_key": b"\x01\x02", "sign_count": 0, "transports": ["internal"],
             "backed_up": True}
-    app.db.add_passkey(ann.user["id"], "handle-1", "Ann's phone", cred)
+    core.db.add_passkey(ann.user["id"], "handle-1", "Ann's phone", cred)
     [passkey] = ann.get("/me/export").json()["passkeys"]
     assert passkey == {"name": "Ann's phone", "backed_up": True, "created_at": passkey["created_at"],
                        "last_used_at": None}
@@ -86,7 +88,7 @@ def test_export_lists_passkeys_without_key_material(people, app):
 def test_export_skips_activity_when_another_member_has_the_same_name(people, app):
     ann = people["ann"]
     make_user("ann2", "viewer", "Ann")
-    app.db.log("Ann", "say", "not necessarily mine")
+    core.db.log("Ann", "say", "not necessarily mine")
     assert ann.get("/me/export").json()["activity"] == []
 
 
@@ -102,25 +104,25 @@ def test_delete_me_removes_everything_personal(people, app):
     ann, ben, root = people["ann"], people["ben"], people["root"]
     pl, f = give_things(app, ann, "ann")
     give_things(app, ben, "ben")
-    stored = app.db.get_file(f["id"])["stored_name"]
+    stored = core.db.get_file(f["id"])["stored_name"]
     elsewhere = session_client(ann.user)
     uid = ann.user["id"]
 
     r = delete_me(ann, " ANN ")  # case and spaces don't matter
     assert r.status_code == 204 and r.content == b""
     assert 'sid=""' in r.headers["set-cookie"] and "Max-Age=0" in r.headers["set-cookie"]
-    assert app.db.get_user(uid) is None
+    assert core.db.get_user(uid) is None
     assert ann.get("/status").status_code == 401 and elsewhere.get("/status").status_code == 401
-    assert app.db.get_playlist(pl["id"]) is None and app.db.get_file(f["id"]) is None
-    assert not (app.MEDIA_DIR / stored).exists() and not (app.TALKIE_DIR / "ann.mp3").exists()
-    assert app.db.list_subs(uid) == [] and app.db.get_clip("clip-ann") is None
-    with app.db.tx() as db:
+    assert core.db.get_playlist(pl["id"]) is None and core.db.get_file(f["id"]) is None
+    assert not (config.MEDIA_DIR / stored).exists() and not (config.TALKIE_DIR / "ann.mp3").exists()
+    assert core.db.list_subs(uid) == [] and core.db.get_clip("clip-ann") is None
+    with core.db.tx() as db:
         assert db.execute("SELECT COUNT(*) FROM sessions WHERE user_id = ?", (uid,)).fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM passkeys WHERE user_id = ?", (uid,)).fetchone()[0] == 0
     # other members keep theirs
     assert [p["name"] for p in ben.get("/playlists").json()] == ["ben list"]
-    assert app.db.get_clip("clip-ben") is not None and (app.TALKIE_DIR / "ben.mp3").exists()
-    assert len(app.db.list_subs(ben.user["id"])) == 1
+    assert core.db.get_clip("clip-ben") is not None and (config.TALKIE_DIR / "ben.mp3").exists()
+    assert len(core.db.list_subs(ben.user["id"])) == 1
     entry = root.get("/activity").json()[0]
     assert (entry["actor"], entry["action"], entry["detail"]) == ("Ann", "member delete", "ann (own account)")
 
@@ -131,7 +133,7 @@ def test_delete_me_needs_the_right_username(people, app):
     assert r.status_code == 400 and r.json()["detail"] == "Type your username to confirm"
     assert delete_me(ann, "").status_code == 400
     assert ann.request("DELETE", "/me", json={}).status_code == 422
-    assert app.db.get_user(ann.user["id"]) is not None
+    assert core.db.get_user(ann.user["id"]) is not None
     assert ann.get("/status").status_code == 200
 
 
@@ -153,4 +155,4 @@ def test_delete_me_needs_a_signed_in_member(people, client, anon, app):
     assert r.status_code == 400 and r.json()["detail"] == "The API token is not a user account"
     no_csrf = session_client(people["ann"].user, csrf=False)
     assert delete_me(no_csrf, "ann").status_code == 403
-    assert app.db.get_user(people["ann"].user["id"]) is not None
+    assert core.db.get_user(people["ann"].user["id"]) is not None

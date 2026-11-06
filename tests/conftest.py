@@ -16,6 +16,8 @@ os.environ["DATA_PATH"] = str(_TMP / "data.db")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from server import app as app_module  # noqa: E402
+from server import config, core, livetalk, media, outbound, playback, sources, talkie  # noqa: E402
+from server import speaker as speaker_module  # noqa: E402
 from server import transport as transport_module  # noqa: E402
 from server.auth import Throttle, hash_password, new_session_token, token_hash  # noqa: E402
 from server.store import Store  # noqa: E402
@@ -24,11 +26,11 @@ BASE = "http://test-host:8090"
 TOKEN = "test-token"
 PASSWORD = "correct horse"
 PASSWORD_HASH = hash_password(PASSWORD)  # scrypt is slow; hash once for every test user
-REAL_SCHEDULE_PREFETCH = app_module.schedule_prefetch
-REAL_YT_DOWNLOAD = app_module.yt_download
-REAL_YT_EXTRACT = app_module.yt_extract
-REAL_ENSURE_PROBE = app_module.ensure_probe
-REAL_QUEUE_CUT = app_module.queue_cut
+REAL_SCHEDULE_PREFETCH = playback.schedule_prefetch
+REAL_YT_DOWNLOAD = media.yt_download
+REAL_YT_EXTRACT = media.yt_extract
+REAL_ENSURE_PROBE = speaker_module.ensure_probe
+REAL_QUEUE_CUT = media.queue_cut
 
 
 class FakeMediaController:
@@ -100,57 +102,57 @@ def app():
 @pytest.fixture(autouse=True)
 def fake_speaker(monkeypatch):
     cast = FakeCast()
-    app_module.settings = app_module.Settings(public_base_url=BASE, api_token=TOKEN)
-    speaker = transport_module.CastTransport("192.0.2.10", name=app_module.settings.speaker_name)
+    config.settings = config.Settings(public_base_url=BASE, api_token=TOKEN)
+    speaker = transport_module.CastTransport("192.0.2.10", name=config.settings.speaker_name)
     speaker.get_cast = lambda: cast
-    monkeypatch.setattr(app_module, "transport", speaker)
-    app_module.save_settings(app_module.settings)
-    app_module._resume = None
-    app_module._say_gen = 0
+    monkeypatch.setattr(core, "transport", speaker)
+    config.save_settings(config.settings)
+    playback._resume = None
+    playback._say_gen = 0
     return cast
 
 
 def _no_network(*args, **kwargs):
-    raise AssertionError("tests must not reach YouTube; monkeypatch yt_download / yt_extract")
+    raise AssertionError("tests must not reach YouTube; monkeypatch media.yt_download / media.yt_extract")
 
 
 def _no_http(request):
-    raise AssertionError(f"tests must not reach {request.url.host}; mock app.http / app.feed_http")
+    raise AssertionError(f"tests must not reach {request.url.host}; mock outbound.http / outbound.feed_http")
 
 
 @pytest.fixture(autouse=True)
 def fresh_state(monkeypatch, tmp_path):
     """Empty database and upload dir, no queue, no throttling history, no network, speaker not known offline;
     background tasks recorded instead of spawned."""
-    monkeypatch.setattr(app_module, "db", Store(tmp_path / "data.db"))
-    monkeypatch.setattr(app_module, "login_throttle", Throttle(limit=5, window=300))
-    monkeypatch.setattr(app_module, "yt_download", _no_network)
-    monkeypatch.setattr(app_module, "yt_extract", _no_network)
-    monkeypatch.setattr(app_module, "http", httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
-    monkeypatch.setattr(app_module, "feed_http", httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
-    monkeypatch.setattr(app_module, "MEDIA_DIR", tmp_path / "media")
-    monkeypatch.setattr(app_module, "TALKIE_DIR", tmp_path / "talkie")
-    app_module.clear_queue()
-    app_module._talk = app_module._talk_last = app_module._talk_on_speaker = None
-    app_module._talkie = app_module._talkie_last = None
-    app_module._talkie_conns.clear()
-    app_module._talkie_swept = 0.0
-    app_module._downloads.clear()
-    app_module._feed_cache.clear()
+    monkeypatch.setattr(core, "db", Store(tmp_path / "data.db"))
+    monkeypatch.setattr(core, "login_throttle", Throttle(limit=5, window=300))
+    monkeypatch.setattr(media, "yt_download", _no_network)
+    monkeypatch.setattr(media, "yt_extract", _no_network)
+    monkeypatch.setattr(outbound, "http", httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
+    monkeypatch.setattr(outbound, "feed_http", httpx.AsyncClient(transport=httpx.MockTransport(_no_http)))
+    monkeypatch.setattr(config, "MEDIA_DIR", tmp_path / "media")
+    monkeypatch.setattr(config, "TALKIE_DIR", tmp_path / "talkie")
+    playback.clear_queue()
+    livetalk._talk = livetalk._talk_last = livetalk._talk_on_speaker = None
+    talkie._talkie = talkie._talkie_last = None
+    talkie._talkie_conns.clear()
+    talkie._talkie_swept = 0.0
+    playback._downloads.clear()
+    sources._feed_cache.clear()
     spawned = SimpleNamespace(watchers=0, prefetch=[], probes=0, cuts=[])
-    app_module.reset_reachability()
-    monkeypatch.setattr(app_module, "cast_lock", asyncio.Lock())  # a contended lock binds to its test's event loop
-    monkeypatch.setattr(app_module, "ensure_queue_watcher", lambda: setattr(spawned, "watchers", spawned.watchers + 1))
-    monkeypatch.setattr(app_module, "ensure_probe", lambda: setattr(spawned, "probes", spawned.probes + 1))
-    monkeypatch.setattr(app_module, "schedule_prefetch", lambda q: spawned.prefetch.append(q.peek_next()))
-    monkeypatch.setattr(app_module, "queue_cut", lambda video_id, *a: spawned.cuts.append(video_id))
+    speaker_module.reset_reachability()
+    monkeypatch.setattr(core, "cast_lock", asyncio.Lock())  # a contended lock binds to its test's event loop
+    monkeypatch.setattr(playback, "ensure_queue_watcher", lambda: setattr(spawned, "watchers", spawned.watchers + 1))
+    monkeypatch.setattr(speaker_module, "ensure_probe", lambda: setattr(spawned, "probes", spawned.probes + 1))
+    monkeypatch.setattr(playback, "schedule_prefetch", lambda q: spawned.prefetch.append(q.peek_next()))
+    monkeypatch.setattr(media, "queue_cut", lambda video_id, *a: spawned.cuts.append(video_id))
     return spawned
 
 
 def make_user(username="alice", role="admin", display_name=None, disabled=False):
-    user = app_module.db.create_user(username, display_name or username.title(), role, PASSWORD_HASH)
+    user = core.db.create_user(username, display_name or username.title(), role, PASSWORD_HASH)
     if disabled:
-        user = app_module.db.update_user(user["id"], {"disabled": True})
+        user = core.db.update_user(user["id"], {"disabled": True})
     return user
 
 
@@ -159,7 +161,7 @@ def session_client(user, csrf=True):
     from fastapi.testclient import TestClient
 
     sid = new_session_token()
-    app_module.db.create_session(token_hash(sid), user["id"])
+    core.db.create_session(token_hash(sid), user["id"])
     c = TestClient(app_module.app, headers={"X-Requested-With": "speaker-web"} if csrf else {})
     c.cookies.set("sid", sid)
     c.sid = sid
