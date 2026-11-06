@@ -146,8 +146,10 @@ def test_live_stream_backlog_and_close():
 # --- Stub ffmpeg (a real subprocess, no audio) ---
 
 def stub_ffmpeg(tmp_path, monkeypatch, body):
+    # A sh wrapper, not a #!python line: a shebang can't hold an interpreter path with spaces.
+    (tmp_path / "stub.py").write_text(f"import sys, time\n{body}\n")
     path = tmp_path / "ffmpeg"
-    path.write_text(f"#!{sys.executable}\nimport sys, time\n{body}\n")
+    path.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{tmp_path / "stub.py"}" "$@"\n')
     path.chmod(0o755)
     monkeypatch.setattr(talk, "FFMPEG", str(path))
     return path
