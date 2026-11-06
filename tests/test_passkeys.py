@@ -12,8 +12,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 
-import passkeys
-import store
+from server import config, core, passkeys, store
 
 BASE_URL = "https://speaker.example.com"
 RP_ID, ORIGIN = "speaker.example.com", "https://speaker.example.com"
@@ -78,8 +77,8 @@ class SoftKey:
 @pytest.fixture
 def https(app):
     """Serve on an HTTPS origin, the only kind (besides localhost) where browsers offer passkeys."""
-    app.settings.public_base_url = BASE_URL
-    app.passkey_challenges = passkeys.Challenges()
+    config.settings.public_base_url = BASE_URL
+    core.passkey_challenges = passkeys.Challenges()
     return app
 
 
@@ -133,7 +132,7 @@ def test_options_shape(https):
     c = session_client(alice)
     key, _ = register(c)
     create = c.post("/me/passkeys/options").json()["publicKey"]
-    assert create["rp"] == {"id": RP_ID, "name": https.settings.speaker_name}
+    assert create["rp"] == {"id": RP_ID, "name": config.settings.speaker_name}
     assert create["user"]["name"] == "alice" and create["user"]["id"] == key.user_handle  # same handle every time
     assert create["authenticatorSelection"]["residentKey"] == "required"
     assert create["authenticatorSelection"]["userVerification"] == "preferred"
@@ -155,7 +154,7 @@ def test_register_list_and_member_flag(https, client):
     assert c.get("/me/passkeys").json() == [passkey]
     assert c.get("/auth/state").json()["user"]["has_passkey"] is True
     assert [u["has_passkey"] for u in client.get("/users").json()] == [True]
-    assert https.db.activity()[0]["action"] == "passkey add"
+    assert core.db.activity()[0]["action"] == "passkey add"
     _, second = register(c)
     assert second["name"] == "Passkey"
 
@@ -165,7 +164,7 @@ def test_registration_challenge_is_bound_to_the_member(https):
     options = session_client(alice).post("/me/passkeys/options").json()
     r = session_client(bob).post("/me/passkeys", json={"credential": SoftKey().create(options)})
     assert r.status_code == 400
-    assert https.db.list_passkeys(bob["id"]) == []
+    assert core.db.list_passkeys(bob["id"]) == []
 
 
 def test_registration_checks_origin_and_challenge(https):
@@ -201,11 +200,11 @@ def test_sign_in_with_a_passkey(https):
     assert r.json()["user"]["id"] == alice["id"]
     assert browser.get("/auth/state").json()["user"]["username"] == "alice"
     assert browser.post("/queue/clear").status_code == 204  # a real operator session
-    stored = https.db.passkey_by_credential(b64(key.credential_id))
+    stored = core.db.passkey_by_credential(b64(key.credential_id))
     assert stored["sign_count"] == 1 and stored["last_used_at"]
-    assert any(a["action"] == "login ok" and a["detail"].startswith("with a passkey") for a in https.db.activity())
+    assert any(a["action"] == "login ok" and a["detail"].startswith("with a passkey") for a in core.db.activity())
     assert sign_in(https, key)[1].status_code == 200
-    assert https.db.passkey_by_credential(b64(key.credential_id))["sign_count"] == 2
+    assert core.db.passkey_by_credential(b64(key.credential_id))["sign_count"] == 2
 
 
 def test_assertion_is_single_use(https):
@@ -219,7 +218,7 @@ def test_assertion_is_single_use(https):
 
 def test_expired_challenge_is_refused(https):
     key, _ = register(session_client(make_user("alice")))
-    https.passkey_challenges.ttl = -1
+    core.passkey_challenges.ttl = -1
     assert sign_in(https, key)[1].status_code == 401
 
 
@@ -236,7 +235,7 @@ def test_wrong_origin_or_unknown_passkey_is_refused(https):
     assert r.status_code == 401 and "origin" in r.json()["detail"]
     _, r = sign_in(https, SoftKey())
     assert r.status_code == 401 and "isn't registered" in r.json()["detail"]
-    assert https.db.user_count() == 1
+    assert core.db.user_count() == 1
 
 
 def test_forged_signature_is_refused(https):
@@ -255,7 +254,7 @@ def test_user_handle_must_match(https):
 def test_disabled_member_cannot_sign_in(https):
     alice, admin = make_user("alice", "viewer"), make_user("boss")
     key, _ = register(session_client(alice))
-    https.db.update_user(alice["id"], {"disabled": True})
+    core.db.update_user(alice["id"], {"disabled": True})
     _, r = sign_in(https, key)
     assert r.status_code == 401 and "disabled" in r.json()["detail"]
     assert admin  # the last enabled admin stays
@@ -282,7 +281,7 @@ def test_rename_and_remove(https):
     assert c.delete(f"/me/passkeys/{passkey['id']}").status_code == 204
     assert c.get("/me/passkeys").json() == []
     assert c.delete(f"/me/passkeys/{passkey['id']}").status_code == 404
-    actions = [a["action"] for a in https.db.activity()][:3]
+    actions = [a["action"] for a in core.db.activity()][:3]
     assert actions == ["passkey remove", "passkey rename", "passkey add"]
 
 
@@ -290,7 +289,7 @@ def test_cannot_remove_the_only_sign_in_method(https):
     alice = make_user("alice")
     c = session_client(alice)
     _, first = register(c)
-    with https.db.tx() as db:  # a passkey-only member
+    with core.db.tx() as db:  # a passkey-only member
         db.execute("UPDATE users SET password_hash = '' WHERE id = ?", (alice["id"],))
     r = c.delete(f"/me/passkeys/{first['id']}")
     assert r.status_code == 409 and "only way" in r.json()["detail"]
@@ -317,7 +316,7 @@ def test_owner_removes_a_members_passkey(https, client):
     assert [p["name"] for p in boss.get(f"/users/{alice['id']}/passkeys").json()] == ["MacBook"]
     assert a.get("/auth/state").json()["user"] is None  # signed out of every device
     assert boss.get("/auth/state").json()["user"]["id"] == owner["id"]
-    e = https.db.activity()[0]
+    e = core.db.activity()[0]
     assert (e["actor"], e["action"], e["detail"]) == ("Olivia", "member update", "alice: removed passkey iPhone")
     assert client.delete(f"/users/{alice['id']}/passkeys/{laptop['id']}").status_code == 204  # the API token too
 
@@ -325,7 +324,7 @@ def test_owner_removes_a_members_passkey(https, client):
 def test_owner_cannot_remove_a_members_only_way_in_or_their_own(https):
     owner, alice = make_user("olivia"), make_user("alice", "operator")
     _, pk = register(session_client(alice))
-    with https.db.tx() as db:  # a passkey-only member
+    with core.db.tx() as db:  # a passkey-only member
         db.execute("UPDATE users SET password_hash = '' WHERE id = ?", (alice["id"],))
     boss = session_client(owner)
     r = boss.delete(f"/users/{alice['id']}/passkeys/{pk['id']}")
@@ -339,7 +338,7 @@ def test_deleting_a_member_removes_their_passkeys(https, client):
     alice = make_user("alice", "viewer")
     key, _ = register(session_client(alice))
     assert client.delete(f"/users/{alice['id']}").status_code == 204
-    assert https.db.passkey_by_credential(b64(key.credential_id)) is None
+    assert core.db.passkey_by_credential(b64(key.credential_id)) is None
 
 
 # --- "Require a passkey for admins" ---
@@ -381,7 +380,7 @@ def test_required_admin_must_use_the_passkey(https, client):
     assert "passkey_required" not in c.get("/auth/state").json()
 
     # If passkeys become unusable the rule stops applying, so nobody is locked out.
-    https.settings.public_base_url = "http://speaker.example.com"
+    config.settings.public_base_url = "http://speaker.example.com"
     assert web(https).post("/auth/login", json={"username": "boss", "password": PASSWORD}).status_code == 200
 
 

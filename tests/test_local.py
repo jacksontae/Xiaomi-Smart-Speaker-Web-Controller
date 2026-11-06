@@ -6,6 +6,9 @@ from conftest import BASE
 from test_queue import downloads  # noqa: F401 - fixture
 from test_sources import MP3, STATIONS, UUID_A, net, upload  # noqa: F401 - fixtures
 
+from server import access, config, core, media, outbound
+from server.routes import device as device_routes
+
 VID = "aaaaaaaaaaa"
 
 
@@ -17,8 +20,8 @@ class NoSpeaker:
 @pytest.fixture
 def no_speaker(app, monkeypatch, fake_speaker):
     """Any speaker call (or working out the speaker-facing base URL) fails the test."""
-    monkeypatch.setattr(app, "transport", NoSpeaker())
-    monkeypatch.setattr(app, "host_ip", lambda: (_ for _ in ()).throw(AssertionError("host_ip used")))
+    monkeypatch.setattr(core, "transport", NoSpeaker())
+    monkeypatch.setattr(access, "host_ip", lambda: (_ for _ in ()).throw(AssertionError("host_ip used")))
     return fake_speaker
 
 
@@ -49,7 +52,7 @@ def test_tts(client, anon, app, net, no_speaker):  # noqa: F811
     assert got["url"].startswith("/tts.mp3?") and "sig=" in got["url"] and got["content_type"] == "audio/mp3"
     assert fetch(anon, got["url"]).content == b"mp3"  # signed: plays without a session
     assert resolve(client, kind="tts", source="  ").status_code == 400
-    assert no_speaker.media_controller.loads == [] and app.db.activity() == []
+    assert no_speaker.media_controller.loads == [] and core.db.activity() == []
 
 
 def test_viewers_may_download_youtube(as_role, app, downloads, no_speaker):  # noqa: F811
@@ -74,7 +77,7 @@ def test_youtube_by_id_uses_the_cache(client, anon, app, downloads, no_speaker):
 
 def test_youtube_words_are_looked_up(client, app, downloads, monkeypatch, no_speaker):  # noqa: F811
     found = {"entries": [{"id": VID, "title": "Found it", "duration": 61}]}
-    monkeypatch.setattr(app, "yt_extract", lambda target: found)
+    monkeypatch.setattr(media, "yt_extract", lambda target: found)
     got = resolve(client, kind="youtube", source="some song").json()
     assert got["title"] == "Found it" and got["duration"] == 61 and got["url"].startswith(f"/yt/{VID}.")
 
@@ -87,12 +90,12 @@ def test_youtube_download_failure_is_502(client, downloads, no_speaker):  # noqa
 def test_file(client, anon, app, no_speaker):
     f = upload(client).json()
     got = resolve(client, kind="file", source=str(f["id"])).json()
-    stored = app.db.get_file(f["id"])["stored_name"]
+    stored = core.db.get_file(f["id"])["stored_name"]
     assert got["url"].startswith(f"/media/{stored}?") and got["content_type"] == "audio/mpeg"
     assert got["title"] == "My Song"
     assert fetch(anon, got["url"]).content == MP3
     assert resolve(client, kind="file", source="999").status_code == 404
-    (app.MEDIA_DIR / stored).unlink()
+    (config.MEDIA_DIR / stored).unlink()
     assert resolve(client, kind="file", source=str(f["id"])).status_code == 404
 
 
@@ -133,8 +136,8 @@ def test_podcast_and_url(client, no_speaker):
 
 def test_speaker_play_still_gets_absolute_links(client, app, fake_speaker, downloads):  # noqa: F811
     """The refactor keeps the speaker's links absolute (public_base_url)."""
-    pl = app.db.create_playlist("Mix")
-    app.db.add_item(pl["id"], {"kind": "tts", "source": "hi", "title": "hi", "duration": None, "thumbnail": None,
+    pl = core.db.create_playlist("Mix")
+    core.db.add_item(pl["id"], {"kind": "tts", "source": "hi", "title": "hi", "duration": None, "thumbnail": None,
                                "lang": "en"}, 100)
     assert client.post(f"/playlists/{pl['id']}/play", json={}).status_code == 200
     assert fake_speaker.media_controller.loads[-1]["url"].startswith(f"{BASE}/tts.mp3?")
@@ -145,19 +148,19 @@ def test_speaker_play_still_gets_absolute_links(client, app, fake_speaker, downl
 def test_played_is_logged_once_per_call(as_role, anon, app, no_speaker):
     viewer = as_role("viewer", "vee")
     assert viewer.post("/local/played", json={"title": "  Morning   mix  "}).status_code == 204
-    assert [(e["actor"].lower(), e["action"], e["detail"]) for e in app.db.activity()] == [
+    assert [(e["actor"].lower(), e["action"], e["detail"]) for e in core.db.activity()] == [
         ("vee", "device play", "Morning mix")]
     assert viewer.post("/local/played", json={"title": "   "}).status_code == 400
     assert viewer.post("/local/played", json={}).status_code == 422
     assert anon.post("/local/played", json={"title": "x"}).status_code == 401
-    assert len(app.db.activity()) == 1
+    assert len(core.db.activity()) == 1
 
 
 def test_resolve_alone_logs_nothing(client, app, net, no_speaker):  # noqa: F811
     """The browser resolves ahead (next track) and again (expired link): only /local/played writes the log."""
     resolve(client, kind="radio", source=UUID_A)
     resolve(client, kind="radio", source=UUID_A)
-    assert app.db.activity() == []
+    assert core.db.activity() == []
 
 
 # --- Stream relay: GET /local/stream ---
@@ -165,7 +168,7 @@ def test_resolve_alone_logs_nothing(client, app, net, no_speaker):  # noqa: F811
 @pytest.fixture
 def upstream(app, net, monkeypatch):  # noqa: F811
     """Fake radio servers on the mock internet (no real network): the relay uses the same mock client."""
-    monkeypatch.setattr(app, "stream_http", app.http)
+    monkeypatch.setattr(outbound, "stream_http", outbound.http)
     return net
 
 
@@ -216,7 +219,7 @@ def test_stream_blocks_private_targets(client, anon, app, upstream, monkeypatch,
     """No SSRF: hosts that resolve into private, loopback or link-local networks are refused, redirects too."""
     addresses = {"lan.example.com": "172.16.0.5", "loop.example.com": "127.0.0.1",
                  "meta.example.com": "169.254.169.254", "v6.example.com": "::1"}
-    monkeypatch.setattr(app, "resolve_host", lambda host: {addresses.get(host, "8.8.8.8")})
+    monkeypatch.setattr(outbound, "resolve_host", lambda host: {addresses.get(host, "8.8.8.8")})
     for host in addresses:
         assert anon.get(proxy_of(client, f"http://{host}/live")).status_code == 400, host
     upstream.routes[("radio.example.com", "/hop")] = httpx.Response(
@@ -231,7 +234,7 @@ def test_stream_blocks_private_targets(client, anon, app, upstream, monkeypatch,
 
 
 def test_stream_only_http_upstreams(client, anon, app, no_speaker):
-    url = app.media_path("/local/stream", u="file:///etc/passwd", t="")
+    url = access.media_path("/local/stream", u="file:///etc/passwd", t="")
     assert anon.get(url).status_code == 400
 
 
@@ -241,20 +244,20 @@ def test_stream_stops_at_the_size_limit_and_frees_its_slot(client, anon, app, up
             yield b"z" * 1000
     upstream.routes[("radio.example.com", "/endless")] = lambda r: httpx.Response(
         200, content=endless(), headers={"content-type": "audio/mpeg"})
-    monkeypatch.setattr(app, "STREAM_MAX_BYTES", 10_000)
+    monkeypatch.setattr(config, "STREAM_MAX_BYTES", 10_000)
     r = anon.get(proxy_of(client, "https://radio.example.com/endless"))
     assert r.status_code == 200 and len(r.content) == 10_000
-    assert app._streams_open == 0
+    assert device_routes._streams_open == 0
 
 
 def test_stream_time_limit_and_open_cap(client, anon, app, upstream, monkeypatch, no_speaker):
     upstream.routes[("radio.example.com", "/live.mp3")] = httpx.Response(200, content=b"a" * 100,
                                                                         headers={"content-type": "audio/mpeg"})
     url = proxy_of(client, "https://radio.example.com/live.mp3")
-    monkeypatch.setattr(app, "STREAM_MAX_SECONDS", -1)
+    monkeypatch.setattr(config, "STREAM_MAX_SECONDS", -1)
     assert anon.get(url).content == b""  # over time: the relay ends and the browser asks for a fresh link
-    monkeypatch.setattr(app, "STREAM_MAX_SECONDS", 3600)
-    monkeypatch.setattr(app, "_streams_open", app.STREAM_MAX_OPEN)
+    monkeypatch.setattr(config, "STREAM_MAX_SECONDS", 3600)
+    monkeypatch.setattr(device_routes, "_streams_open", config.STREAM_MAX_OPEN)
     assert anon.get(url).status_code == 503
 
 

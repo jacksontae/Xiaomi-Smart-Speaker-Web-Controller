@@ -6,8 +6,10 @@ from types import SimpleNamespace
 import pytest
 from conftest import BASE, TOKEN
 
-import transport as transport_module
-from transport import MqttRelayTransport, TransportError
+from server import access, config, core, playback, speaker
+from server import transport as transport_module
+from server.routes import settings as settings_routes
+from server.transport import MqttRelayTransport, TransportError
 
 TOPIC = "speaker-relay/test-relay"
 
@@ -120,7 +122,7 @@ class FakeMqttClient:
 
 
 def mqtt_cfg(**overrides):
-    from app import MqttSettings
+    from server.config import MqttSettings
 
     return MqttSettings(host="broker.example.com", base_topic=TOPIC, username="change-me", password="change-me",
                         **overrides)
@@ -369,16 +371,16 @@ def test_failed_publish_is_reported(mqtt_transport):
 
 @pytest.fixture
 def relay_app(app, monkeypatch, mqtt_transport):
-    monkeypatch.setattr(app, "transport", mqtt_transport)
+    monkeypatch.setattr(core, "transport", mqtt_transport)
     return app
 
 
 def test_announcement_resumes_track_through_relay(relay_app, client, relay, clock, monkeypatch):
-    app, t = relay_app, relay_app.transport
+    t = core.transport
     spawned = []
-    monkeypatch.setattr(app, "spawn", lambda coro: spawned.append(coro))
-    track = app.media_url("/yt/abc.m4a")
-    asyncio.run(app.run_cast(app.cast_play, track, "audio/mp4", "Song"))
+    monkeypatch.setattr(core, "spawn", lambda coro: spawned.append(coro))
+    track = access.media_url("/yt/abc.m4a")
+    asyncio.run(speaker.run_cast(speaker.cast_play, track, "audio/mp4", "Song"))
     clock.now += 40  # 40 s into the song (status refreshed through the relay)
     r = client.post("/say", json={"text": "dinner is ready"})
     assert r.status_code == 200 and r.json()["will_resume"] == "Song"
@@ -390,35 +392,33 @@ def test_announcement_resumes_track_through_relay(relay_app, client, relay, cloc
     asyncio.run(watcher)
     resumed = [c for c in t.fake.commands() if c["cmd"] == "play"][-1]
     assert resumed["url"] == track and resumed["content_type"] == "audio/mp4" and resumed["title"] == "Song"
-    assert resumed["position"] == pytest.approx(40 - app.RESUME_REWIND)
-    assert app._resume is None
+    assert resumed["position"] == pytest.approx(40 - config.RESUME_REWIND)
+    assert playback._resume is None
 
 
 def test_resume_dropped_when_relay_goes_offline(relay_app, clock):
-    app = relay_app
-    app._resume = {"url": f"{BASE}/yt/abc.m4a", "content_type": "audio/mp4", "title": "Song", "position": 1}
-    app._say_gen = 3
-    app.transport.fake.deliver("online", "false")
-    asyncio.run(app.resume_after_announcement(3, f"{BASE}/tts.mp3"))
-    assert app._resume is None
+    playback._resume = {"url": f"{BASE}/yt/abc.m4a", "content_type": "audio/mp4", "title": "Song", "position": 1}
+    playback._say_gen = 3
+    core.transport.fake.deliver("online", "false")
+    asyncio.run(playback.resume_after_announcement(3, f"{BASE}/tts.mp3"))
+    assert playback._resume is None
 
 
 def test_queue_advances_when_relay_reports_finished(relay_app, client, relay, clock, monkeypatch):
-    app = relay_app
     for vid in ("aaaaaaaaaaa", "bbbbbbbbbbb"):
-        (app.CACHE_DIR / f"{vid}.m4a").write_bytes(b"audio")
-    pl = app.db.create_playlist("Mix")
+        (config.CACHE_DIR / f"{vid}.m4a").write_bytes(b"audio")
+    pl = core.db.create_playlist("Mix")
     for vid in ("aaaaaaaaaaa", "bbbbbbbbbbb"):
-        app.db.add_item(pl["id"], {"kind": "youtube", "source": vid, "title": vid, "duration": 1.0,
+        core.db.add_item(pl["id"], {"kind": "youtube", "source": vid, "title": vid, "duration": 1.0,
                                    "thumbnail": None, "lang": None}, 100)
     assert client.post(f"/playlists/{pl['id']}/play", json={}).status_code == 200
-    first = [c for c in app.transport.fake.commands() if c["cmd"] == "play"][-1]
+    first = [c for c in core.transport.fake.commands() if c["cmd"] == "play"][-1]
     assert "/yt/aaaaaaaaaaa.m4a" in first["url"]
     relay.finish()
     clock.now += 5
-    asyncio.run(app.queue_tick())
-    second = [c for c in app.transport.fake.commands() if c["cmd"] == "play"][-1]
-    assert "/yt/bbbbbbbbbbb.m4a" in second["url"] and app._queue.pos == 1
+    asyncio.run(playback.queue_tick())
+    second = [c for c in core.transport.fake.commands() if c["cmd"] == "play"][-1]
+    assert "/yt/bbbbbbbbbbb.m4a" in second["url"] and playback._queue.pos == 1
 
 
 def test_status_shows_relay_to_admins_only(relay_app, client, as_role):
@@ -432,7 +432,7 @@ def test_status_shows_relay_to_admins_only(relay_app, client, as_role):
 
 
 def test_status_while_relay_offline(relay_app, client, as_role):
-    relay_app.transport.fake.deliver("online", "false")
+    core.transport.fake.deliver("online", "false")
     r = client.get("/status")
     assert r.status_code == 503 and "offline" in r.json()["detail"]
     assert r.json()["relay"]["online"] is False
@@ -448,47 +448,47 @@ def test_cast_status_has_no_relay(client):
 
 def test_mqtt_transport_needs_a_host(app):
     with pytest.raises(ValueError, match="mqtt.host"):
-        app.Settings(transport="mqtt")
-    s = app.Settings(transport="mqtt", mqtt={"host": " broker.example.com "})
+        config.Settings(transport="mqtt")
+    s = config.Settings(transport="mqtt", mqtt={"host": " broker.example.com "})
     assert s.mqtt.host == "broker.example.com" and s.mqtt.port == 8883 and s.mqtt.tls
 
 
 @pytest.mark.parametrize("topic", ["", "/", "relay/+", "relay/#"])
 def test_base_topic_rejects_wildcards(app, topic):
     with pytest.raises(ValueError):
-        app.MqttSettings(base_topic=topic)
+        config.MqttSettings(base_topic=topic)
 
 
 def test_base_topic_is_trimmed(app):
-    assert app.MqttSettings(base_topic="/speaker-relay/x/").base_topic == "speaker-relay/x"
+    assert config.MqttSettings(base_topic="/speaker-relay/x/").base_topic == "speaker-relay/x"
 
 
 @pytest.mark.parametrize("bad", ["speaker.example.com", "ftp://speaker.example.com", "https://", "https://x/?a=1"])
 def test_public_base_url_validation(app, bad):
     with pytest.raises(ValueError, match="public_base_url"):
-        app.Settings(public_base_url=bad)
+        config.Settings(public_base_url=bad)
 
 
 def test_public_base_url_normalized(app):
-    assert app.Settings(public_base_url="https://speaker.example.com/ ").public_base_url == \
+    assert config.Settings(public_base_url="https://speaker.example.com/ ").public_base_url == \
         "https://speaker.example.com"
-    assert app.Settings(public_base_url="").public_base_url is None
+    assert config.Settings(public_base_url="").public_base_url is None
 
 
 def test_media_urls_use_public_base_url(app):
-    app.settings = app.Settings(public_base_url="https://speaker.example.com", api_token=TOKEN)
-    assert app.media_url("/tts.mp3", text="x").startswith("https://speaker.example.com/tts.mp3?")
+    config.settings = config.Settings(public_base_url="https://speaker.example.com", api_token=TOKEN)
+    assert access.media_url("/tts.mp3", text="x").startswith("https://speaker.example.com/tts.mp3?")
 
 
 def test_reconnect_bounds_validated(app):
     with pytest.raises(ValueError, match="reconnect_max"):
-        app.MqttSettings(reconnect_min=30, reconnect_max=5)
+        config.MqttSettings(reconnect_min=30, reconnect_max=5)
 
 
 def test_password_is_never_in_repr_or_public_settings(app):
-    s = app.Settings(transport="mqtt", mqtt={"host": "broker.example.com", "password": "change-me"})
+    s = config.Settings(transport="mqtt", mqtt={"host": "broker.example.com", "password": "change-me"})
     assert "change-me" not in repr(s)
-    public = app.public_settings(s)
+    public = config.public_settings(s)
     assert "change-me" not in json.dumps(public) and public["mqtt"]["password_set"] is True
     assert "api_token" not in public
 
@@ -496,15 +496,15 @@ def test_password_is_never_in_repr_or_public_settings(app):
 def test_env_overrides_apply_but_are_not_saved(app, monkeypatch, tmp_path):
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps({"api_token": TOKEN, "mqtt": {"username": "from-file"}}))
-    monkeypatch.setattr(app, "CONFIG_PATH", cfg)
+    monkeypatch.setattr(config, "CONFIG_PATH", cfg)
     env = {"SPEAKER_TRANSPORT": "mqtt", "MQTT_HOST": "broker.example.com", "MQTT_PORT": "8884",
            "MQTT_USERNAME": "from-env", "MQTT_PASSWORD": "env-secret", "PUBLIC_BASE_URL": "https://speaker.example.com",
            "MQTT_TLS": ""}
-    s = app.load_settings(env)
+    s = config.load_settings(env)
     assert s.transport == "mqtt" and s.mqtt.host == "broker.example.com" and s.mqtt.port == 8884
     assert s.mqtt.username == "from-env" and s.mqtt.password == "env-secret" and s.mqtt.tls is True
     s.default_volume = 0.5
-    app.save_settings(s, env)
+    config.save_settings(s, env)
     saved = json.loads(cfg.read_text())
     assert "env-secret" not in cfg.read_text() and "password" not in saved["mqtt"]
     assert saved["mqtt"]["username"] == "from-file" and "host" not in saved["mqtt"]
@@ -519,15 +519,15 @@ def test_settings_api_merges_mqtt_and_masks_password(client, app, monkeypatch):
         return SimpleNamespace(start=lambda: None, close=lambda: None, kind=s.transport,
                                relay_status=lambda: None)
 
-    monkeypatch.setattr(app, "make_transport", fake_make)
+    monkeypatch.setattr(settings_routes, "make_transport", fake_make)
     r = client.post("/settings", json={"transport": "mqtt", "mqtt": {"host": "broker.example.com",
                                                                     "password": "api-secret"}})
     assert r.status_code == 200, r.text
-    assert built == ["mqtt"] and app.transport.kind == "mqtt"
+    assert built == ["mqtt"] and core.transport.kind == "mqtt"
     assert "api-secret" not in r.text and r.json()["settings"]["mqtt"]["password_set"]
     r = client.post("/settings", json={"mqtt": {"port": 8884}})
-    assert r.status_code == 200 and app.settings.mqtt.password == "api-secret"  # partial update kept it
-    assert app.settings.mqtt.host == "broker.example.com"
+    assert r.status_code == 200 and config.settings.mqtt.password == "api-secret"  # partial update kept it
+    assert config.settings.mqtt.host == "broker.example.com"
     log = json.dumps(client.get("/activity").json())
     assert "api-secret" not in log and "mqtt.password=***" in log
     assert client.post("/settings", json={"mqtt": {"base_topic": "a/#"}}).status_code == 422
@@ -538,7 +538,7 @@ def test_settings_api_merges_mqtt_and_masks_password(client, app, monkeypatch):
 
 def test_seek_needs_relay_protocol_2(relay_app, client, relay, mqtt_transport):
     t = mqtt_transport
-    asyncio.run(relay_app.run_cast(relay_app.cast_play, relay_app.media_url("/yt/abc.m4a"), "audio/mp4", "Song"))
+    asyncio.run(speaker.run_cast(speaker.cast_play, access.media_url("/yt/abc.m4a"), "audio/mp4", "Song"))
     relay.speaker["media"]["duration"] = 200
     t.fake.deliver("status", {"proto": 1, "speaker": relay.speaker})
     assert client.get("/status").json()["media"]["seekable"] is False

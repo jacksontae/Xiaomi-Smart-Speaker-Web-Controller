@@ -7,8 +7,7 @@ from conftest import make_user, session_client
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
-import google_signin
-import store
+from server import config, core, google_signin, store
 
 CLIENT_ID = "1234-test.apps.googleusercontent.com"
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -41,15 +40,15 @@ def keys(app, monkeypatch):
         return state.set
 
     monkeypatch.setattr(verifier.jwks, "fetch_data", fetch)
-    monkeypatch.setattr(app, "google_verifier", verifier)
+    monkeypatch.setattr(core, "google_verifier", verifier)
     state.verifier = verifier
     return state
 
 
 @pytest.fixture
 def google_on(app, keys):
-    app.settings.google_client_id = CLIENT_ID
-    app.settings.google_signin = True
+    config.settings.google_client_id = CLIENT_ID
+    config.settings.google_signin = True
     return keys
 
 
@@ -130,7 +129,7 @@ def test_state_offers_google_only_when_switched_on(anon, app, client):
     assert client.post("/settings", json={"google_signin": True}).status_code == 200
     state = anon.get("/auth/state").json()
     assert state["methods"]["google"] is True and state["google_client_id"] == CLIENT_ID
-    assert app.load_settings().google_signin is True  # persisted to config.json
+    assert config.load_settings().google_signin is True  # persisted to config.json
 
 
 def test_switch_is_owner_only(as_role):
@@ -153,8 +152,8 @@ def test_link_then_sign_in(app, google_on):
     assert r.json()["user"]["id"] == alice["id"] and r.json()["user"]["last_login_at"]
     assert browser.get("/auth/state").json()["user"]["username"] == "alice"
     assert browser.get("/queue").status_code == 200  # a real session
-    assert app.db.get_user(alice["id"])["google_email"] == "alice.new@example.com"
-    actions = [(a["actor"], a["action"], a["detail"]) for a in app.db.activity()]
+    assert core.db.get_user(alice["id"])["google_email"] == "alice.new@example.com"
+    actions = [(a["actor"], a["action"], a["detail"]) for a in core.db.activity()]
     assert ("Alice", "google link", "alice@example.com") in actions
     assert any(a[:2] == ("Alice", "login ok") and a[2].startswith("with Google") for a in actions)
 
@@ -163,13 +162,13 @@ def test_unlinked_google_account_cannot_sign_in(app, google_on):
     make_user("alice")
     r = web(app).post("/auth/google", json={"credential": token()})
     assert r.status_code == 401 and "isn't linked" in r.json()["detail"]
-    assert app.db.user_count() == 1  # no self-sign-up
-    assert app.db.activity()[0]["action"] == "login failed"
+    assert core.db.user_count() == 1  # no self-sign-up
+    assert core.db.activity()[0]["action"] == "login failed"
 
 
 def test_bad_token_cannot_sign_in(app, google_on):
     alice = make_user("alice")
-    app.db.link_google(alice["id"], "1000001", "alice@example.com")
+    core.db.link_google(alice["id"], "1000001", "alice@example.com")
     for credential in (token(aud="other.apps.googleusercontent.com"), token(key=OTHER_KEY)):
         r = web(app).post("/auth/google", json={"credential": credential})
         assert r.status_code == 401
@@ -186,7 +185,7 @@ def test_failed_google_attempts_are_throttled(app, google_on):
 
 def test_disabled_member_cannot_sign_in_with_google(app, google_on):
     bob = make_user("bob", "viewer", disabled=True)
-    app.db.link_google(bob["id"], "1000001", "alice@example.com")
+    core.db.link_google(bob["id"], "1000001", "alice@example.com")
     r = web(app).post("/auth/google", json={"credential": token()})
     assert r.status_code == 401 and "disabled" in r.json()["detail"]
 
@@ -196,12 +195,12 @@ def test_google_account_links_to_one_member(app, google_on):
     assert session_client(alice).post("/me/google", json={"credential": token()}).status_code == 200
     r = session_client(bob).post("/me/google", json={"credential": token()})
     assert r.status_code == 409
-    assert app.db.get_user(bob["id"])["google_email"] is None
+    assert core.db.get_user(bob["id"])["google_email"] is None
 
 
 def test_switched_off_refuses_sign_in_and_linking(app, keys):
     alice = make_user("alice")
-    app.db.link_google(alice["id"], "1000001", "alice@example.com")
+    core.db.link_google(alice["id"], "1000001", "alice@example.com")
     assert web(app).post("/auth/google", json={"credential": token()}).status_code == 409
     assert session_client(alice).post("/me/google", json={"credential": token()}).status_code == 409
     assert keys.fetches == 0
@@ -230,29 +229,29 @@ def test_unlink(app, google_on):
     r = c.delete("/me/google")
     assert r.status_code == 200 and r.json()["google_email"] is None
     assert web(app).post("/auth/google", json={"credential": token()}).status_code == 401
-    assert app.db.activity()[1]["action"] == "google unlink"
+    assert core.db.activity()[1]["action"] == "google unlink"
 
 
 def test_cannot_unlink_the_only_sign_in_method(app, google_on):
     alice = make_user("alice")
-    app.db.link_google(alice["id"], "1000001", "alice@example.com")
-    with app.db.tx() as db:  # a member with no password (Google only)
+    core.db.link_google(alice["id"], "1000001", "alice@example.com")
+    with core.db.tx() as db:  # a member with no password (Google only)
         db.execute("UPDATE users SET password_hash = '' WHERE id = ?", (alice["id"],))
     r = session_client(alice).delete("/me/google")
     assert r.status_code == 409 and "only way" in r.json()["detail"]
-    assert app.db.get_user(alice["id"])["google_email"] == "alice@example.com"
+    assert core.db.get_user(alice["id"])["google_email"] == "alice@example.com"
 
 
 def test_unlink_is_allowed_while_google_is_switched_off(app, google_on):
     alice = make_user("alice")
-    app.db.link_google(alice["id"], "1000001", "alice@example.com")
-    app.settings.google_signin = False
+    core.db.link_google(alice["id"], "1000001", "alice@example.com")
+    config.settings.google_signin = False
     assert session_client(alice).delete("/me/google").status_code == 200
 
 
 def test_owner_unlinks_a_members_google(app, google_on, client):
     owner, alice, bob = make_user("olivia"), make_user("alice", "operator"), make_user("bob", "viewer")
-    app.db.link_google(alice["id"], "1000001", "alice@example.com")
+    core.db.link_google(alice["id"], "1000001", "alice@example.com")
     a, boss = session_client(alice), session_client(owner)
     assert session_client(bob).delete(f"/users/{alice['id']}/google").status_code == 403
     assert boss.delete(f"/users/{bob['id']}/google").status_code == 404  # nothing linked
@@ -261,31 +260,31 @@ def test_owner_unlinks_a_members_google(app, google_on, client):
     assert r.status_code == 200 and r.json()["google_email"] is None
     assert a.get("/auth/state").json()["user"] is None  # signed out of every device
     assert web(app).post("/auth/google", json={"credential": token()}).status_code == 401
-    e = next(e for e in app.db.activity() if e["action"] == "member update")
+    e = next(e for e in core.db.activity() if e["action"] == "member update")
     assert (e["actor"], e["detail"]) == ("Olivia", "alice: unlinked Google alice@example.com")
-    app.db.link_google(alice["id"], "1000001", "alice@example.com")
+    core.db.link_google(alice["id"], "1000001", "alice@example.com")
     assert client.delete(f"/users/{alice['id']}/google").status_code == 200  # the API token too
 
 
 def test_owner_cannot_unlink_a_members_only_way_in_or_their_own(app, google_on):
     owner, alice = make_user("olivia"), make_user("alice", "operator")
-    app.db.link_google(alice["id"], "1000001", "alice@example.com")
-    app.db.link_google(owner["id"], "1000002", "olivia@example.com")
-    with app.db.tx() as db:  # a Google-only member
+    core.db.link_google(alice["id"], "1000001", "alice@example.com")
+    core.db.link_google(owner["id"], "1000002", "olivia@example.com")
+    with core.db.tx() as db:  # a Google-only member
         db.execute("UPDATE users SET password_hash = '' WHERE id = ?", (alice["id"],))
     boss = session_client(owner)
     r = boss.delete(f"/users/{alice['id']}/google")
     assert r.status_code == 409 and "set a new password" in r.json()["detail"]
     r = boss.delete(f"/users/{owner['id']}/google")
     assert r.status_code == 409 and "Account" in r.json()["detail"]
-    assert app.db.get_user(owner["id"])["google_email"] == "olivia@example.com"
+    assert core.db.get_user(owner["id"])["google_email"] == "olivia@example.com"
 
 
 # --- Storage ---
 
 def test_member_list_shows_linked_email(client, app):
     alice = make_user("alice")
-    app.db.link_google(alice["id"], "1000001", "alice@example.com")
+    core.db.link_google(alice["id"], "1000001", "alice@example.com")
     assert [u["google_email"] for u in client.get("/users").json()] == ["alice@example.com"]
 
 

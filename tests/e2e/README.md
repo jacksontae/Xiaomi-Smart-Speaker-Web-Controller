@@ -8,7 +8,7 @@ is installed.
 
 ## What it does
 
-- Starts its own server (`app.py`) on `E2E_PORT` (default 8130) in a throwaway folder: its own config, database,
+- Starts its own server (`python -m server`) on `E2E_PORT` (default 8130) in a throwaway folder: its own config, database,
   cache and media. The speaker address is `192.0.2.10` (TEST-NET), so nothing ever plays on a real device. Every
   "play" ends in the app's "can't reach the speaker" path. The suite refuses to start if the port is busy.
 - Seeds the accounts through the API with a placeholder token written only into that throwaway config.
@@ -67,7 +67,7 @@ Environment variables:
 | `E2E` | unset | `1` turns the suite on |
 | `E2E_PORT` | `8130` | port for the test server (never the live service's port) |
 | `E2E_DIR` | a new temp folder | server data + `artifacts/` screenshots + `server.log`. It is wiped at the start of a run unless `E2E_KEEP_DATA=1` |
-| `E2E_SERVER_PYTHON` | the test python | interpreter that runs `app.py` |
+| `E2E_SERVER_PYTHON` | the test python | interpreter that runs `python -m server` |
 
 The whole run takes about 10–15 minutes. Most of that time is the offline speaker's 10-second timeouts. Run one
 file or one test with `pytest tests/e2e/test_08_playlists.py -k desktop ...`. Test 01 checks first-time setup

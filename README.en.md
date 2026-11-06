@@ -10,68 +10,118 @@ text-to-speech announcements, YouTube audio, internet radio, podcasts, uploaded 
 talk from a browser microphone. The service talks to the speaker over the local network with the Cast protocol, and
 the speaker fetches all audio from the service.
 
-> **Status:** the Python service runs on macOS (LaunchAgent) and in Docker on a Linux VM. The relay firmware
-> (see [firmware/](firmware/README.md)) is tested on an ESP32 (`esp32dev`); ESP32-S3 and ESP8266 build but are not
-> yet tested on hardware.
+> **Status:** the Python service runs in Docker, both at home next to the speaker (e.g. on a Mac) and on a Linux VM.
+> The relay firmware (see [firmware/](firmware/README.md)) is tested on an ESP32 (`esp32dev`); ESP32-S3 and ESP8266
+> build but are not yet tested on hardware.
 
-## Install (macOS)
+## Install (Docker)
 
-You need Python 3.11+ and Node.js (yt-dlp uses it to solve YouTube's JavaScript challenges), e.g.
-`brew install python node`. Live talk also needs ffmpeg: `brew install ffmpeg` (or point the `FFMPEG` environment
-variable at it). Without ffmpeg everything else still works.
+The service runs in Docker in both setups, from the same image (`Dockerfile`):
+
+| Setup | Compose file | How the speaker is driven |
+|---|---|---|
+| Home / LAN, e.g. a Mac next to the speaker | `compose.yaml` | Cast directly; the speaker fetches audio from this computer |
+| Remote VM | `deploy/vm/compose.yaml` | Through the ESP32 relay over MQTT, with Mosquitto, `cloudflared` and nightly backups |
+
+`scripts/speaker` wraps Docker Compose for both (`--vm` picks the VM stack):
+
+```bash
+scripts/speaker up                # build and start (again after changing .env or pulling)
+scripts/speaker status            # containers and their state
+scripts/speaker logs [n] [service]   # follow the log (last n lines first, default 50)
+scripts/speaker restart [service]
+scripts/speaker down              # stop; the database, settings and backups stay in their volumes
+scripts/speaker update            # back up, git pull, rebuild (newest yt-dlp) and restart
+scripts/speaker backup | backups  # one backup now | list backups
+scripts/speaker config            # edit config.json, then restart
+scripts/speaker token             # print the API token; --rotate issues a new one (the old token and old media links stop working)
+```
+
+The containers restart on their own (`restart: unless-stopped`), including after a reboot once Docker is running.
+The web server's access log is off (its lines would hold client addresses and full query strings), so the log
+has only start-up messages, warnings and errors. Inside the container, `config.json`, `data.db`, uploads
+(`media/`) and the YouTube cache live on the `speaker-data` volume under `/data`.
+
+### Home / LAN (Mac)
+
+You need Docker Desktop (`brew install --cask docker`, then open it once and turn on "Start Docker Desktop when you
+sign in"). ffmpeg and Node.js are in the image.
 
 ```bash
 git clone git@github.com:jacksontae/Xiaomi-Smart-Speaker-Web-Controller.git
 cd Xiaomi-Smart-Speaker-Web-Controller
-./speakerctl install     # creates .venv, installs dependencies, copies config.json, starts at login
+cp .env.example .env      # set PUBLIC_BASE_URL (below) and TZ
+scripts/speaker up
+scripts/speaker token     # for the first admin account
 ```
 
-Then set `speaker_ip` in `config.json`, or press "Find" in the web UI to pick a speaker on the LAN. To run it
-without the LaunchAgent: `./.venv/bin/python app.py`.
+Web UI: `http://<this computer's IP>:8090/` · API docs (OpenAPI): `http://<IP>:8090/docs`. On first open, the
+web UI asks for the API token to create the first admin account (see [API](#api)). Then set `speaker_ip` in
+Settings (or `scripts/speaker config`).
 
-## Run
+**Why `PUBLIC_BASE_URL`:** the speaker plays links that point back at the service. Docker Desktop runs containers
+in a small VM, so inside the container the service only sees its own private address (172.x), which the speaker
+can't reach. `PUBLIC_BASE_URL` in `.env` gives it the address to use instead: this computer's LAN IP and the
+published port, e.g. `http://192.0.2.20:8090`. Give the Mac a fixed address (a DHCP reservation in the router);
+if it changes, update `.env` and run `scripts/speaker up`. Port 8090 is published on every interface, as before;
+the first time, allow Docker in the macOS firewall if it asks.
 
-The service starts every time you log in to the Mac (LaunchAgent `~/Library/LaunchAgents/local.speaker-service.plist`)
-and is restarted if the process dies. Output goes to `service.log` in the repository folder. The web server's
-access log is off (its lines would hold client addresses and full query strings), so `service.log` has only
-start-up messages, warnings and errors.
+What works differently in Docker on a Mac:
+
+- **"Find" (speaker discovery) finds nothing:** it uses mDNS multicast, which doesn't reach the container. Enter
+  the speaker's IP by hand; everything else talks to the speaker by IP, so playback is unaffected.
+- **Browsers may all show up with one address** (Docker Desktop's gateway) in the activity log and the sign-in
+  throttle, because Docker Desktop's port forwarding doesn't pass on the client's own IP.
+- **Schedules** use `TZ` from `.env` (the container doesn't see the Mac's time zone).
+- **Backups:** the `backup` service writes a nightly backup to `./backups` (a plain folder, so Time Machine
+  includes it); see [Backups and restore](#backups-and-restore).
+
+### Remote VM
+
+`deploy/vm/compose.yaml` runs the service with a Mosquitto broker, `cloudflared` and a nightly backup; the speaker
+is driven through an ESP32 relay over MQTT. The steps are in
+[Remote deployment](#remote-deployment-esp32-relay--self-hosted-mqtt--cloudflare-tunnel). Run the helper with
+`--vm` (`scripts/speaker --vm up`), or Compose directly from the checkout:
+`docker compose -f deploy/vm/compose.yaml up -d --build`.
+
+### Moving from the LaunchAgent (`speakerctl`)
+
+Earlier versions ran on the Mac as a LaunchAgent managed by `./speakerctl`, with `config.json`, `data.db` and
+`media/` in the repository folder. Once, after pulling this version:
 
 ```bash
-./speakerctl status      # service state and the speaker's /status
-./speakerctl restart
-./speakerctl stop | start
-./speakerctl logs [n]    # follow the log (last n lines first, default 50)
-./speakerctl config      # edit config.json, then restart
-./speakerctl token       # print the API token; --rotate issues a new one (the old token and old media links stop working)
-./speakerctl uninstall   # remove auto-start
+launchctl bootout gui/$(id -u)/local.speaker-service      # stop the old service (what "speakerctl stop" did)
+rm ~/Library/LaunchAgents/local.speaker-service.plist      # no more auto-start (what "speakerctl uninstall" did)
+cp .env.example .env                                       # set PUBLIC_BASE_URL and TZ
+scripts/speaker import .                                   # copy config.json, data.db and media/ into the volume, then start
 ```
 
-Web UI: `http://<this machine's IP>:8090/` · API docs (OpenAPI): `http://<IP>:8090/docs`
+`import` refuses while the old agent still runs, keeps anything already in the volume as `*.before-import-<time>`,
+and sets `port` in `config.json` to 8090 (the container's port; the one on the Mac is `SPEAKER_PORT` in `.env`).
+The YouTube cache isn't copied; it fills again. Check the web UI, then delete the old files from the repository
+folder (`config.json`, `data.db*`, `media/`, `cache/`, `service.log`, `.venv/`) when you no longer need them.
 
-On first open, the web UI asks for the API token to create the first admin account (see [API](#api)).
-
-## Install (Docker on a VM)
-
-For a service that runs away from the speaker's LAN, use `deploy/remote/` (Docker Compose: the service, a Mosquitto
-broker, `cloudflared` and a nightly backup). The speaker is then driven through an ESP32 relay over MQTT. The steps
-are in [Remote deployment](#remote-deployment-esp32-relay--self-hosted-mqtt--cloudflare-tunnel).
-
-In the container, `config.json`, `data.db`, uploads (`media/`) and the YouTube cache live on the `speaker-data`
-volume under `/data`. The API token is generated on first start; to read it for the first-admin setup:
+The VM stack moved from `deploy/remote/` to `deploy/vm/`. Its Compose project is pinned to the old name
+(`name: remote`), so it keeps the same containers and volumes (`remote_speaker-data`, `remote_speaker-backups`,
+`remote_mosquitto-data`). The git-ignored secrets don't move with `git pull`; move them once, then start as usual:
 
 ```bash
-docker compose -f deploy/remote/docker-compose.yml exec speaker-service \
-  python -c "import json; print(json.load(open('/data/config.json'))['api_token'])"
+mv deploy/remote/.env deploy/vm/.env
+mv deploy/remote/mosquitto/passwd deploy/remote/mosquitto/acl deploy/vm/mosquitto/
+scripts/speaker --vm up        # = docker compose -f deploy/vm/compose.yaml up -d --build
 ```
+
+`scripts/speaker --vm` refuses to run while those files are still only in `deploy/remote/`, and Compose stops with
+an error when `deploy/vm/.env` lacks a required value.
 
 ## Settings
 
-Three ways to change them: the web UI ("Settings"), `POST /settings`, or edit `config.json` and run
-`./speakerctl restart`.
+Three ways to change them: the web UI ("Settings"), `POST /settings`, or `scripts/speaker config` (edits
+`config.json` in the volume, then restarts).
 
 | key | default | meaning |
 |---|---|---|
-| `speaker_ip` | `192.0.2.10` | Speaker IP address or hostname (press "Find" in the web UI to choose from speakers on the LAN) |
+| `speaker_ip` | `192.0.2.10` | Speaker IP address or hostname (press "Find" in the web UI to choose from speakers on the LAN; not in Docker on a Mac, enter it by hand) |
 | `speaker_name` | `Air Purifier speaker` | Display name (1–64 characters) |
 | `port` | `8090` | Service port, 1024–65535 (changing it restarts the service) |
 | `default_volume` | `null` | Volume set before an announcement or playback, 0–1; `null` = leave it |
@@ -82,7 +132,7 @@ Three ways to change them: the web UI ("Settings"), `POST /settings`, or edit `c
 | `talk_max_seconds` | `120` | Longest live talk in seconds (10–600) |
 | `transport` | `cast` | `cast` = talk to the speaker directly on the LAN · `mqtt` = through the ESP32 relay (see Remote deployment) |
 | `mqtt` | see `config.example.json` | Relay broker: `host`, `port`, `tls`, `ca_file`, `username`, `password`, `base_topic`, `client_id`, plus timing (`keepalive`, `offline_after`, `status_refresh`, `command_timeout`, `play_timeout`, `reconnect_min`, `reconnect_max`) |
-| `public_base_url` | `null` | Base of the media links the speaker gets, for when the auto-detected LAN address is wrong or the speaker is remote, e.g. `http://192.0.2.20:8090` or `https://speaker.example.com`. Its host is the passkey RP ID |
+| `public_base_url` | `null` | Base of the media links the speaker gets, for when the auto-detected LAN address is wrong or the speaker is remote, e.g. `http://192.0.2.20:8090` or `https://speaker.example.com` (in Docker on a Mac, always set through `PUBLIC_BASE_URL` in `.env`). Its host is the passkey RP ID |
 | `google_client_id` | `null` | OAuth client ID for "Sign in with Google", e.g. `1234-abc.apps.googleusercontent.com` (not a secret) |
 | `google_signin` | `false` | Owner (admin) switch for Google sign-in; needs `google_client_id` |
 | `passkey_signin` | `true` | Allow passkey sign-in (works only when `public_base_url` is `https://` or `http://localhost`) |
@@ -94,7 +144,7 @@ Three ways to change them: the web UI ("Settings"), `POST /settings`, or edit `c
 the API.
 
 ```bash
-TOKEN=$(./speakerctl token)
+TOKEN=$(scripts/speaker token)
 curl -X POST localhost:8090/settings -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"default_volume":0.4}'
 curl -H "Authorization: Bearer $TOKEN" localhost:8090/speakers    # find Cast speakers on the LAN
 ```
@@ -103,9 +153,9 @@ Environment variables used by the service:
 
 | variable | default | meaning |
 |---|---|---|
-| `CONFIG_PATH` | `./config.json` | Settings file |
-| `DATA_PATH` | `./data.db` | SQLite database |
-| `CACHE_DIR` | `./cache` | YouTube cache |
+| `CONFIG_PATH` | `./config.json` (Docker: `/data/config.json`) | Settings file |
+| `DATA_PATH` | `./data.db` (Docker: `/data/data.db`) | SQLite database |
+| `CACHE_DIR` | `./cache` (Docker: `/data/cache`) | YouTube cache |
 | `MEDIA_DIR` | `media/` next to `data.db` | Uploaded files |
 | `TALKIE_DIR` | `talkie/` next to `data.db` | Talkie clips (kept 24 hours) |
 | `UPLOAD_MAX_MB` · `UPLOAD_QUOTA_MB` | `50` · `2000` | Size limit per upload · for all uploads together |
@@ -114,8 +164,8 @@ Environment variables used by the service:
 | `SPONSORBLOCK_API` | `https://sponsor.ajay.app` | SponsorBlock server |
 | `RADIO_BROWSER_URL` | `https://all.api.radio-browser.info` | Radio directory |
 | `PODCAST_SEARCH_URL` | `https://itunes.apple.com/search` | Podcast search |
-| `TZ` | system zone | Time zone for schedules |
-| `SPEAKER_TRANSPORT`, `PUBLIC_BASE_URL`, `MQTT_*` | – | Override `config.json`; see Remote deployment |
+| `TZ` | system zone (Docker: UTC; set it in `.env`) | Time zone for schedules |
+| `SPEAKER_TRANSPORT`, `PUBLIC_BASE_URL`, `MQTT_*` | – | Override `config.json`; see Remote deployment. In Docker on a Mac, `PUBLIC_BASE_URL` is the LAN address the speaker fetches audio from |
 
 ## API
 
@@ -125,8 +175,8 @@ always `{"detail": "..."}`.
 - **API token:** send `Authorization: Bearer <token>`. It has the `admin` role. Use it for curl, integrations and
   scripts.
   - The token is generated on first start and stored in `config.json` (file mode 600). Print it with
-    `./speakerctl token`.
-  - `GET /settings` doesn't return it and the API can't change it; use `./speakerctl token --rotate`.
+    `scripts/speaker token` (on the VM `scripts/speaker --vm token`).
+  - `GET /settings` doesn't return it and the API can't change it; use `scripts/speaker token --rotate`.
 - **User accounts (web UI):** signing in sets the `sid` cookie (`HttpOnly`, `SameSite=Strict`, valid 30 days from
   last use; `Secure` over https, see `cookie_secure`). Expired sessions are deleted at start-up and hourly.
   - Requests that change data (POST/PUT/PATCH/DELETE) with the cookie must send `X-Requested-With: speaker-web`,
@@ -260,7 +310,7 @@ A new admin without a passkey can still sign in with a password, but `/auth/stat
 - The queue lives in memory: a restart loses it, and editing a playlist doesn't change a queue that is playing.
 
 ```bash
-TOKEN=$(./speakerctl token)
+TOKEN=$(scripts/speaker token)
 curl -X POST localhost:8090/say -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"text":"Air quality is poor, please close the windows","lang":"en"}'
 curl -X POST localhost:8090/youtube -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"query":"piano instrumental"}'
 curl -X POST localhost:8090/playlists/1/play -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"shuffle":true,"repeat":"all"}'
@@ -379,8 +429,6 @@ them to MP3 with ffmpeg and has the speaker play the link `/talk/<id>/live` as a
 | ← | `{"type": "ended", "reason", "seconds", "detail"?}` | Finished, closed with code 1000. `reason`: `stopped`, `disconnected`, `max_length`, `idle` (no audio for 10 seconds), `interrupted` (something else was played), `too_large`, `speaker_error`, `transcoder_error` |
 | ← | `{"type": "error", "code", "detail"}` | Not started, closed with `4400` bad_request · `4401` unauthorized · `4403` forbidden · `4409` busy · `4503` unavailable (no ffmpeg) |
 
-To test by hand: `python tests/manual/talk_stream.py --url ws://127.0.0.1:8090/talk --token $TOKEN --file clip.webm`
-
 ### Talkie
 
 A walkie-talkie between the members of this server. While "This device" is the music output, the Announce page is
@@ -434,23 +482,28 @@ the VM's own ports; the relay reaches the broker over `wss://` through the tunne
       +--Cast--> [speaker] --HTTPS (signed media URLs)--> [tunnel] --> [speaker-service]
 ```
 
-1. **Broker logins.** `cp deploy/remote/mosquitto/acl.example deploy/remote/mosquitto/acl`, then
-   `sh deploy/remote/mosquitto/add-user.sh speaker-service` and `sh deploy/remote/mosquitto/add-user.sh relay-1`
+1. **Broker logins.** `cp deploy/vm/mosquitto/acl.example deploy/vm/mosquitto/acl`, then
+   `sh deploy/vm/mosquitto/add-user.sh speaker-service` and `sh deploy/vm/mosquitto/add-user.sh relay-1`
    (one login per relay; the ACL limits each relay to its own base topic). Anonymous clients are refused.
 2. **Tunnel.** Create a Cloudflare Tunnel with two public hostnames:
    `speaker.example.com` → `http://speaker-service:8090` (web UI and the signed media paths) and
    `mqtt.example.com` → `http://mosquitto:9001` (Cloudflare carries WebSockets; it terminates TLS).
    These names only resolve inside the compose network, so run `cloudflared` from the compose file; a `cloudflared`
    installed on the host answers 502.
-3. **Service.** `cp deploy/remote/.env.example deploy/remote/.env` (then `chmod 600`), fill it in
+3. **Service.** `cp deploy/vm/.env.example deploy/vm/.env` (then `chmod 600`), fill it in
    (`PUBLIC_BASE_URL` = `https://speaker.example.com`, `MQTT_PASSWORD` = the `speaker-service` password,
-   `CLOUDFLARE_TUNNEL_TOKEN`), then `docker compose -f deploy/remote/docker-compose.yml up -d --build`.
+   `CLOUDFLARE_TUNNEL_TOKEN`), then `scripts/speaker --vm up` (= `docker compose -f deploy/vm/compose.yaml up -d
+   --build`). For the first admin, print the API token with `scripts/speaker --vm token`.
 4. **Relay.** Flash `firmware/` to an ESP32 next to the speaker (see below) and set the broker to
    `wss://mqtt.example.com` with the `relay-1` login. The firmware trusts the public root CAs Cloudflare uses; no CA
    upload is needed. ESP8266 can't do MQTT over WebSocket.
 
 The service's port is bound to the VM's loopback (`127.0.0.1:8090`) only. To reach the web UI other than through
 the tunnel, use an SSH tunnel (`ssh -L 8090:127.0.0.1:8090 <vm>`).
+
+The Compose project name is pinned (`name: remote`, from when the stack lived in `deploy/remote/`), so the volumes
+are `remote_speaker-data`, `remote_speaker-backups` and `remote_mosquitto-data`. Don't change it: a new name would
+start the service on new, empty volumes.
 
 The compose network has a fixed subnet (`172.30.77.0/24`) and `cloudflared` a fixed address in it; the service
 trusts `X-Forwarded-For` from that address only (`FORWARDED_ALLOW_IPS`), so the activity log and the sign-in throttle
@@ -482,13 +535,13 @@ How it behaves:
 
 ### Backups and restore
 
-The `backup` service in the same compose file saves the database and settings every night at
+The `backup` service (in both compose files) saves the database and settings every night at
 `BACKUP_TIME` (default `03:30`, UTC) and keeps the newest `BACKUP_KEEP` (default 14). It also takes one at
 start-up when the newest is more than a day old (a VM that was off at night). Each backup is one file,
 `speaker-YYYYMMDD-HHMMSS.tar.gz`, with `data.db` and `config.json`. The database is copied with SQLite's
 online backup API while the service runs (it includes changes still in the WAL file; a plain file copy
-can miss them or come out torn), and the copy must pass `PRAGMA integrity_check`. Backups live in the
-`speaker-backups` volume, owner-only (files `0600`, folder `0700`): they hold password hashes, sessions
+can miss them or come out torn), and the copy must pass `PRAGMA integrity_check`. On the VM backups live in the
+`speaker-backups` volume (at home: the `backups/` folder in the repository), owner-only (files `0600`, folder `0700`): they hold password hashes, sessions
 and the API token. The YouTube cache isn't backed up; it fills again by itself.
 
 Why a compose service rather than a host cron job or systemd timer: it ships with the deployment, needs
@@ -497,10 +550,17 @@ database and its WAL without root), and uses Python's `sqlite3` backup API from 
 sleeps between runs.
 
 ```bash
-C="docker compose -f deploy/remote/docker-compose.yml"
+scripts/speaker --vm backups     # list (without --vm: the home setup)
+scripts/speaker --vm backup      # one now, e.g. before an upgrade (update does this too)
+```
+
+The same with Compose directly, plus copying off and restoring (at home use `C="docker compose"`):
+
+```bash
+C="docker compose -f deploy/vm/compose.yaml"
 $C logs backup                                      # "[backup] wrote speaker-....tar.gz" each night
-$C exec backup python backup.py --list
-$C exec backup python backup.py --now               # e.g. before an upgrade (counts toward BACKUP_KEEP)
+$C exec backup python -m server.backup --list
+$C exec backup python -m server.backup --now               # e.g. before an upgrade (counts toward BACKUP_KEEP)
 
 # Copy them off the VM as well (a backup on the same disk doesn't survive losing the VM)
 $C cp backup:/backups ./speaker-backups && chmod -R go-rwx ./speaker-backups
@@ -510,8 +570,8 @@ $C cp backup:/backups ./speaker-backups && chmod -R go-rwx ./speaker-backups
 
 ```bash
 $C stop speaker-service backup
-$C run --rm --no-deps backup python backup.py --list
-$C run --rm --no-deps backup python backup.py --restore speaker-20261030-033000.tar.gz
+$C run --rm --no-deps backup python -m server.backup --list
+$C run --rm --no-deps backup python -m server.backup --restore speaker-20261030-033000.tar.gz
 $C up -d speaker-service backup
 ```
 
@@ -526,7 +586,7 @@ $C run --rm --no-deps -T backup sh -c 'umask 077; cat > /backups/speaker-2026103
   < speaker-20261030-033000.tar.gz
 ```
 
-`deploy/remote/.env` and the broker's `mosquitto/passwd` and `acl` are files on the VM, not in a volume;
+`deploy/vm/.env` and the broker's `mosquitto/passwd` and `acl` are files on the VM, not in a volume;
 keep your own copy of them (they hold secrets, so not in git).
 
 ## ESP32 relay firmware
@@ -573,38 +633,45 @@ the Cast speaker. The board never handles audio; it tells the speaker which URL 
   there is nothing to cut, a hard link with the new name is made so it isn't asked again. A failure is retried on
   the next play. The old file isn't deleted right away (the speaker may still be playing it) but ages out with
   `cache_keep`. The API can be changed with `SPONSORBLOCK_API`.
-- yt-dlp needs Node.js for YouTube's JavaScript challenges. If playback stops working one day, update it:
-  `./.venv/bin/pip install -U "yt-dlp[default]"`
+- yt-dlp needs Node.js for YouTube's JavaScript challenges (both are in the image). If playback stops working one
+  day, `scripts/speaker update`: it rebuilds the image without cache, which installs the newest yt-dlp.
 - TTS uses an undocumented Google Translate endpoint, which may change or be rate-limited.
 
 ## Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| `503` from speaker endpoints | Speaker is off, on another network, or its IP changed. Use "Find" in Settings or `GET /speakers`. With `transport: mqtt`, check the relay (`relay` in `/status` as admin) |
-| Speaker gets the command but plays nothing | The speaker can't fetch the media link. Set `public_base_url` to an address the speaker can reach |
-| YouTube fails | Update yt-dlp (`./.venv/bin/pip install -U "yt-dlp[default]"`) and check Node.js is installed |
+| `503` from speaker endpoints | Speaker is off, on another network, or its IP changed. Set `speaker_ip` in Settings ("Find" and `GET /speakers` don't work in Docker on a Mac). With `transport: mqtt`, check the relay (`relay` in `/status` as admin) |
+| Speaker gets the command but plays nothing | The speaker can't fetch the media link. Set `PUBLIC_BASE_URL` (in `.env`) to an address the speaker can reach, e.g. the Mac's current LAN IP |
+| YouTube fails | Rebuild the image for a newer yt-dlp: `scripts/speaker update` |
 | Live talk unavailable (`4503`) | Install ffmpeg or set `FFMPEG` |
 | Passkeys missing from the sign-in page | `public_base_url` must be `https://` (or `http://localhost`) and the page must be opened through it |
 | `403 Missing header X-Requested-With` | Cookie requests that change data must send `X-Requested-With: speaker-web` |
-| Lost access to every account | The API token always has admin rights: `./speakerctl token` |
+| Lost access to every account | The API token always has admin rights: `scripts/speaker token` |
 | Tunnel answers 502 (VM) | `cloudflared` must run from the compose file, not on the host |
-| Logs | macOS: `./speakerctl logs` · Docker: `docker compose -f deploy/remote/docker-compose.yml logs speaker-service` |
+| Logs | `scripts/speaker logs` · VM: `scripts/speaker --vm logs` (or `docker compose -f deploy/vm/compose.yaml logs speaker-service`) |
 
 ## Project layout
 
 ```
-app.py                 FastAPI service: TTS, YouTube cache, queue, schedules, settings, the whole API
-talk.py                Live talk: ffmpeg converts the microphone to an MP3 stream; chime sounds
-transport.py           How the speaker is driven: Cast directly (pychromecast) or the ESP32 relay over MQTT
-auth.py                Passwords (scrypt), session tokens, failed sign-in throttling
-google_signin.py       Checks "Sign in with Google" ID tokens (signature, aud, iss, exp)
-passkeys.py            Passkeys (WebAuthn): RP from public_base_url, single-use challenges, response checks
-store.py               SQLite: users, sessions, playlists, quick phrases, schedules, radio favourites, uploads, activity log
-player.py              Queue (play order, shuffle, repeat)
+server/                The Python service (FastAPI); start with `python -m server`
+  app.py               Entry point: builds the app, includes the routers, serves static/
+  config.py            Settings (config.json + environment), paths and limits
+  core.py              Shared objects: the speaker transport, database, sign-in throttle
+  access.py            Who is calling (roles), signed media links, the routers
+  routes/              The HTTP and WebSocket endpoints, one file per area
+  media.py, playback.py, speaker.py   YouTube cache and SponsorBlock, queue and announcements, speaker reachability
+  accounts.py, sources.py, schedules.py, livetalk.py, talkie.py, webui.py   the logic behind each area
+  store.py             SQLite: users, sessions, playlists, schedules, uploads, activity log
+  transport.py         Drives the speaker: Cast directly (pychromecast) or the ESP32 relay over MQTT
+  auth.py, passkeys.py, google_signin.py   passwords and sessions, passkeys, Google sign-in
+  talk.py, player.py, backup.py, version.py   live-talk transcoding, play order, nightly backups, the version
 static/                Web UI
-speakerctl             Manages the macOS LaunchAgent
-deploy/                LaunchAgent template · deploy/remote/ = Docker Compose for a VM (service + Mosquitto + cloudflared + nightly backup)
+Dockerfile             The one image for both setups (.dockerignore keeps it to server/, static/ and requirements)
+compose.yaml           Docker Compose for home / LAN (e.g. a Mac next to the speaker); settings in .env (.env.example)
+deploy/vm/             Docker Compose for a VM (service + Mosquitto + cloudflared + nightly backup), mosquitto/ config
+scripts/speaker        Manages either setup: up, down, restart, logs, update, backup, token, config
+scripts/gen_licenses.py  Regenerates the Licenses page
 tests/                 pytest with a fake speaker (no real speaker needed)
 firmware/              ESP32 / ESP8266 firmware (PlatformIO), the LAN-side relay to the speaker
 config.example.json    Example settings (copied to config.json)

@@ -3,6 +3,9 @@ import pytest
 from conftest import session_client
 from fastapi.routing import APIRoute
 
+from server import access, config, media
+from server import sources as sources_module
+
 # (method, path) -> minimum role; None = public. Adding a route without listing it here fails the suite.
 # Viewers may also edit their own personal playlists and files (checked per row, 403/404 in the handler), skip
 # through the speaker's queue, search music sources for This device, and follow podcasts (personal to each member).
@@ -133,8 +136,8 @@ def _route_role(route, router_deps=()):
 def test_role_table_covers_every_route(app):
     actual = {}
     sources = [(r, ()) for r in app.app.routes if isinstance(r, APIRoute)]
-    for router in (app.viewer_api, app.operator_api, app.admin_api):
-        sources += [(r, router.dependencies) for r in router.routes]
+    for router in (access.public_api, access.viewer_api, access.operator_api, access.admin_api):
+        sources += [(r, router.dependencies) for r in router.routes if isinstance(r, APIRoute)]
     for route, deps in sources:
         for method in route.methods - {"HEAD"}:
             actual[(method, route.path)] = _route_role(route, deps)
@@ -168,13 +171,13 @@ def _call(client, method, path):
 def test_role_enforced(method, path, role, anon, as_role, app, fake_speaker, monkeypatch):
     import pychromecast.discovery
 
-    monkeypatch.setattr(app, "yt_search", lambda q, limit: [])
+    monkeypatch.setattr(media, "yt_search", lambda q, limit: [])
 
     async def no_stations(*args):
         return []
 
-    monkeypatch.setattr(app, "radio_search", no_stations)
-    monkeypatch.setattr(app, "get_json", lambda *a: no_stations())
+    monkeypatch.setattr(sources_module, "radio_search", no_stations)
+    monkeypatch.setattr(sources_module, "get_json", lambda *a: no_stations())
     monkeypatch.setattr(pychromecast.discovery, "discover_chromecasts", lambda timeout: ([], _Browser()))
 
     r = _call(anon, method, path)
@@ -212,7 +215,7 @@ def test_static_files_are_public(anon, app):
 
 def test_root_files_served_from_static(anon, app, monkeypatch, tmp_path):
     (tmp_path / "manifest.webmanifest").write_text("{}")
-    monkeypatch.setattr(app, "STATIC_DIR", tmp_path)
+    monkeypatch.setattr(config, "STATIC_DIR", tmp_path)
     r = anon.get("/manifest.webmanifest")
     assert r.status_code == 200 and r.headers["content-type"].startswith("application/manifest+json")
     assert anon.get("/apple-touch-icon.png").status_code == 404

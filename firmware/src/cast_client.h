@@ -1,5 +1,5 @@
 // Minimal Cast v2 sender: keeps one TLS connection to the speaker, launches the
-// Default Media Receiver and loads URLs into it. Same flow as pychromecast in app.py.
+// Default Media Receiver and loads URLs into it. Same flow as pychromecast in server/transport.py.
 #pragma once
 
 #include <Arduino.h>

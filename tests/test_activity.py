@@ -1,7 +1,7 @@
 import pytest
 from conftest import PASSWORD, make_user, session_client
 
-import store
+from server import core, store
 
 
 def actions(client):
@@ -61,9 +61,9 @@ def test_records_login_logout_and_password(app):
     c.post("/auth/login", json={"username": "bob", "password": PASSWORD})
     c.post("/auth/password", json={"current": PASSWORD, "new": "new password 1"})
     c.post("/auth/logout")
-    log = [(e["actor"], e["action"]) for e in app.db.activity()]
+    log = [(e["actor"], e["action"]) for e in core.db.activity()]
     assert log == [("Bob", "logout"), ("Bob", "password change"), ("Bob", "login ok"), ("system", "login failed")]
-    assert "bob" in app.db.activity()[-1]["detail"]
+    assert "bob" in core.db.activity()[-1]["detail"]
 
 
 def test_unknown_username_failures_are_coalesced(app):
@@ -72,7 +72,7 @@ def test_unknown_username_failures_are_coalesced(app):
     c = TestClient(app.app)
     for name in ("ghost1", "ghost2", "ghost3"):
         c.post("/auth/login", json={"username": name, "password": "whatever-1"})
-    rows = app.db.activity()
+    rows = core.db.activity()
     assert len(rows) == 1 and rows[0]["detail"].startswith("ghost3")
 
 
@@ -90,9 +90,9 @@ def test_records_member_changes(client):
 
 
 def test_records_playlist_play_and_queue_skip(client, app, fake_speaker):
-    pl = app.db.create_playlist("Party")
+    pl = core.db.create_playlist("Party")
     for text in ("one", "two"):
-        app.db.add_item(pl["id"], {"kind": "tts", "source": text, "title": text, "lang": "en"}, 10)
+        core.db.add_item(pl["id"], {"kind": "tts", "source": text, "title": text, "lang": "en"}, 10)
     client.post(f"/playlists/{pl['id']}/play", json={})
     client.post("/queue/next")
     log = actions(client)
@@ -101,7 +101,7 @@ def test_records_playlist_play_and_queue_skip(client, app, fake_speaker):
 
 
 def test_volume_coalesced_per_actor_within_10s(client, app, monkeypatch):
-    import store
+    from server import store
 
     now = [5_000.0]
     monkeypatch.setattr(store.time, "time", lambda: now[0])
@@ -120,7 +120,7 @@ def test_volume_coalesced_per_actor_within_10s(client, app, monkeypatch):
 
 def test_activity_paging(client, app):
     for i in range(7):
-        app.db.log("system", "test", str(i))
+        core.db.log("system", "test", str(i))
     page = client.get("/activity", params={"limit": 3}).json()
     assert [e["detail"] for e in page] == ["6", "5", "4"]
     assert set(page[0]) == {"id", "at", "actor", "action", "detail"}
@@ -130,12 +130,12 @@ def test_activity_paging(client, app):
 
 
 def test_activity_capped(app, monkeypatch):
-    import store
+    from server import store
 
     monkeypatch.setattr(store, "ACTIVITY_KEEP", 5)
     for i in range(12):
-        app.db.log("system", "test", str(i))
-    rows = app.db.activity(limit=100)
+        core.db.log("system", "test", str(i))
+    rows = core.db.activity(limit=100)
     assert [r["detail"] for r in rows] == ["11", "10", "9", "8", "7"]
 
 
@@ -145,8 +145,8 @@ def test_activity_is_admin_only(as_role, role):
 
 
 def test_schema_version_and_tables(app):
-    assert app.db.schema_version() == store.SCHEMA_VERSION
-    with app.db.tx() as db:
+    assert core.db.schema_version() == store.SCHEMA_VERSION
+    with core.db.tx() as db:
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"users", "sessions", "playlists", "playlist_items", "phrases", "activity", "schedules",
             "radio_favorites", "media_files"} <= tables
@@ -165,7 +165,7 @@ def details(db):
 
 
 def test_activity_older_than_90_days_pruned_hourly_on_write(app, monkeypatch):
-    db = app.db
+    db = core.db
     _old_row(db, 91, "old")
     _old_row(db, 89, "recent")
     db.log("system", "test", "new")
@@ -179,8 +179,8 @@ def test_activity_older_than_90_days_pruned_hourly_on_write(app, monkeypatch):
 def test_activity_age_limit_keeps_count_cap(app, monkeypatch):
     monkeypatch.setattr(store, "ACTIVITY_KEEP", 3)
     for i in range(5):
-        app.db.log("system", "test", str(i))
-    assert details(app.db) == ["4", "3", "2"]
+        core.db.log("system", "test", str(i))
+    assert details(core.db) == ["4", "3", "2"]
 
 
 def test_startup_prunes_old_activity_and_expired_sessions(app, tmp_path):
@@ -188,7 +188,7 @@ def test_startup_prunes_old_activity_and_expired_sessions(app, tmp_path):
 
     from conftest import make_user
 
-    db = app.db
+    db = core.db
     user = make_user("bob", "viewer")
     _old_row(db, 120, "old")
     db.log("system", "test", "new")
@@ -208,12 +208,12 @@ def test_prune_removes_expired_sessions_without_sign_in(app):
     from conftest import make_user
 
     user = make_user("bob", "viewer")
-    app.db.create_session("expired", user["id"])
-    with app.db.tx() as tx:
+    core.db.create_session("expired", user["id"])
+    with core.db.tx() as tx:
         tx.execute("UPDATE sessions SET expires_at = ? WHERE token_hash = 'expired'", (time.time() - 60,))
-    app.db.prune(force=False)  # throttled: the start-up sweep was just now
-    with app.db.tx() as tx:
+    core.db.prune(force=False)  # throttled: the start-up sweep was just now
+    with core.db.tx() as tx:
         assert tx.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
-    app.db.prune()
-    with app.db.tx() as tx:
+    core.db.prune()
+    with core.db.tx() as tx:
         assert tx.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0

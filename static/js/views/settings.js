@@ -38,7 +38,7 @@ register({
     'set.brokerDown': 'The app can\'t reach the broker',
     'set.media': 'Address the speaker loads audio from', 'set.mediaLan': 'This computer\'s address on the LAN',
     'set.transportHelp': 'Changed in config.json on the computer running the service.',
-    'set.token': 'API token', 'set.tokenHelp': 'For the ESP32 or scripts. View or change it with ./speakerctl token on the computer running the service.',
+    'set.token': 'API token', 'set.tokenHelp': 'For the ESP32 or scripts. View or change it with scripts/speaker token on the computer running the service.',
     'set.port': 'Port', 'set.portHelp': 'The service restarts by itself after a change.',
     'set.badPort': 'The port must be a number from 1024 to 65535.', 'set.badCache': 'Keep at least 1 track.',
     'set.badName': 'Give the speaker a name.', 'set.badIp': 'Enter an IP address like 192.0.2.10 or a hostname like speaker.example.com.',
@@ -80,7 +80,7 @@ register({
     'set.brokerDown': 'แอปติดต่อโบรกเกอร์ไม่ได้',
     'set.media': 'ที่อยู่ที่ลำโพงใช้โหลดเสียง', 'set.mediaLan': 'ที่อยู่ของเครื่องนี้ในวง LAN',
     'set.transportHelp': 'เปลี่ยนได้ใน config.json บนเครื่องที่รัน service',
-    'set.token': 'API token', 'set.tokenHelp': 'สำหรับ ESP32 หรือสคริปต์ ดูหรือเปลี่ยนด้วย ./speakerctl token บนเครื่องที่รัน service',
+    'set.token': 'API token', 'set.tokenHelp': 'สำหรับ ESP32 หรือสคริปต์ ดูหรือเปลี่ยนด้วย scripts/speaker token บนเครื่องที่รัน service',
     'set.port': 'พอร์ต', 'set.portHelp': 'เปลี่ยนแล้ว service จะเริ่มใหม่เอง',
     'set.badPort': 'พอร์ตต้องเป็นตัวเลข 1024 ถึง 65535', 'set.badCache': 'ต้องเก็บอย่างน้อย 1 เพลง',
     'set.badName': 'ตั้งชื่อลำโพงก่อน', 'set.badIp': 'ใส่ IP เช่น 192.0.2.10 หรือชื่อโฮสต์ เช่น speaker.example.com',
@@ -102,7 +102,7 @@ const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]
 const HOST = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
 /** IPv4 or a DNS hostname; an all-digits-and-dots value must be a real IPv4 address. */
 const validAddress = (v) => (/^[\d.]+$/.test(v) ? IPV4.test(v) : HOST.test(v));
-// SponsorBlock categories the server accepts (app.py YT_SEGMENT_CATEGORIES); the first three are the default.
+// SponsorBlock categories the server accepts (server/config.py YT_SEGMENT_CATEGORIES); the first three are the default.
 const SEGMENTS = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'preview', 'filler', 'music_offtopic', 'hook'];
 const SEG_DEFAULT = ['interaction', 'selfpromo', 'sponsor'];
 

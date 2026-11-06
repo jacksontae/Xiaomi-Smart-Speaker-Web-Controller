@@ -4,10 +4,10 @@
 - `MqttRelayTransport`: publishes commands to the ESP32 relay (firmware/) through an MQTT broker and
   rebuilds the speaker state from the relay's results and status messages (server anywhere).
 
-Both expose the same small surface, so app.py (queue, resume-after-announcement, /status) does not
+Both expose the same small surface, so the service (queue, resume-after-announcement, /status) does not
 care which one is in use: play / set_volume / pause / resume / stop, media() and receiver().
-Methods block; app.py calls them from a worker thread under its cast lock. Failures in UNREACHABLE_ERRORS
-make app.py treat the speaker as offline (fail fast, retry in the background) until a call succeeds again.
+Methods block; speaker.py calls them from a worker thread under the cast lock. Failures in UNREACHABLE_ERRORS
+make speaker.py treat the speaker as offline (fail fast, retry in the background) until a call succeeds again.
 """
 import itertools
 import json
@@ -34,7 +34,7 @@ class SpeakerUnreachable(TransportError):
 
 
 SPEAKER_ERRORS = (pychromecast.error.PyChromecastError, OSError, TransportError)
-# Failures that mean "nothing answers", so app.py treats the speaker as offline for a while.
+# Failures that mean "nothing answers", so speaker.py treats the speaker as offline for a while.
 # Other errors (a refused LOAD, an unsupported namespace) come from a live speaker and are passed through.
 UNREACHABLE_ERRORS = (
     OSError, SpeakerUnreachable, pychromecast.error.ChromecastConnectionError, pychromecast.error.NotConnected,
@@ -45,7 +45,7 @@ UNREACHABLE_ERRORS = (
 
 @dataclass
 class MediaState:
-    """What the speaker is playing. Field names follow pychromecast's MediaStatus, which app.py grew up on."""
+    """What the speaker is playing. Field names follow pychromecast's MediaStatus, which the service grew up on."""
     content_id: str | None = None
     content_type: str | None = None
     title: str | None = None

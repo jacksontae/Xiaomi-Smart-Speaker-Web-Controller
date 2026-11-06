@@ -48,7 +48,7 @@ register({
   },
 });
 
-// files next to the static folder's root, under the same versioned path as this module (see app.py StaticBuild)
+// files next to the static folder's root, under the same versioned path as this module (see server/webui.py StaticBuild)
 const staticUrl = (path) => new URL(`../../${path}`, import.meta.url).href;
 const texts = new Map(); // path -> Promise<string>, kept across renders (language changes)
 const loadText = (path) => {

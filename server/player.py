@@ -1,4 +1,4 @@
-"""In-memory play queue: play order with shuffle and repeat. No Cast I/O here; app.py drives it."""
+"""In-memory play queue: play order with shuffle and repeat. No Cast I/O here; playback.py drives it."""
 import random
 
 REPEAT_MODES = ("off", "all", "one")

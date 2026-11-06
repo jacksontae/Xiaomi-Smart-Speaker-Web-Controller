@@ -1,5 +1,7 @@
 from conftest import PASSWORD, make_user, session_client
 
+from server import core
+
 
 def test_create_and_list_members(client):
     body = {"username": "Bob.S", "display_name": "Bob", "password": PASSWORD, "role": "operator"}
@@ -81,7 +83,7 @@ def test_last_enabled_admin_is_protected(client, app):
     assert client.patch(f"/users/{only['id']}", json={"role": "viewer"}).status_code == 409
     assert client.patch(f"/users/{only['id']}", json={"disabled": True}).status_code == 409
     assert client.delete(f"/users/{only['id']}").status_code == 409
-    assert app.db.get_user(only["id"])["role"] == "admin"
+    assert core.db.get_user(only["id"])["role"] == "admin"
 
     second = make_user("bob", "admin", disabled=True)  # a disabled admin doesn't count
     assert client.delete(f"/users/{only['id']}").status_code == 409
@@ -107,12 +109,12 @@ def test_any_member_renames_themselves(app, client):
     c = session_client(vera)
     r = c.patch("/me", json={"display_name": "  Vera V.  ", "role": "admin", "disabled": True})
     assert r.status_code == 200 and r.json()["display_name"] == "Vera V."
-    me = app.db.get_user(vera["id"])
+    me = core.db.get_user(vera["id"])
     assert (me["display_name"], me["role"], me["disabled"]) == ("Vera V.", "viewer", False)  # only the name changes
-    e = app.db.activity()[0]
+    e = core.db.activity()[0]
     assert (e["action"], e["detail"]) == ("member update", "vera: display_name=Vera V.")
     assert c.patch("/me", json={"display_name": "Vera V."}).status_code == 200  # unchanged: no new entry
-    assert app.db.activity()[0]["id"] == e["id"]
+    assert core.db.activity()[0]["id"] == e["id"]
     assert c.patch("/me", json={"display_name": "   "}).status_code == 400
     assert c.patch("/me", json={"display_name": "x" * 65}).status_code == 400
     assert client.patch("/me", json={"display_name": "Token"}).status_code == 400  # the API token has no account
