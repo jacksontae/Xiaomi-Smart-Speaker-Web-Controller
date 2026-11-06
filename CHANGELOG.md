@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-06
+
 ### Changed
 - Docker is now the way to run the service, at home and on the VM, from one image (`Dockerfile` at the root).
   At home (e.g. a Mac next to the speaker) it is `compose.yaml` with settings in `.env`: `PUBLIC_BASE_URL` gives the
