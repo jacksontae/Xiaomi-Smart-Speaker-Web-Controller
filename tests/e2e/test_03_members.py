@@ -112,6 +112,18 @@ def test_members_self_guards(make_app, seeded):
     app.clean("self guards")
 
 
+def test_phone_sheet_dialog_cannot_scroll(make_app, seeded):
+    # iOS Safari scrolls a still-sliding sheet's dialog to reveal the focused field (it ignores preventScroll); the sheet
+    # then sat mid-screen until the animation ended and dropped. overflow: clip makes the dialog unscrollable.
+    app = make_app("owner", device="phone", route="members")
+    app.page.get_by_role("button", name="Add member").first.click()
+    app.sheet()
+    dlg = app.page.locator("dialog.ov[open]")
+    assert dlg.evaluate("d => getComputedStyle(d).overflow") == "clip"
+    assert dlg.evaluate("d => { d.scrollTop = 240; return d.scrollTop; }") == 0
+    app.clean("sheet dialog scroll")
+
+
 def test_members_phone_sheet(make_app, seeded):
     app = make_app("owner", device="phone", route="members")
     p = app.page

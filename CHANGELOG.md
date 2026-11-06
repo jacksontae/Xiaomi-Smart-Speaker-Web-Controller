@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+- iPhone: sheets (speaker picker, display name and others) no longer appear mid-screen and then drop to the bottom
+  while they slide up. Safari scrolled the sheet's dialog to show the focused button or field; the dialog now can't
+  scroll.
+
 ## [0.6.2] - 2026-11-06
 
 ### Added

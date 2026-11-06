@@ -251,7 +251,10 @@ body[data-mood="off"] .ambient::before, body[data-mood="off"] .ambient::after { 
 .help-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 500; text-decoration: none; }
 
 /* ---------- sheets (phone) / dialogs (large) / popovers ---------- */
-dialog.ov { position: fixed; inset: 0; z-index: 80; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: transparent; color: inherit; overflow: hidden; }
+/* overflow: clip, not hidden: a hidden box can still be scrolled by script, and iOS Safari ignores preventScroll when
+   focus lands in a sheet that is still sliding up (below the fold), scrolling the dialog until the animation ends;
+   the sheet then showed mid-screen and dropped to the bottom. */
+dialog.ov { position: fixed; inset: 0; z-index: 80; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: transparent; color: inherit; overflow: clip; }
 dialog.ov::backdrop { background: transparent; }
 .ov-scrim { position: absolute; inset: 0; width: 100%; border: 0; padding: 0; background: var(--scrim); animation: fade-in var(--t-slow) var(--ease) both; }
 .ov.closing .ov-scrim { animation: fade-out var(--t-mid) var(--ease) both; }
