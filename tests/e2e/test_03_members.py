@@ -113,8 +113,8 @@ def test_members_self_guards(make_app, seeded):
 
 
 def test_phone_sheet_dialog_cannot_scroll(make_app, seeded):
-    # iOS Safari scrolls a still-sliding sheet's dialog to reveal the focused field (it ignores preventScroll); the sheet
-    # then sat mid-screen until the animation ended and dropped. overflow: clip makes the dialog unscrollable.
+    # iOS Safari scrolls a still-sliding sheet's dialog to reveal the focused field (it ignores preventScroll); the
+    # sheet then sat mid-screen until the animation ended and dropped. overflow: clip makes the dialog unscrollable.
     app = make_app("owner", device="phone", route="members")
     app.page.get_by_role("button", name="Add member").first.click()
     app.sheet()
