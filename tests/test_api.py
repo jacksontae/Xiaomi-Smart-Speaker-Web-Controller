@@ -5,7 +5,7 @@ import re
 import pytest
 from conftest import BASE, path_of
 
-from transport import DEFAULT_MEDIA_RECEIVER
+from server.transport import DEFAULT_MEDIA_RECEIVER
 
 
 def test_status_reports_speaker(client):

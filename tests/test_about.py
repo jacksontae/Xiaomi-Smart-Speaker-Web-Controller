@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from conftest import make_user, session_client
 
-import version
+from server import version
 
 ROOT = Path(__file__).resolve().parents[1]
 

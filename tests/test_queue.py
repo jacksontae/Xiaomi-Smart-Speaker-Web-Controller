@@ -5,7 +5,7 @@ import pytest
 from conftest import BASE, REAL_SCHEDULE_PREFETCH, path_of
 from fastapi import HTTPException
 
-from player import Queue
+from server.player import Queue
 
 A, B, C = "aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"
 

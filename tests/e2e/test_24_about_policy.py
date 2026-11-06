@@ -7,7 +7,7 @@ from playwright.sync_api import expect
 
 from .e2ekit import ROOT
 
-VERSION = re.search(r'__version__ = "([^"]+)"', (ROOT / "version.py").read_text())[1]
+VERSION = re.search(r'__version__ = "([^"]+)"', (ROOT / "server" / "version.py").read_text())[1]
 CONTACT = "it@example.com"
 
 

@@ -15,10 +15,10 @@ os.environ["CACHE_DIR"] = str(_TMP / "cache")
 os.environ["DATA_PATH"] = str(_TMP / "data.db")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import app as app_module  # noqa: E402
-import transport as transport_module  # noqa: E402
-from auth import Throttle, hash_password, new_session_token, token_hash  # noqa: E402
-from store import Store  # noqa: E402
+from server import app as app_module  # noqa: E402
+from server import transport as transport_module  # noqa: E402
+from server.auth import Throttle, hash_password, new_session_token, token_hash  # noqa: E402
+from server.store import Store  # noqa: E402
 
 BASE = "http://test-host:8090"
 TOKEN = "test-token"

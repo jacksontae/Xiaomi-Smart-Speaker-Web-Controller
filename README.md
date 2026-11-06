@@ -405,8 +405,8 @@ sleeps between runs.
 ```bash
 C="docker compose -f deploy/remote/docker-compose.yml"
 $C logs backup                                      # "[backup] wrote speaker-....tar.gz" each night
-$C exec backup python backup.py --list
-$C exec backup python backup.py --now               # e.g. before an upgrade (counts toward BACKUP_KEEP)
+$C exec backup python -m server.backup --list
+$C exec backup python -m server.backup --now               # e.g. before an upgrade (counts toward BACKUP_KEEP)
 
 # Copy them off the VM as well (a backup on the same disk doesn't survive losing the VM)
 $C cp backup:/backups ./speaker-backups && chmod -R go-rwx ./speaker-backups
@@ -416,8 +416,8 @@ $C cp backup:/backups ./speaker-backups && chmod -R go-rwx ./speaker-backups
 
 ```bash
 $C stop speaker-service backup
-$C run --rm --no-deps backup python backup.py --list
-$C run --rm --no-deps backup python backup.py --restore speaker-20261030-033000.tar.gz
+$C run --rm --no-deps backup python -m server.backup --list
+$C run --rm --no-deps backup python -m server.backup --restore speaker-20261030-033000.tar.gz
 $C up -d speaker-service backup
 ```
 

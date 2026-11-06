@@ -51,7 +51,7 @@ services:
   backup:
     build: *speaker-build
     restart: unless-stopped
-    command: ["python", "backup.py", "--daemon"]
+    command: ["python", "-m", "server.backup", "--daemon"]
     environment:
       BACKUP_TIME: ${BACKUP_TIME:-03:30}         # HH:MM, UTC
       BACKUP_KEEP: ${BACKUP_KEEP:-14}            # newest backups kept

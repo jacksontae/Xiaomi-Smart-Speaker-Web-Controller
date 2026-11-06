@@ -7,7 +7,7 @@ from conftest import make_user, session_client
 from test_queue import downloads  # noqa: F401 - fixture
 from test_sources import MP3, upload
 
-import store
+from server import store
 
 A, B = "aaaaaaaaaaa", "bbbbbbbbbbb"
 EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]

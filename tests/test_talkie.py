@@ -12,7 +12,7 @@ import pytest
 from conftest import make_user, session_client
 from test_talk import WEBM, FakeTranscoder, refused
 
-import store
+from server import store
 
 
 @pytest.fixture

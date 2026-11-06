@@ -7,8 +7,7 @@ from conftest import make_user, session_client
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
-import google_signin
-import store
+from server import google_signin, store
 
 CLIENT_ID = "1234-test.apps.googleusercontent.com"
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)

@@ -51,8 +51,8 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from starlette.background import BackgroundTask
 from yt_dlp.postprocessor.sponsorblock import SponsorBlockPP
 
-import talk
-from auth import (
+from server import talk
+from server.auth import (
     DUMMY_HASH,
     PASSWORD_MAX,
     PASSWORD_MIN,
@@ -64,8 +64,8 @@ from auth import (
     token_hash,
     verify_password,
 )
-from google_signin import GoogleVerifier, InvalidToken, KeysUnavailable
-from passkeys import (
+from server.google_signin import GoogleVerifier, InvalidToken, KeysUnavailable
+from server.passkeys import (
     Challenges,
     PasskeyError,
     authentication_options,
@@ -77,12 +77,12 @@ from passkeys import (
     verify_authentication,
     verify_registration,
 )
-from player import Queue
-from store import SESSION_TTL, Conflict, Store
-from transport import SPEAKER_ERRORS, UNREACHABLE_ERRORS, TransportError, make_transport
-from version import __version__
+from server.player import Queue
+from server.store import SESSION_TTL, Conflict, Store
+from server.transport import SPEAKER_ERRORS, UNREACHABLE_ERRORS, TransportError, make_transport
+from server.version import __version__
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent.parent  # the checkout: config.json, data.db, static/, cache/
 CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", ROOT / "config.json"))
 DATA_PATH = Path(os.environ.get("DATA_PATH", ROOT / "data.db"))
 STATIC_DIR = ROOT / "static"
@@ -4401,7 +4401,7 @@ app.mount("/static", AppStatic(directory=STATIC_DIR), name="static")
 for router in (viewer_api, operator_api, admin_api):
     app.include_router(router)
 
-if __name__ == "__main__":
+def main():
     import uvicorn
 
     # No access log: its lines carry client addresses and full query strings (signed media links, searches).

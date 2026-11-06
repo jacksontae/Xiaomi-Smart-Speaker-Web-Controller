@@ -135,12 +135,11 @@ def test_main_runs_uvicorn_without_access_log(monkeypatch):
     """The access log would write client addresses and full query strings (signed links, searches)."""
     import runpy
     import sys
-    from pathlib import Path
     from types import SimpleNamespace
 
     calls = []
     monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=lambda *a, **kw: calls.append(kw)))
-    runpy.run_path(str(Path(__file__).resolve().parents[1] / "app.py"), run_name="__main__")
+    runpy.run_module("server", run_name="__main__")
     assert calls and calls[0]["access_log"] is False
 
 
@@ -183,7 +182,7 @@ def test_login_throttle_expires(app, monkeypatch):
     make_user("bob")
     c = web(app)
     now = [1_000_000.0]
-    import auth
+    from server import auth
 
     monkeypatch.setattr(auth.time, "time", lambda: now[0])
     for _ in range(5):
@@ -277,7 +276,7 @@ def test_disabled_user_loses_access_immediately(app):
 
 def backdated(seconds):
     """Pretend the code inside ran `seconds` ago."""
-    import store
+    from server import store
 
     real = store.time.time
     return mock.patch.object(store.time, "time", lambda: real() - seconds)
@@ -301,7 +300,7 @@ def test_expired_session_rejected(app):
 
 
 def test_password_hash_format(app):
-    import auth
+    from server import auth
 
     stored = auth.hash_password("hunter2hunter2")
     scheme, n, r, p, salt, digest = stored.split("$")

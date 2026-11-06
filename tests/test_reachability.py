@@ -11,7 +11,7 @@ import pytest
 from conftest import REAL_ENSURE_PROBE, TOKEN
 from test_relay import FakeMqttClient, FakeRelay, mqtt_cfg
 
-from transport import MqttRelayTransport
+from server.transport import MqttRelayTransport
 
 ATTEMPT = 0.4  # how long one (fake) connect attempt takes here; the real one is ~10 s
 POLLS = 6  # browser tabs polling /status at once

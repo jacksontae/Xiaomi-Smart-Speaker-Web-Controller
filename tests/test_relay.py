@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 from conftest import BASE, TOKEN
 
-import transport as transport_module
-from transport import MqttRelayTransport, TransportError
+from server import transport as transport_module
+from server.transport import MqttRelayTransport, TransportError
 
 TOPIC = "speaker-relay/test-relay"
 
@@ -120,7 +120,7 @@ class FakeMqttClient:
 
 
 def mqtt_cfg(**overrides):
-    from app import MqttSettings
+    from server.app import MqttSettings
 
     return MqttSettings(host="broker.example.com", base_topic=TOPIC, username="change-me", password="change-me",
                         **overrides)

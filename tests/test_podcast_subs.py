@@ -8,7 +8,7 @@ import pytest
 from conftest import make_user, session_client
 from test_sources import net  # noqa: F401 - fixture
 
-import store
+from server import store
 
 SHOW = "https://feeds.example.com/daily.xml"
 

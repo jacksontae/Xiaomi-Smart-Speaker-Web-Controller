@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-import transport
+from server import transport
 
 
 def test_split_text_keeps_short_text_whole(app):

@@ -12,8 +12,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 
-import passkeys
-import store
+from server import passkeys, store
 
 BASE_URL = "https://speaker.example.com"
 RP_ID, ORIGIN = "speaker.example.com", "https://speaker.example.com"

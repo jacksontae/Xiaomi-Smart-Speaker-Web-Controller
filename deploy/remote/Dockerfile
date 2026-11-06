@@ -11,9 +11,9 @@ RUN apt-get update \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY *.py ./
+COPY server ./server
 COPY static ./static
-COPY deploy/remote/backup.py ./
+
 
 # config.json, the database and the YouTube cache live on the volume. /backups is for the backup service:
 # a new named volume copies this owner and mode, so backups are written owner-only with no host setup.
@@ -23,4 +23,4 @@ RUN useradd --system --uid 10001 speaker && mkdir -p /data /backups && chown spe
 USER speaker
 VOLUME /data
 EXPOSE 8090
-CMD ["python", "app.py"]
+CMD ["python", "-m", "server"]

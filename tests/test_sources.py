@@ -9,8 +9,8 @@ import httpx
 import pytest
 from conftest import BASE, make_user, path_of, session_client
 
-import store
-import transport as transport_module
+from server import store
+from server import transport as transport_module
 
 UUID_A = "11111111-2222-3333-4444-555555555555"
 UUID_B = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"

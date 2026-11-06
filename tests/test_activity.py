@@ -1,7 +1,7 @@
 import pytest
 from conftest import PASSWORD, make_user, session_client
 
-import store
+from server import store
 
 
 def actions(client):
@@ -101,7 +101,7 @@ def test_records_playlist_play_and_queue_skip(client, app, fake_speaker):
 
 
 def test_volume_coalesced_per_actor_within_10s(client, app, monkeypatch):
-    import store
+    from server import store
 
     now = [5_000.0]
     monkeypatch.setattr(store.time, "time", lambda: now[0])
@@ -130,7 +130,7 @@ def test_activity_paging(client, app):
 
 
 def test_activity_capped(app, monkeypatch):
-    import store
+    from server import store
 
     monkeypatch.setattr(store, "ACTIVITY_KEEP", 5)
     for i in range(12):

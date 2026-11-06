@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import BASE, make_user, session_client
 
-import store
+from server import store
 
 BKK = ZoneInfo("Asia/Bangkok")
 EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]

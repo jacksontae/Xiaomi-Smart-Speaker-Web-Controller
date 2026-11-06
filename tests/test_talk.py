@@ -10,7 +10,7 @@ import pytest
 from conftest import BASE, path_of
 from starlette.websockets import WebSocketDisconnect
 
-import talk
+from server import talk
 
 WEBM = "audio/webm;codecs=opus"
 
