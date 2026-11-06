@@ -1,0 +1,9 @@
+# Allow-list: the image needs only these. Everything else (tests, firmware, docs, .temp, .venv, caches,
+# config.json, data.db, .env files, backups) stays out of the build context and the image.
+*
+!requirements.txt
+!server/
+!static/
+**/__pycache__
+**/*.py[co]
+**/.DS_Store

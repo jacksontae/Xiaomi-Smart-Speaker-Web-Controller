@@ -21,8 +21,12 @@ Python 3.11+ and Node.js (used by yt-dlp for YouTube) are required.
 python3 -m venv .venv
 ./.venv/bin/pip install -r requirements-dev.txt
 cp config.example.json config.json     # set speaker_ip
-./.venv/bin/python app.py              # http://localhost:8090
+./.venv/bin/python -m server           # http://localhost:8090
 ```
+
+Day-to-day the service runs in Docker (`scripts/speaker up`, see the README); running it from the venv as above is
+for development. If you change the `Dockerfile`, `compose.yaml` or `deploy/vm/`, check them with
+`docker compose config -q` (CI does, with the `.env.example` files) and keep `name: remote` in `deploy/vm/compose.yaml`.
 
 ## Before opening a pull request
 

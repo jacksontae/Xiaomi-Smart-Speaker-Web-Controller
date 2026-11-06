@@ -1,5 +1,5 @@
 // First-time setup (board Setup): shown instead of Sign in while the server has no account yet. Creates the owner
-// account with the API token from ./speakerctl token. On iPhone there is no card: the form sits on the backdrop.
+// account with the API token from scripts/speaker token. On iPhone there is no card: the form sits on the backdrop.
 // Android (A_Setup / AT_Setup): the lock-screen date and clock of Sign in sit above the form.
 import { h, field, passwordInput } from '../ui.js';
 import { register, t, fmtDate, fmtClock } from '../i18n.js';
@@ -10,8 +10,8 @@ import { langToggle } from './login.js';
 register({
   en: {
     'setup.title': 'First-time setup', 'setup.intro': 'Create the owner account. You can add other members later.',
-    'setup.token': 'API token', 'setup.tokenHelp': 'To see it, run ./speakerctl token on the machine that runs the service.',
-    'setup.tokenBad': 'Enter the token from ./speakerctl token', 'setup.tokenWrong': 'That API token is wrong. Copy it again from ./speakerctl token.',
+    'setup.token': 'API token', 'setup.tokenHelp': 'To see it, run scripts/speaker token on the machine that runs the service.',
+    'setup.tokenBad': 'Enter the token from scripts/speaker token', 'setup.tokenWrong': 'That API token is wrong. Copy it again from scripts/speaker token.',
     'setup.name': 'Display name', 'setup.nameErr': 'Enter the name other people will see',
     'setup.user': 'Username', 'setup.userHelp': 'a–z, numbers, dots and hyphens, 3–32 characters',
     'setup.pw': 'Password', 'setup.pwHelp': 'At least 8 characters',
@@ -21,8 +21,8 @@ register({
   },
   th: {
     'setup.title': 'ตั้งค่าครั้งแรก', 'setup.intro': 'สร้างบัญชีเจ้าของ แล้วค่อยเพิ่มสมาชิกคนอื่นทีหลัง',
-    'setup.token': 'API token', 'setup.tokenHelp': 'ดูได้ด้วยคำสั่ง ./speakerctl token บนเครื่องที่รัน service',
-    'setup.tokenBad': 'ใส่ token ที่ได้จากคำสั่ง ./speakerctl token', 'setup.tokenWrong': 'API token ไม่ถูกต้อง คัดลอกจากคำสั่ง ./speakerctl token อีกครั้ง',
+    'setup.token': 'API token', 'setup.tokenHelp': 'ดูได้ด้วยคำสั่ง scripts/speaker token บนเครื่องที่รัน service',
+    'setup.tokenBad': 'ใส่ token ที่ได้จากคำสั่ง scripts/speaker token', 'setup.tokenWrong': 'API token ไม่ถูกต้อง คัดลอกจากคำสั่ง scripts/speaker token อีกครั้ง',
     'setup.name': 'ชื่อที่แสดง', 'setup.nameErr': 'ใส่ชื่อที่จะให้คนอื่นเห็น',
     'setup.user': 'ชื่อผู้ใช้', 'setup.userHelp': 'a–z ตัวเลข จุด ขีด ยาว 3–32 ตัว',
     'setup.pw': 'รหัสผ่าน', 'setup.pwHelp': 'อย่างน้อย 8 ตัวอักษร',
