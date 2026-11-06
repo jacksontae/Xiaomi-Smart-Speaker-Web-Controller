@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-06
+
+The first stable release. The web app, the HTTP API and both Docker setups (home and VM) are ready for everyday
+use, and from this version on the version number follows Semantic Versioning strictly: a change that breaks the API,
+the configuration or the stored data bumps the major version. The relay firmware keeps its own version (0.2.1).
+
+### Added
+- The README opens with what the app does and screenshots from an iPhone (`docs/screenshots/`), in English and Thai.
+
+### Changed
+- The package description says what the app does today: announcements, music, radio, podcasts, schedules, live talk
+  and the walkie-talkie.
+
+### Fixed
+- Tests: the stub ffmpeg in `tests/test_talk.py` also runs from a checkout whose path has spaces.
+
 ## [0.6.3] - 2026-11-06
 
 ### Changed
